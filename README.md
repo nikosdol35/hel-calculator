@@ -1,6 +1,6 @@
 # HEL Engineering Calculator
 
-*Version 1.1 — landing page (post-audit fixes): added data-handling note, softened wavelength-interpolation phrasing, softened mobile-support claim, added response-time expectation.*
+*Version 1.2 — Phase 2 complete: physics modules M1–M11, full Streamlit UI (login, six input panels, five output panels, three Plotly plots, share-URL code block) live at the URL below.*
 
 A web-based engineering calculator for High-Energy Laser (HEL) systems in Counter-UAS applications. Models beam propagation, atmospheric attenuation, turbulence, thermal blooming, target burn-through, laser safety (NOHD), and system-level power and thermal budgets — all from a single browser tab, no installation required.
 
