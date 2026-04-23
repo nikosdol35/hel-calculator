@@ -23,3 +23,10 @@ desktop.ini
 
 .scratch/
 .streamlit/secrets.toml
+
+# Transient files created by local tooling (PR body drafts, API scratch,
+# git-credential dumps, Office lock files). None should ever be committed.
+.pr_body.md
+.api_resp.json
+.cred*.tmp
+~$*.docx
