@@ -30,6 +30,26 @@ References:
 
 from __future__ import annotations
 
+# ---------------------------------------------------------------------------
+# sys.path shim — MUST run before any ``physics`` or ``ui`` import.
+#
+# ``streamlit run ui/app.py`` (Streamlit Cloud's invocation per ARCH §6.1)
+# sets ``sys.path[0]`` to this file's directory, i.e. ``<repo>/ui/`` — NOT
+# the repo root. From that vantage ``from physics import ...`` resolves to
+# ``<repo>/ui/physics/`` and raises ``ModuleNotFoundError``.
+#
+# Prepending the repo root here makes every sibling package (``physics``,
+# ``ui``) importable without touching Cloud's "Main file path" setting or
+# requiring a top-level shim file. Local pytest is unaffected because
+# pytest already discovers the repo root from ``tests/conftest.py``.
+# ---------------------------------------------------------------------------
+import sys as _sys
+from pathlib import Path as _Path
+
+_REPO_ROOT = str(_Path(__file__).resolve().parent.parent)
+if _REPO_ROOT not in _sys.path:
+    _sys.path.insert(0, _REPO_ROOT)
+
 from typing import Any
 from urllib.parse import urlencode
 
