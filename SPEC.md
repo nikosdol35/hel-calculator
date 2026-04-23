@@ -1,6 +1,6 @@
 # SPEC.md — HEL Engineering Calculator
 
-**Version:** 1.3 (Phase 0 draft, post-audit + UI enhancements + M8 validation-input correction)
+**Version:** 1.4 (Phase 2 UI slice 2a: orchestrator relocation, no physics changes)
 **Supersedes:** `HEL_Calculator_Project_Plan_v0p8.docx` §3–§6 (which remains the plan-of-record; this SPEC is the implementation contract derived from it)
 **Status:** Implementation contract. Any requested feature not described here requires a SPEC update before implementation.
 
@@ -9,6 +9,7 @@
 - v1.1 — consistency fixes surfaced during ARCHITECTURE.md audit: (a) `assumptions_flagged` key added to M2, M3, M5 Outputs tables (previously missing — §2 interface contract requires every module to return this, but the per-module tables had drifted); (b) M11 now has an explicit function signature `run_validation_suite() -> dict` with a documented return schema, so ARCHITECTURE can reference it without inventing the contract.
 - v1.2 — four UI enhancements added (no physics or module changes): (a) §5.1 introduction now specifies default panel expansion state and iconography conventions; (b) §5.2 Panel 2 verdict now includes a numeric margin and a traffic-light color in addition to the binary ENGAGEABLE/NOT ENGAGEABLE label; (c) §5.2 Plots A, B, C subsections now specify hover-tooltip content and cross-plot hover synchronization; (d) §5.3 adds URL-encoded parameter sharing as a v1 feature (was previously deferred to v1.2 as JSON only). All other content unchanged from v1.1.
 - v1.3 (2026-04-23) — §3 M8 `test_m8_aluminum_standard` and `test_m8_cfrp_thin` input values corrected. Inputs in v1.2 were low by ~100× relative to the stated `tau_BT` targets (e.g. `I_aim=5e4 W/m²` on 2 mm Al with `A_λ=0.5` yields ~210 s to melt, not the stated 4–8 s; at T_melt the environmental losses actually exceed the 25 kW/m² absorbed flux so the surface would equilibrate below T_melt). Corrected inputs (`I_aim=2e6 W/m²` for Al, `I_aim=5e5 W/m²` for CFRP) are HEL-engagement realistic (= 200 W/cm² and 50 W/cm²) and reproduce the original SPEC tau_BT targets to within the stated 25% / < 2 s tolerances. No physics, PDE, or failure-criterion text changed — values only. Caught during M8 implementation per CLAUDE §4.3 procedure.
+- v1.4 (2026-04-23) — **structural-only: orchestrator.py relocated from `ui/` to `physics/`** to enable direct unit-test coverage of the M6↔M7 fixed-point loop under the ARCHITECTURE §2 import rules. The chain coordinator has no Streamlit imports and no UI side effects, so it belongs in Layer 1. Caching (`@st.cache_data`) moves to `ui/app.py`, wrapping the orchestrator call at the UI boundary — the standard Streamlit pattern. §6 file-layout tree updated (orchestrator.py under `physics/`, dropped from `ui/`) and the import-rules bullet simplified (`ui/` imports from `physics/` only, no parenthetical about `orchestrator.py`). No physics, no equations, no validation cases touched.
 
 ---
 
@@ -1148,7 +1149,8 @@ hel-calculator/
 │   ├── m8_material_tables.py       # ρ, cp, k, T_fail, A_λ per material
 │   ├── m9_nohd.py
 │   ├── m10_power_thermal.py
-│   └── m11_validation.py           # Self-test runner (calls pytest)
+│   ├── m11_validation.py           # Self-test runner (calls pytest)
+│   └── orchestrator.py             # Chain coordinator (M1→M10, M6↔M7 iteration)
 ├── tests/                          # Layer 2: Validation suite
 │   ├── __init__.py
 │   ├── test_m1_laser_source.py
@@ -1168,7 +1170,6 @@ hel-calculator/
 │   ├── panels.py                   # The 6 input panels
 │   ├── outputs.py                  # The 5 output panels
 │   ├── plots.py                    # Plotly plot constructors (A, B, C)
-│   ├── orchestrator.py             # Calls modules in dependency order (M6↔M7 iteration)
 │   └── auth.py                     # Shared-credential login
 └── docs/                           # Reference material
     ├── Plan_v0p8.docx              # Project plan (reference)
@@ -1178,7 +1179,7 @@ hel-calculator/
 **Strict separation:**
 - `physics/` never imports from `ui/` or `tests/`
 - `tests/` imports from `physics/` only
-- `ui/` imports from `physics/` only (via `orchestrator.py`)
+- `ui/` imports from `physics/` only
 - No cross-imports between the three layers
 
 This enforces the three-layer architecture from plan §2.3.

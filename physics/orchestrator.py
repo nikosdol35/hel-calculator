@@ -1,8 +1,14 @@
 """Chain coordinator — wires the 10 physics modules in dependency order.
 
-Pure Python. No Streamlit imports, no UI side effects. ``ui/app.py``
-calls ``run_full_chain(user_inputs)`` when the user clicks "Run Analysis"
-and renders the returned dict via ``ui/outputs.py`` + ``ui/plots.py``.
+Pure Python. No Streamlit imports, no UI side effects. Lives in
+``physics/`` (not ``ui/``) so ``tests/`` can import it directly under
+the ARCHITECTURE §2 import rules — the M6↔M7 fixed-point loop is
+physics-critical and deserves dedicated unit-test coverage.
+
+``ui/app.py`` wraps calls to ``run_full_chain(user_inputs)`` in an
+``@st.cache_data`` helper (per ARCHITECTURE §5.3) on the "Run Analysis"
+click handler, then renders the returned dict via ``ui/outputs.py`` +
+``ui/plots.py``.
 
 Dependency graph (ARCH §5.1 / SPEC §4):
 
@@ -43,7 +49,8 @@ Output contract:
         tolerance criterion rather than max_iter.
 
 References:
-    ARCHITECTURE.md §5.1 (data flow), §5.3 (caching strategy).
+    ARCHITECTURE.md §5.1 (data flow), §5.3 (caching strategy),
+    §6.1 (caching wrapper in ui/app.py).
     SPEC.md §3 M6 "Iterative coupling with M7" and §4 (orchestration).
 """
 
