@@ -1,0 +1,1363 @@
+# SPEC.md — HEL Engineering Calculator
+
+**Version:** 1.2 (Phase 0 draft, post-audit + UI enhancements)
+**Supersedes:** `HEL_Calculator_Project_Plan_v0p8.docx` §3–§6 (which remains the plan-of-record; this SPEC is the implementation contract derived from it)
+**Status:** Implementation contract. Any requested feature not described here requires a SPEC update before implementation.
+
+**Revision history:**
+- v1.0 — initial draft; post-audit fixes applied before first delivery (dn/dT formula corrected, M6.2 canonical case revised to 10 kW, test count 28→29)
+- v1.1 — consistency fixes surfaced during ARCHITECTURE.md audit: (a) `assumptions_flagged` key added to M2, M3, M5 Outputs tables (previously missing — §2 interface contract requires every module to return this, but the per-module tables had drifted); (b) M11 now has an explicit function signature `run_validation_suite() -> dict` with a documented return schema, so ARCHITECTURE can reference it without inventing the contract.
+- v1.2 — four UI enhancements added (no physics or module changes): (a) §5.1 introduction now specifies default panel expansion state and iconography conventions; (b) §5.2 Panel 2 verdict now includes a numeric margin and a traffic-light color in addition to the binary ENGAGEABLE/NOT ENGAGEABLE label; (c) §5.2 Plots A, B, C subsections now specify hover-tooltip content and cross-plot hover synchronization; (d) §5.3 adds URL-encoded parameter sharing as a v1 feature (was previously deferred to v1.2 as JSON only). All other content unchanged from v1.1.
+
+---
+
+## 0. Purpose of This Document
+
+SPEC.md is the single source of truth for what Claude Code implements. For every module (M1 through M11), this document specifies:
+
+- **Inputs:** exact parameters, types, units, and valid ranges
+- **Outputs:** exact return values, types, and units
+- **Equation(s):** the canonical form to implement, stated precisely
+- **Reference:** the textbook or standard the equation is drawn from
+- **Validation case:** the reference calculation the module must reproduce in pytest
+
+The plan document (`v0p8.docx`) describes the *why* and the *design intent*. SPEC.md describes the *what* and the *exact contract*. Conflicts are resolved as follows: **plan describes intent; SPEC describes implementation. If the SPEC disagrees with the plan, update the SPEC. If the user wants behavior not described in the SPEC, update the SPEC before implementing.**
+
+All numerical values in this SPEC have been independently verified via Python numerical checks against first-principles derivations. Any value flagged "[HIGH UNCERTAINTY]" is a literature-sourced engineering default that should be confirmed against program-specific data before the tool is used for formal trade studies.
+
+---
+
+## 1. Conventions
+
+### 1.1 Beam-Size Convention
+
+The 1/e² intensity radius `w` is the canonical beam-size measure throughout this SPEC. For a Gaussian intensity profile:
+
+```
+I(r) = I_peak · exp(-2 r² / w²)
+```
+
+- 1/e² diameter = `2·w`
+- Total power = `(π/2) · I_peak · w²`
+- Peak irradiance = `2·P / (π·w²)`
+- Relation to RMS: `σ = w/2`
+
+All equations below use `w`. Where user-facing labels report a beam diameter, they report `2·w` (the 1/e² diameter, matching vendor datasheet convention).
+
+### 1.2 Units
+
+All internal calculations use SI base units (W, m, s, K, radians, kg). Convenience conversions (kW, cm, km, µrad, °C, µm) are applied at the I/O boundaries only. Every user-facing numeric field displays its unit inline; units are never inferred.
+
+### 1.3 Jitter Convention
+
+Pointing jitter `σ_jit` is defined as **per-axis 1-σ angular RMS** (the standard PTU/EO datasheet convention). Users who enter a 2D radial RMS value would double-count — the UI label in Panel B makes the per-axis convention explicit.
+
+### 1.4 Angle Convention
+
+Angular divergence values (θ_diff, θ_total, etc.) are expressed as **full-angle** (Siegman convention). Some other trade-study tools use half-angle; the Panel 1 display legend states this explicitly to prevent confusion when comparing numbers across tools.
+
+### 1.5 Beam Geometry
+
+v1 assumes **collimated beam** (focus at infinity). Focus-on-target geometry is a v1.5 feature. The diffraction formula `w_diff(L) = w₀·sqrt(1 + (M²·L/z_R)²)` is the exact Gaussian propagation formula for a collimated launch beam.
+
+### 1.6 Out-of-Regime Behavior
+
+When the user provides inputs that are valid but outside the regime where a module's physics is reliable, the tool behaves as follows:
+
+- **REFUSE** (red error, computation blocked): truly unphysical inputs (M² < 1.0, P ≤ 0, negative distances, etc.)
+- **WARN + COMPUTE** (red banner, results shown with caveat): model-validity boundaries (N_D > 30, wavelength outside validated set, Cn² outside HV model range, etc.)
+- **FLAG SILENTLY** (entry in assumptions panel only): routine default usage, wavelength interpolation within validated set, aimpoint smaller than beam waist, etc.
+
+---
+
+## 2. Module Interface Contract
+
+Every physics module shall be a pure Python function with the signature pattern:
+
+```python
+def module_function(inputs_dict: dict) -> dict:
+    """
+    [module description and reference citation]
+    
+    Inputs (keys expected):
+      - key_name (unit): description, valid range
+      ...
+    
+    Outputs (keys returned):
+      - key_name (unit): description
+      ...
+    
+    Assumptions flagged:
+      - [list of modeling assumptions active for this call]
+    
+    Reference: [citation]
+    """
+    # validation of input ranges
+    # computation
+    # return dict with outputs + assumptions_flagged list
+```
+
+Every module returns an `assumptions_flagged` list that the UI aggregates into the Panel 4 assumptions block. This is a first-class output, not an afterthought.
+
+Modules shall **not** have side effects, shall **not** access files, shall **not** access the network, and shall **not** depend on UI state. They are pure functions.
+
+---
+
+## 3. Module Specifications
+
+### M1 — Laser Source
+
+**File:** `physics/m1_laser_source.py`
+
+**Purpose:** Defines the physical beam at the exit aperture of the laser head, before the beam director.
+
+**Inputs:**
+| Key | Unit | Type | Valid Range | Description |
+|---|---|---|---|---|
+| `P0` | W | float | 100 – 100,000 | Output power at laser head |
+| `M2` | — | float | 1.0 – 10.0 | Beam-quality factor |
+| `D` | m | float | 0.01 – 0.50 | Exit aperture diameter |
+| `wavelength` | m | float | 0.5e-6 – 5.0e-6 | Laser wavelength |
+
+**Outputs:**
+| Key | Unit | Description |
+|---|---|---|
+| `theta_diff` | rad | Full-angle diffraction-limited divergence |
+| `w0` | m | Initial 1/e² beam radius at exit |
+| `zR` | m | Rayleigh range |
+| `I_exit` | W/m² | Peak irradiance at exit aperture |
+| `assumptions_flagged` | list[str] | e.g., `["wavelength outside validated set"]` if applicable |
+
+**Equations:**
+```
+θ_diff = M² · 4·λ / (π·D)       [full-angle, radians]
+w₀     = D / 2                   [beam fills aperture]
+z_R    = π·w₀² / λ               [Rayleigh range, M²=1 reference]
+I_exit = 2·P₀ / (π·w₀²)         [Gaussian peak, matches §6.7.1 of plan]
+```
+
+**Reference:** Siegman, *Lasers* (1986), Ch. 17 (M² formalism).
+
+**Validation case** (pytest: `test_m1_divergence`):
+- Inputs: P0=1000, M2=1.0, D=0.10, wavelength=1.064e-6
+- Expected: theta_diff ≈ 13.547 µrad
+- Tolerance: 0.1%
+
+**Validation case** (pytest: `test_m1_rayleigh_range`):
+- Inputs: P0=3000, M2=1.2, D=0.10, wavelength=1.07e-6
+- Expected: w0=0.05 m, zR ≈ 7340 m
+- Tolerance: 1%
+
+---
+
+### M2 — Beam Director Transmission
+
+**File:** `physics/m2_beam_director.py`
+
+**Purpose:** Applies a single end-to-end optical-train transmission factor to account for Coudé-path mirror losses, exit-window absorption, and contamination margin.
+
+**Inputs:**
+| Key | Unit | Type | Valid Range | Description |
+|---|---|---|---|---|
+| `P0` | W | float | (from M1) | Source power |
+| `eta_opt` | — | float | 0.50 – 0.99 | End-to-end transmission |
+
+**Outputs:**
+| Key | Unit | Description |
+|---|---|---|
+| `P_exit` | W | Power at beam director exit aperture |
+| `assumptions_flagged` | list[str] | Per-module assumption flags (typically empty for M2) |
+
+**Equation:**
+```
+P_exit = η_opt · P₀
+```
+
+**Reference:** No external citation required. Default `η_opt = 0.85` is a typical value for a 5–7 mirror Coudé path with a protected exit window; user may override.
+
+**Validation case** (pytest: `test_m2_transmission`):
+- Inputs: P0=3000, eta_opt=0.85
+- Expected: P_exit = 2550 W (exact, arithmetic)
+- Tolerance: 0.01%
+
+---
+
+### M3 — Engagement Geometry
+
+**File:** `physics/m3_geometry.py`
+
+**Purpose:** Computes slant-range geometry from user-specified emplacement, target altitude, and horizontal range. Also defines the target dwell window for lethality analysis (Plot B).
+
+**Inputs:**
+| Key | Unit | Type | Valid Range | Description |
+|---|---|---|---|---|
+| `H_e` | m | float | 0 – 3000 | Emplacement altitude AGL |
+| `R` | m | float | 50 – 50,000 | Slant range to target |
+| `H_t` | m | float | 0 – 5000 | Target altitude AGL |
+| `v_tgt` | m/s | float | 0 – 100 | Target velocity |
+| `v_perp` | m/s | float | 0 – 30 | Crosswind component perpendicular to beam |
+
+**Outputs:**
+| Key | Unit | Description |
+|---|---|---|
+| `R_slant` | m | Slant path length (equal to R for v1) |
+| `R_h` | m | Horizontal component of range |
+| `elevation_angle` | rad | Beam elevation angle |
+| `available_dwell` | s | Target time-in-basket estimate (for Plot B) |
+| `assumptions_flagged` | list[str] | e.g., `["v2 tracker-dependent dwell model deferred; heuristic used"]` |
+
+**Equations:**
+```
+R_h             = sqrt(R² − (H_t − H_e)²)   [assumes R ≥ |H_t − H_e|]
+elevation_angle = arctan((H_t − H_e) / R_h)
+available_dwell = 2·R · tan(FOV/2) / v_tgt   [approximate, FOV=5° default]
+```
+
+**Reference:** Plain geometry. `available_dwell` is a conservative engagement-basket heuristic; the full tracker-dependent calculation is deferred to v2.
+
+**Validation case** (pytest: `test_m3_geometry`):
+- Inputs: H_e=2, R=5000, H_t=200, v_tgt=20, v_perp=3
+- Expected: R_h ≈ 4996.1 m; elevation_angle ≈ 0.0396 rad (2.27°)
+- Tolerance: 0.1%
+
+---
+
+### M4 — Atmospheric Attenuation
+
+**File:** `physics/m4_atmosphere.py`
+
+**Purpose:** Computes Beer-Lambert transmission through the lower atmosphere, combining molecular absorption (water vapor, CO₂) and aerosol extinction. Wavelength-dependent via both tabulated molecular data and the Kruse aerosol formula.
+
+**Inputs:**
+| Key | Unit | Type | Valid Range | Description |
+|---|---|---|---|---|
+| `V` | km | float | 0.5 – 50 | Meteorological visibility |
+| `RH` | — | float | 0.0 – 1.0 | Relative humidity (0-1 fraction) |
+| `T_ambient` | K | float | 253 – 328 | Ambient air temperature |
+| `wavelength` | m | float | 0.5e-6 – 5.0e-6 | From M1 |
+| `R_slant` | m | float | (from M3) | Path length |
+
+**Outputs:**
+| Key | Unit | Description |
+|---|---|---|
+| `alpha_atm` | 1/m | Total extinction coefficient |
+| `tau_atm` | — | Transmission factor `exp(-α·R)` |
+| `alpha_mol_abs` | 1/m | Molecular absorption component (for display Panel 5) |
+| `alpha_mol_scat` | 1/m | Molecular scattering component |
+| `alpha_aer_abs` | 1/m | Aerosol absorption component |
+| `alpha_aer_scat` | 1/m | Aerosol scattering component |
+| `assumptions_flagged` | list[str] | e.g., `["wavelength interpolated", "sea-level coefficients used along slant path"]` |
+
+**Equations:**
+```
+τ_atm(R) = exp(-α_atm · R)
+
+α_atm = α_mol_abs + α_mol_scat + α_aer_abs + α_aer_scat   [4-way decomposition for display]
+
+α_aer_total = (3.91/V_km) · (λ_µm/0.55)^(-q)   [Kruse-McClatchey, converted to 1/m]
+
+q rule (Kruse modified):
+  V > 50 km:     q = 1.6
+  6 ≤ V ≤ 50:    q = 1.3
+  1 ≤ V < 6:     q = 0.16·V + 0.34
+  V < 1 km:      q = V − 0.5
+```
+
+Aerosol scattering dominates aerosol absorption at near-IR wavelengths; for v1 we use `α_aer_scat = 0.95·α_aer_total` and `α_aer_abs = 0.05·α_aer_total` as engineering approximations. Full split into individual Mie components deferred to v2.
+
+**Molecular absorption table** [HIGH UNCERTAINTY — engineering placeholders, should be refined against HITRAN/MODTRAN data before formal use]:
+
+Sea-level, mid-latitude summer, at 60% RH baseline, scaled linearly with RH:
+
+| λ (µm) | α_mol_abs (1/km) | α_mol_scat (1/km) | Notes |
+|---|---|---|---|
+| 1.06 | 0.045 | 0.005 | Near-IR window, low H₂O absorption |
+| 1.07 | 0.065 | 0.005 | Slight H₂O band edge |
+| 1.55 | 0.190 | 0.010 | Within 1.5 µm atmospheric window |
+| 2.05 | 0.490 | 0.010 | Edge of 2.0 µm H₂O band |
+
+Linear RH scaling: `α_mol_abs(RH) = α_mol_abs(60%) · (RH/0.60)` for absorption component; scattering is RH-independent to first order.
+
+**Wavelength interpolation:** Linear in log space between tabulated wavelengths. Wavelengths outside {1.06, 1.07, 1.55, 2.05 µm} trigger "reduced confidence" assumption flag.
+
+**Multi-component display (for Panel 5):** The tool separately reports α_mol_abs, α_mol_scat, α_aer_abs, α_aer_scat so the user can see where extinction is coming from.
+
+**Reference:** Kruse, *Elements of Infrared Technology* (1962) for aerosol formula; McClatchey et al., AFCRL-TR-72-0497 for molecular baselines; Andrews & Phillips Ch. 12 for engineering formulations.
+
+**Validation cases:**
+
+`test_m4_aerosol_clear` (clear air at 1.07 µm):
+- Inputs: V=23, RH=0.6, T_ambient=300, wavelength=1.07e-6, R_slant=5000
+- Expected: α_aer_total ≈ 0.0716 1/km; α_atm ≈ 0.137 1/km; τ_atm ≈ exp(-0.685) ≈ 0.504
+- Tolerance: 5%
+
+`test_m4_aerosol_hazy` (5 km visibility):
+- Inputs: V=5, RH=0.6, wavelength=1.07e-6
+- Expected: α_aer_total ≈ 0.366 1/km (using q = 0.16·5 + 0.34 = 1.14)
+- Tolerance: 5%
+
+`test_m4_wavelength_interpolation`:
+- Input wavelength between tabulated points (e.g., 1.3 µm) should return a value interpolated from the 1.07 and 1.55 entries with "wavelength interpolated" flag.
+- Tolerance on interpolation: exact match to log-space linear.
+
+---
+
+**[Continued in Part 2]**
+
+### M5 — Cn² and Turbulence
+
+**File:** `physics/m5_turbulence.py`
+
+**Purpose:** Computes the refractive-turbulence contribution to beam spreading via the Fried coherence length `r₀` (spherical-wave form, appropriate for diverging beams from a finite source) and the resulting long-term beam radius.
+
+**Inputs:**
+| Key | Unit | Type | Valid Range | Description |
+|---|---|---|---|---|
+| `cn2_model` | — | enum | see below | Model selector |
+| `Cn2_value` | m^(-2/3) | float | 1e-17 – 1e-12 | Constant Cn² (if model = 'constant') |
+| `Cn2_ground` | m^(-2/3) | float | 1e-16 – 1e-12 | Ground-level Cn² (if HV model) |
+| `v_HV` | m/s | float | 0 – 60 | High-altitude wind (HV models) |
+| `wavelength` | m | float | (from M1) | Laser wavelength |
+| `R_slant` | m | float | (from M3) | Path length |
+| `H_e` | m | float | (from M3) | Emplacement altitude |
+| `H_t` | m | float | (from M3) | Target altitude |
+
+`cn2_model` enum values: `'constant'`, `'HV_5_7'`, `'HV_day'`, `'HV_night'`, `'custom'`.
+
+**Outputs:**
+| Key | Unit | Description |
+|---|---|---|
+| `Cn2_integrated` | m^(1/3) | Path-integrated Cn² with spherical-wave weighting |
+| `r0_sph` | m | Spherical-wave Fried coherence length |
+| `w_turb` | m | Long-term turbulent 1/e² radius contribution at target |
+| `assumptions_flagged` | list[str] | e.g., `["spherical-wave r₀ form", "engineering form 2L/(k·r₀) used"]` |
+
+**Equations:**
+
+```
+k = 2π/λ   [wavenumber, 1/m]
+
+Path integration (spherical wave, appropriate for diverging HEL):
+  Cn2_integrated = ∫₀^L Cn²(z) · (z/L)^(5/3) dz
+
+Fried coherence length (spherical wave):
+  r0_sph = (0.423 · k² · Cn2_integrated)^(-3/5)   [m]
+
+Long-term turbulent 1/e² radius (engineering form, committed in v0.8):
+  w_turb = 2·L / (k · r0_sph)   [m]
+```
+
+**HV-5/7 profile** (when cn2_model = 'HV_5_7'):
+```
+Cn²(h) = 0.00594·(v_HV/27)²·(1e-5·h)¹⁰·exp(-h/1000)
+         + 2.7e-16·exp(-h/1500)
+         + Cn2_ground·exp(-h/100)
+```
+where `h` is altitude in meters. Default `Cn2_ground = 1.7e-14`, default `v_HV = 21 m/s`.
+
+For uniform Cn² (constant model):
+```
+∫₀^L Cn² · (z/L)^(5/3) dz = Cn² · L · (3/8)
+```
+so `r0_sph = (0.423 · k² · Cn² · L · 3/8)^(-3/5)`, which is exactly `1.86·r0_plane` (the factor-of-1.86 relationship between spherical and plane-wave forms for uniform turbulence).
+
+**Reference:** Andrews & Phillips, *Laser Beam Propagation through Random Media* (2nd ed., 2005), Ch. 6 for `w_turb` (engineering form, §6.5); Ch. 12 for path-integrated r₀. Hufnagel 1974 and Valley 1980 for HV profile.
+
+**Modeling choice flagged by this module:**
+- Spherical-wave r₀ is used (not plane-wave) because the HEL beam originates from a finite aperture and propagates as a diverging beam, for which spherical-wave is the physically correct treatment.
+- Engineering form `2L/(k·r₀)` is used for `w_turb` (not the rigorous Yura form with ρ₀ ≈ 2.1·r₀), because the engineering form is conservative (predicts more spread) and simpler to verify against textbook cases.
+
+**Validation cases:**
+
+`test_m5_r0_uniform_cn2`:
+- Inputs: cn2_model='constant', Cn2_value=1e-14, wavelength=1.07e-6, R_slant=5000, H_e=0, H_t=0
+- Expected: r0_sph ≈ 0.0345 m (3.45 cm)
+- Tolerance: 2%
+
+`test_m5_w_turb_5km`:
+- Same inputs as above
+- Expected: w_turb ≈ 0.0494 m (4.94 cm)
+- Tolerance: 2%
+
+`test_m5_spherical_vs_plane_ratio`:
+- Verify that for uniform Cn², r0_sph / r0_plane = (3/8)^(-3/5) ≈ 1.801
+- Tolerance: 0.1% (this is a structural test to prevent regression to plane-wave form)
+
+`test_m5_r0_at_1500m`:
+- Same Cn² and wavelength but R_slant=1500
+- Expected: r0_sph ≈ 0.0711 m (7.11 cm); w_turb ≈ 0.00719 m (0.72 cm)
+- Tolerance: 2%
+
+---
+
+### M6 — Thermal Blooming
+
+**File:** `physics/m6_blooming.py`
+
+**Purpose:** Computes the Gebhardt distortion number `N_D` and the associated Strehl loss from beam-induced heating of the atmospheric path. Outputs both the Strehl factor for peak-irradiance reduction and (for large N_D) a blooming-induced spot broadening contribution.
+
+**Inputs:**
+| Key | Unit | Type | Valid Range | Description |
+|---|---|---|---|---|
+| `P_propagating` | W | float | (computed) | Average power along path (after M4 attenuation) |
+| `w_at_target` | m | float | (iterated) | Beam 1/e² radius at target (from M7, iterated) |
+| `alpha_atm` | 1/m | float | (from M4) | Atmospheric absorption |
+| `v_perp` | m/s | float | (from M3) | Crosswind |
+| `R_slant` | m | float | (from M3) | Path length |
+| `T_ambient` | K | float | (from M4) | Ambient air temperature |
+| `P_atm` | Pa | float | 101325 | Atmospheric pressure (default sea level) |
+
+**Outputs:**
+| Key | Unit | Description |
+|---|---|---|
+| `N_D` | — | Gebhardt distortion number |
+| `S_TB` | — | Thermal-blooming Strehl ratio (0–1, peak reduction) |
+| `w_bloom` | m | Blooming-induced spot broadening contribution (0 if N_D < 5) |
+| `assumptions_flagged` | list[str] | e.g., `["N_D > 30, model outside validity range"]` |
+
+**Equations:**
+
+```
+# Air properties at T_ambient, P_atm (from ideal gas law + standard air):
+ρ    = P_atm · 0.029 / (8.314 · T_ambient)     [kg/m³, molar mass air = 0.029 kg/mol]
+c_p  = 1005                                     [J/(kg·K), dry air, weakly T-dependent]
+n₀   = 1.000293                                 [standard index of air at ~500 nm, approx for NIR]
+dn/dT = -0.93e-6 · (288/T_ambient) · (P_atm/101325)   [K⁻¹, from Gladstone-Dale; ≈ −0.93e-6 at STP]
+
+# Gebhardt distortion number (4√2 prefactor, Gebhardt 1990 form):
+N_D = 4·sqrt(2) · (-dn/dT) · (α_atm · P_propagating · R_slant²) 
+      / (n₀ · ρ · c_p · v_perp · w_at_target³)
+
+# Blooming Strehl (Smith approximation):
+S_TB = 1 / (1 + (N_D / N_crit)²)   where N_crit = 5
+
+# Blooming-induced broadening (nonzero only above N_D threshold):
+if N_D < 5:
+    w_bloom = 0
+elif 5 ≤ N_D ≤ 30:
+    w_bloom = w_at_target · sqrt((N_D/5)² − 1) · 0.3   [empirical scaling]
+else:
+    w_bloom = w_at_target · sqrt((N_D/5)² − 1) · 0.3
+    flag "N_D > 30, model outside validity range"
+```
+
+Note on sign: `dn/dT` for air is negative (hot air has lower index); the leading `-dn/dT` makes N_D positive. Both signs are preserved in the equation for clarity.
+
+**Iterative coupling with M7:** M6 and M7 form a fixed-point iteration. M7 computes `w_at_target` assuming some `S_TB`; M6 computes `S_TB` and `w_bloom` from `w_at_target`; loop until `w_at_target` changes by less than 1% between iterations. Maximum 10 iterations. If no convergence, flag "blooming iteration did not converge" and use last iterate.
+
+**Reference:** Gebhardt, F. G., "High-power laser propagation," *Applied Optics* 15(6), 1479–1493 (1976); Gebhardt, F. G., "Twenty-five years of thermal blooming: an overview," *Proc. SPIE* 1221 (1990), 2–25 (current engineering form and 4√2 prefactor). Sprangle et al., NRL papers on maritime HEL propagation (e.g., NRL/MR/6790-08-9141) for multi-physics corrections.
+
+**Validation cases:**
+
+`test_m6_dimensional`:
+- Verify N_D is dimensionless for any set of valid SI inputs. Structural test.
+
+`test_m6_moderate_blooming`:
+- Inputs: P_propagating=10e3, w_at_target=0.10, alpha_atm=1e-4 (=0.1 1/km), v_perp=5, R_slant=5000, T_ambient=300
+- Expected: N_D ≈ 20 (interesting-regime check; actual blooming trade studies operate in this range); S_TB ≈ 0.05 using N_crit=5 (severe blooming — catastrophic peak-irradiance loss, illustrating why high-power engagement at this range with 5 m/s crosswind is not viable)
+- Tolerance: ±30% on N_D (engineering-model tolerance)
+- Rationale: At 100 kW / 5 km with standard atmosphere, N_D would be ~200 (catastrophic blooming — the tool correctly predicts you cannot operate there without beam director mitigation). This validation case exercises the interesting regime where blooming matters but is not yet catastrophic.
+
+`test_m6_small_power_limit`:
+- P_propagating=100 W: N_D should be ~0.001, S_TB ~1.0
+- Validates low-power limit
+
+---
+
+### M7 — Spot Size and Power-in-the-Bucket
+
+**File:** `physics/m7_spot_pib.py`
+
+**Purpose:** The integrating module. Combines all upstream beam-quality losses — diffraction, M² scaling, turbulence, jitter, blooming broadening — into the 1/e² spot radius at the target and computes the power delivered inside a user-specified aimpoint disk.
+
+**Inputs:**
+| Key | Unit | Type | Description |
+|---|---|---|---|
+| `P_exit` | W | float | Power at beam director exit (from M2) |
+| `tau_atm` | — | float | Atmospheric transmission (from M4) |
+| `w0` | m | float | Launch beam 1/e² radius (from M1) |
+| `zR` | m | float | Rayleigh range (from M1) |
+| `M2` | — | float | Beam quality factor (from M1) |
+| `wavelength` | m | float | From M1 |
+| `R_slant` | m | float | From M3 |
+| `sigma_jit` | rad | float | Per-axis jitter RMS (user input) |
+| `r0_sph` | m | float | From M5 |
+| `S_TB` | — | float | From M6 |
+| `w_bloom` | m | float | From M6 |
+| `d_aim` | m | float | Aimpoint diameter (user input) |
+
+**Outputs:**
+| Key | Unit | Description |
+|---|---|---|
+| `w_diff` | m | Exact-Gaussian diffraction 1/e² radius at target |
+| `w_turb` | m | Turbulence contribution (reflected from M5 for convenience) |
+| `w_jit` | m | Jitter contribution |
+| `w_total` | m | Combined 1/e² radius (quadrature) |
+| `d_spot` | m | 1/e² diameter = 2·w_total |
+| `I_peak` | W/m² | Strehl-corrected peak irradiance at target |
+| `PIB_fraction` | — | Power fraction inside aimpoint (0–1) |
+| `P_aim` | W | Power delivered inside aimpoint |
+| `I_avg_aim` | W/m² | Average irradiance inside aimpoint |
+
+**Equations:**
+
+```
+# Diffraction (EXACT Gaussian propagation, NOT far-field asymptote):
+w_diff(L) = w₀ · sqrt(1 + (M² · L / z_R)²)
+
+# Turbulence (from M5):
+w_turb = 2·L / (k · r0_sph)
+
+# Jitter (per-axis RMS → 1/e² spatial radius):
+w_jit = 2 · σ_jit · L
+
+# Quadrature combination (diffraction, turbulence, jitter, blooming-broadening):
+w_total² = w_diff² + w_turb² + w_jit² + w_bloom²
+
+# Spot diameter (1/e², HEL-standard):
+d_spot = 2 · w_total
+
+# Peak irradiance with Strehl correction (S_TB for blooming; optics Strehl = 1 in v1):
+# NOTE: turbulence broadening is captured in w_total (long-term convention);
+#       multiplicative Strehl only covers phase-only effects (blooming, WFE).
+S_total = S_TB · S_opt          [S_opt = 1 in v1]
+I_peak  = 2 · P_exit · τ_atm · S_total / (π · w_total²)
+
+# Power-in-the-bucket (Gaussian, circular aperture, bucket radius R_aim = d_aim/2):
+R_aim         = d_aim / 2
+PIB_fraction  = 1 - exp(-2 · R_aim² / w_total²)
+P_aim         = P_exit · τ_atm · S_total · PIB_fraction
+I_avg_aim     = P_aim / (π · R_aim²)
+```
+
+**Critical implementation notes:**
+
+1. **Use the exact Gaussian formula for `w_diff`, not the far-field asymptote.** At realistic C-UAS engagement ranges (0.5–5 km with typical D = 10–30 cm), the beam is in the near-field or transition regime (L/z_R < 1). The far-field formula `w_diff = M²·λL/(π·w₀)` under-predicts spot size by 2× to 15× in this regime. This was the critical bug caught in v0.6 of the plan.
+
+2. **Use the bucket RADIUS, not the diameter, in the PIB exponent.** `R_aim = d_aim / 2` is the HEL-standard Gaussian PIB formula. Using `d_aim` directly in place of `R_aim` produces a factor-of-4 error in the exponent (bug caught in v0.2 of the plan).
+
+3. **Do NOT double-count turbulence.** Turbulence enters `w_total²` via `w_turb²` (spot broadening, long-term convention). It must NOT ALSO be applied as a Strehl factor `S_turb` on top of that — the two conventions are mutually exclusive. `S_total = S_TB · S_opt` only. Bug caught in v0.4 of the plan.
+
+4. **Jitter is per-axis angular RMS.** The factor of 2 in `w_jit = 2·σ_jit·L` converts from σ (RMS) to w (1/e² radius) per axis. The resulting 2D time-averaged spot is axially symmetric because σ_x = σ_y = σ_jit.
+
+**Reference:** Andrews & Phillips, Ch. 6 (Gaussian beam propagation in turbulence); Siegman, *Lasers* Ch. 17 (M² propagation); Born & Wolf, *Principles of Optics* Ch. 8 (Gaussian PIB closed form); Perram et al., *An Introduction to Laser Weapon Systems* (DEPS) for HEL engineering conventions.
+
+**Validation cases:**
+
+`test_m7_pure_diffraction_5km` (Case 1 from plan §6.7.5):
+- Inputs: P_exit=2550, tau_atm=1, w0=0.05, zR=7340, M2=1.0, wavelength=1.07e-6, R_slant=5000, sigma_jit=0, r0_sph=∞, S_TB=1, w_bloom=0, d_aim=0.05
+- Expected: w_diff ≈ 6.05 cm, d_spot ≈ 12.1 cm, PIB_fraction ≈ 0.289
+- Tolerance: 2%
+
+`test_m7_diff_plus_turb_5km` (Case 2):
+- Same as above but r0_sph=0.0345 (corresponding to Cn²=1e-14 over 5 km)
+- Expected: w_turb ≈ 4.94 cm, w_total ≈ 7.81 cm, PIB_fraction ≈ 0.185
+- Tolerance: 2%
+
+`test_m7_typical_c_uas_1500m` (Case 3, the near-field regression test):
+- Inputs: w0=0.05, zR=7340, M2=1.0, wavelength=1.07e-6, R_slant=1500, r0_sph=0.0711, d_aim=0.05, everything else ideal
+- Expected: w_diff ≈ 5.10 cm (NOT 1.02 cm, which is what far-field formula gives!), PIB_fraction ≈ 0.376
+- Tolerance: 2%
+- **This test explicitly guards against regression to the far-field formula.**
+
+`test_m7_convention_consistency`:
+- Verify that computing PIB via the w-convention formula `1 - exp(-2R²/w²)` and the σ-convention formula `1 - exp(-R²/(2σ²))` with `σ = w/2` give identical results.
+- Verify that `I_peak = 2P/(πw²) = P/(2πσ²)` gives the same number both ways.
+- This is the structural guard against the convention-mixing errors that caused v0.3/v0.4 bugs.
+
+---
+
+**[Continued in Part 3]**
+
+### M8 — Material Burn-Through
+
+**File:** `physics/m8_burnthrough.py`
+
+**Purpose:** Computes the dwell time required to defeat a selected material at a specified thickness, given the peak or average irradiance delivered by M7. Uses a 1-D transient heat conduction model with absorbed-flux surface boundary, convective backside cooling, and phase-change (metals) or decomposition-threshold (polymers, foams, LiPo) completion criteria.
+
+**Inputs:**
+| Key | Unit | Type | Description |
+|---|---|---|---|
+| `I_aim` | W/m² | float | Delivered irradiance (from M7; use `I_avg_aim` conservatively or `I_peak` for best-case) |
+| `material` | str | enum | One of: `'anodized_Al'`, `'CFRP'`, `'GFRP'`, `'polycarbonate'`, `'ABS'`, `'EPP_foam'`, `'LiPo'` |
+| `thickness` | m | float | Material thickness (0.0001 – 0.020) |
+| `A_lambda` | — | float | Absorptivity at user wavelength (default from table; user-overridable 0.05–0.99) |
+| `wavelength` | m | float | For default A_λ lookup (from M1) |
+| `backside_BC` | enum | str | `'insulated'` or `'convective'` |
+| `v_tgt` | m/s | float | For convective h estimation (from M3) |
+| `T_ambient` | K | float | (from M4) |
+
+**Outputs:**
+| Key | Unit | Description |
+|---|---|---|
+| `tau_BT` | s | Time-to-burn-through |
+| `T_surface_peak` | K | Peak surface temperature reached |
+| `E_delivered` | J | Total energy delivered at burn-through |
+| `failure_mode` | str | `'melt'` (metals), `'decomposition'` (polymers), `'vent'` (LiPo), or `'no_failure_before_timeout'` |
+| `assumptions_flagged` | list[str] | e.g., `["A_λ at default value (high uncertainty)"]` |
+
+**Equations:**
+
+Governing PDE (1-D transient heat conduction):
+```
+ρ · c_p · ∂T/∂t = k · ∂²T/∂x²
+```
+
+Surface boundary condition at x = 0 (laser-illuminated face):
+```
+-k · ∂T/∂x |_{x=0} = A_λ · I_aim 
+                      - h_conv · (T_s − T_ambient)
+                      - ε_IR · σ_SB · (T_s⁴ − T_ambient⁴)
+```
+
+Backside boundary condition at x = t_thickness:
+- `insulated`: `∂T/∂x = 0`
+- `convective`: `-k · ∂T/∂x = h_conv · (T_back − T_ambient)` with `h_conv = 10 + 6.2·sqrt(v_tgt)` W/(m²·K)
+
+Failure criterion:
+- Metals (Al): when `T_surface ≥ T_melt` AND cumulative Stefan-condition mass loss reaches full thickness, fail with mode `'melt'`.
+- Polymers (CFRP, GFRP, PC, ABS, EPP): when `T_surface ≥ T_decomp` sustained for `Δt ≥ 0.05 s`, fail with mode `'decomposition'`.
+- LiPo: when surface or through-thickness-averaged temperature reaches `T_vent = 420 K`, fail with mode `'vent'`.
+
+Numerical method: explicit finite-difference, with:
+- Spatial step: `Δx = min(0.05e-3 m, thickness/20)`
+- Time step: `Δt ≤ 0.4 · Δx² · ρ · c_p / k` (stability criterion with safety factor)
+- Integration timeout: 60 s (reports `failure_mode = 'no_failure_before_timeout'`)
+
+**Material property table** [HIGH UNCERTAINTY flag on all A_λ values]:
+
+| Material | ρ (kg/m³) | c_p (J/kg·K) | k (W/m·K) | T_fail (K) | L_f (kJ/kg) | Failure mode |
+|---|---|---|---|---|---|---|
+| Anodized Al | 2700 | 900 | 200 | 933 (melt) | 397 | melt |
+| CFRP | 1600 | 1000 | 7.0 | 600 (decomp) | — | decomposition |
+| GFRP | 1900 | 800 | 0.4 | 600 (decomp) | — | decomposition |
+| Polycarbonate | 1200 | 1200 | 0.2 | 700 (decomp) | — | decomposition |
+| ABS | 1050 | 1400 | 0.17 | 670 (decomp) | — | decomposition |
+| EPP foam | 30 | 1900 | 0.04 | 620 (ignition) | — | decomposition |
+| LiPo cell | 1800 (avg) | 1000 (avg) | 0.5 (avg) | 420 (vent) | — | vent |
+
+**Absorptivity table A_λ** [HIGH UNCERTAINTY — user should override with measured or program-specific values when available]:
+
+| Material | 1.06 µm | 1.07 µm | 1.55 µm | 2.05 µm |
+|---|---|---|---|---|
+| Anodized Al | 0.30 | 0.30 | 0.25 | 0.20 |
+| CFRP | 0.85 | 0.85 | 0.85 | 0.85 |
+| GFRP | 0.40 | 0.40 | 0.45 | 0.55 |
+| Polycarbonate | 0.10 | 0.10 | 0.30 | 0.60 |
+| ABS | 0.70 | 0.70 | 0.75 | 0.85 |
+| EPP foam | 0.50 | 0.50 | 0.55 | 0.70 |
+| LiPo cell | 0.30 | 0.30 | 0.35 | 0.45 |
+
+Wavelength interpolation: linear between tabulated points; warning flag if outside {1.06, 1.07, 1.55, 2.05 µm}.
+
+Emissivity ε_IR = 0.85 default for all materials (relatively minor effect below ~1000 K).
+
+**Reference:** Carslaw & Jaeger, *Conduction of Heat in Solids* (2nd ed., Oxford, 1959); Steen & Mazumder, *Laser Material Processing* (4th ed., Springer, 2010), Ch. 5–6; ASM Handbook Vol. 2 for metallic properties; manufacturer datasheets (Hexcel, Toray) for CFRP/GFRP; Sandia Labs reports for LiPo thermal runaway thresholds.
+
+**Validation cases:**
+
+`test_m8_aluminum_standard`:
+- Inputs: I_aim=5e4 W/m², material='anodized_Al', thickness=0.002, A_lambda=0.5, backside_BC='insulated', T_ambient=293
+- Expected: tau_BT in range 4–8 s (cross-check vs Steen Ch. 5 worked example for 5 kW/cm² on 2 mm Al)
+- Tolerance: 25% (engineering-level comparison)
+
+`test_m8_cfrp_thin`:
+- Inputs: I_aim=1e4 W/m², material='CFRP', thickness=0.001, A_lambda=0.85
+- Expected: tau_BT < 2 s (CFRP is easy target)
+- Tolerance: structural only
+
+`test_m8_polycarbonate_nir`:
+- Demonstrates the NIR-transparency issue: PC with default A_λ=0.10 at 1.07 µm should require ~10× more dwell than CFRP for the same thickness.
+- Tolerance: structural comparison, not absolute
+
+`test_m8_stability_criterion`:
+- Verify that the simulation is numerically stable for Δx=50 µm and the stability-limited Δt across the full material list. Catches any regression in the numerical integrator.
+
+---
+
+### M9 — NOHD
+
+**File:** `physics/m9_nohd.py`
+
+**Purpose:** Computes the Nominal Ocular Hazard Distance per ANSI Z136.1 / IEC 60825-1. Reports both the top-hat (ANSI general) and Gaussian-peak (single-mode HEL) conventions. Single-mode HEL safety cases should cite the Gaussian-peak value.
+
+**Inputs:**
+| Key | Unit | Type | Description |
+|---|---|---|---|
+| `P0` | W | float | Output power (from M1) |
+| `D` | m | float | Exit aperture (from M1) |
+| `theta_diff` | rad | float | Full-angle divergence (from M1) |
+| `wavelength` | m | float | From M1 |
+| `t_exp` | s | float | Exposure duration (0.25 – 100) |
+
+**Outputs:**
+| Key | Unit | Description |
+|---|---|---|
+| `MPE` | W/m² | Maximum Permissible Exposure irradiance |
+| `NOHD_tophat` | m | Top-hat convention NOHD (ANSI general form) |
+| `NOHD_gausspeak` | m | Gaussian-peak convention NOHD (recommended for single-mode HEL) |
+| `laser_class` | str | `'Class 1'`, `'Class 1M'`, `'Class 2'`, `'Class 3R'`, `'Class 3B'`, or `'Class 4'` |
+
+**Equations:**
+
+```
+NOHD_tophat    = (1/θ_diff) · sqrt(4·P₀ / (π·MPE)) − D/θ_diff
+NOHD_gausspeak = (1/θ_diff) · sqrt(8·P₀ / (π·MPE)) − D/θ_diff   [= sqrt(2) · NOHD_tophat]
+```
+
+**MPE calculation** per ANSI Z136.1-2014, CW beam, intrabeam viewing, correction factors C_A = C_C = 1 for the wavelength bands of interest:
+
+Band A: Retinal hazard (0.400 µm ≤ λ ≤ 1.400 µm):
+```
+if t_exp < 18e-6:
+    MPE_energy = 5e-3 · C_A   [J/cm²]
+elif t_exp ≤ 10:
+    MPE_energy = 1.8e-3 · t_exp^(3/4) · C_A   [J/cm²]
+    MPE_irradiance = MPE_energy / t_exp = 1.8e-3 · t_exp^(-1/4)   [W/cm²]
+else:  # t_exp > 10 s, chronic
+    MPE_irradiance = 1.0e-3   [W/cm²]
+```
+
+For λ ≥ 1.050 µm, apply C_A = 10^(0.002·(λ_nm − 700)) up to C_A = 5.0 at 1050 nm.
+
+Band B: Eye-safer (1.400 µm ≤ λ ≤ 4.000 µm):
+```
+if t_exp ≤ 10:
+    MPE_energy = 0.56 · t_exp^(1/4)   [J/cm²]
+    MPE_irradiance = MPE_energy / t_exp = 0.56 · t_exp^(-3/4)   [W/cm²]
+else:  # chronic
+    MPE_irradiance = 0.1   [W/cm²]
+```
+
+Band C: Far-IR (λ > 4 µm): out of scope for v1; emit assumption flag "MPE for λ > 4 µm deferred to v2" and use Band B values as a placeholder.
+
+Convert MPE_irradiance from W/cm² to W/m²: multiply by 10⁴.
+
+**Laser classification:**
+- Class 4 whenever `P₀ > 500 mW` (the typical threshold for CW NIR lasers). For HEL systems (kW+), always Class 4. Explicitly reported for safety-case context.
+
+**Reference:** ANSI Z136.1-2014, *Safe Use of Lasers*; IEC 60825-1:2014, *Safety of laser products — Part 1: Equipment classification*.
+
+**Usage guidance (emitted with outputs):**
+
+> For single-mode HEL safety cases, cite `NOHD_gausspeak`. The top-hat value is the ANSI "general form" appropriate for diffused or multimode beams; it underestimates the on-axis hazard for a low-M² Gaussian beam by a factor of √2.
+
+**Validation cases:**
+
+`test_m9_retinal_band_baseline`:
+- Inputs: P0=1, D=0.001, theta_diff=1e-3, wavelength=1.07e-6, t_exp=0.25
+- Expected: MPE ≈ 25.5 W/m² (from 1.8e-3 · 0.25^(-0.25) · C_A · 10⁴); NOHD_tophat ≈ 223 m, NOHD_gausspeak ≈ 315 m
+- Tolerance: 2%
+- **NOTE:** the plan document §6.9 quoted MPE ≈ 50 W/m² at 1.07 µm as a round-number band-average. The formula-derived value at t=0.25 s is 25.5 W/m² (using C_A appropriate for 1.07 µm), giving proportionally larger NOHDs than the plan's round numbers. SPEC.md uses the formula-derived values.
+
+`test_m9_eyesafer_band`:
+- Inputs: same as above but wavelength=1.55e-6
+- Expected: MPE ≈ 15839 W/m² (from 0.56 · 0.25^(-0.75) · 10⁴); NOHD_tophat much smaller (~9 m)
+- Tolerance: 5%
+
+`test_m9_ratio_sqrt2`:
+- Verify `NOHD_gausspeak / NOHD_tophat = sqrt(2)` for any inputs. Structural test.
+
+`test_m9_chronic_viewing`:
+- t_exp=100 s, wavelength=1.07e-6
+- Expected: MPE saturates at chronic limit 1e-3 W/cm² = 10 W/m²
+
+---
+
+### M10 — Power & Thermal Budget
+
+**File:** `physics/m10_power_thermal.py`
+
+**Purpose:** Computes prime power required and waste heat generated; determines whether the system can sustain the requested engagement duration based on cooling capacity and coolant thermal mass.
+
+**Inputs:**
+| Key | Unit | Type | Description |
+|---|---|---|---|
+| `P0` | W | float | Laser output power (from M1) |
+| `eta_wallplug` | — | float | Wall-plug efficiency (0.05 – 0.50) |
+| `Q_cool` | W | float | Installed cooling capacity |
+| `C_thermal` | J/K | float | Coolant thermal mass |
+| `dT_max` | K | float | Allowable coolant temperature rise |
+| `t_engagement` | s | float | Required engagement duration (typically from M8 tau_BT) |
+
+**Outputs:**
+| Key | Unit | Description |
+|---|---|---|
+| `P_in` | W | Prime power draw |
+| `Q_waste` | W | Waste heat generated |
+| `t_sustain` | s | Maximum sustainable run-time (inf for steady-state) |
+| `engagement_viable` | bool | True iff `t_engagement ≤ t_sustain` |
+| `duty_cycle_limit` | — | Maximum duty cycle (if transient) |
+| `engagements_per_hour` | float | At given duty cycle and engagement duration |
+
+**Equations:**
+
+```
+P_in     = P₀ / η_wallplug
+Q_waste  = P_in − P₀
+
+# Steady-state check:
+if Q_waste ≤ Q_cool:
+    t_sustain = inf   # cooling matches dissipation indefinitely
+else:
+    t_sustain = (C_thermal · dT_max) / (Q_waste − Q_cool)
+
+# Viability:
+engagement_viable = (t_engagement ≤ t_sustain)
+
+# Duty cycle limit (for transient mode):
+# After firing for t_sustain, cooling must remove C_thermal·dT_max of stored heat
+# at rate Q_cool. So recovery_time = (C_thermal·dT_max)/Q_cool.
+# duty_cycle = t_sustain / (t_sustain + recovery_time)
+if t_sustain < inf:
+    recovery_time = (C_thermal · dT_max) / Q_cool
+    duty_cycle_limit = t_sustain / (t_sustain + recovery_time)
+else:
+    duty_cycle_limit = 1.0
+
+# Engagements per hour at t_engagement per engagement:
+engagements_per_hour = 3600 · duty_cycle_limit / t_engagement
+```
+
+**Default parameters** (selected to support a 3 kW baseline as steady-state and a 50 kW class engagement in transient mode for ~1 minute):
+
+| Parameter | Default | Rationale |
+|---|---|---|
+| `eta_wallplug` | 0.30 | Typical fiber laser wall-plug efficiency (range 0.25–0.35) |
+| `Q_cool` | 15 kW | Mid-sized vehicle-mounted cooling loop |
+| `C_thermal` | 200 kJ/K | Corresponds to ~50 kg of water or equivalent coolant mass |
+| `dT_max` | 30 K | Typical shutdown threshold above inlet temperature |
+
+Verification of defaults: for a 50 kW laser with these numbers, the tool correctly predicts ~59 seconds of sustained fire before thermal shutdown. For a 3 kW laser, operation is steady-state (Q_waste = 7 kW < Q_cool = 15 kW).
+
+**Validation cases:**
+
+`test_m10_steady_state`:
+- Inputs: P0=3000, eta_wallplug=0.30, Q_cool=15000, C_thermal=200000, dT_max=30, t_engagement=5
+- Expected: P_in=10000, Q_waste=7000, t_sustain=inf, engagement_viable=True
+- Tolerance: 0.1% (exact arithmetic)
+
+`test_m10_transient`:
+- Inputs: P0=50000, eta_wallplug=0.30, Q_cool=15000, C_thermal=200000, dT_max=30, t_engagement=5
+- Expected: P_in=166667, Q_waste=116667, t_sustain ≈ 59 s, engagement_viable=True
+- Tolerance: 1%
+
+`test_m10_insufficient_cooling`:
+- Inputs: P0=100000, eta_wallplug=0.30, Q_cool=5000, C_thermal=100000, dT_max=20, t_engagement=30
+- Expected: t_sustain < 30 s, engagement_viable=False
+- Tolerance: 1%
+
+---
+
+### M11 — Validation Self-Test
+
+**File:** `physics/m11_validation.py` (and `tests/` directory for pytest suites)
+
+**Purpose:** Provides an in-UI button that runs the entire pytest validation suite on-demand and displays the pass/fail report. This is the safety net that catches physics regressions before they reach the user.
+
+**Interface (v1.1 — M11 uniquely does not follow the standard `compute(inputs) -> dict` pattern because it is a runner, not a physics module):**
+
+Public function signature:
+```python
+def run_validation_suite() -> dict:
+    """
+    Invokes pytest on the tests/ directory and returns a structured report.
+
+    Returns:
+        {
+            'timestamp': str (ISO 8601),
+            'total_tests': int,
+            'passed': int,
+            'failed': int,
+            'duration_seconds': float,
+            'results': {
+                test_id (str): {
+                    'status': 'PASS' | 'FAIL',
+                    'expected': any (the claimed value or structural check),
+                    'actual': any (the computed value),
+                    'tolerance': str (e.g., '2%', 'structural'),
+                    'reference': str (citation to SPEC §3 or external source),
+                    'error_message': str (if FAIL, else empty),
+                },
+                ...
+            }
+        }
+    """
+```
+
+This signature is what `ui/app.py` expects when the "Run Validation Suite" button is pressed. Implementation may wrap a pytest subprocess call or invoke pytest programmatically via `pytest.main()`.
+
+**Interface:** 
+- UI button "Run Validation Suite" in the Streamlit interface.
+- When clicked, invokes `pytest` on the `tests/` directory and renders the output in a formatted table showing: test name, expected value, actual value, tolerance, pass/fail, reference citation.
+- Total expected runtime: < 30 seconds (all tests are either closed-form or small numerical simulations).
+
+**Test inventory** (managed via pytest discovery in `tests/` directory):
+
+| Test ID | Module | Description | Tolerance |
+|---|---|---|---|
+| M1.1 | M1 | θ_diff vs hand calculation | 0.1% |
+| M1.2 | M1 | Rayleigh range | 1% |
+| M2.1 | M2 | Transmission arithmetic | 0.01% |
+| M3.1 | M3 | Slant-range geometry | 0.1% |
+| M4.1 | M4 | Aerosol at V=23 km, 1.07 µm | 5% |
+| M4.2 | M4 | Aerosol at V=5 km (Kim) | 5% |
+| M4.3 | M4 | Wavelength interpolation | exact |
+| M5.1 | M5 | r₀_sph uniform Cn² | 2% |
+| M5.2 | M5 | w_turb at 5 km | 2% |
+| M5.3 | M5 | Spherical/plane ratio | 0.1% (structural) |
+| M5.4 | M5 | r₀ at 1.5 km (near-field) | 2% |
+| M6.1 | M6 | Dimensional check | structural |
+| M6.2 | M6 | Moderate blooming (10 kW canonical) | ±30% |
+| M6.3 | M6 | Low-power limit | structural |
+| M7.1 | M7 | Pure diffraction at 5 km | 2% |
+| M7.2 | M7 | +Turbulence at 5 km | 2% |
+| M7.3 | M7 | C-UAS near-field at 1.5 km | 2% |
+| M7.4 | M7 | w/σ/PIB convention consistency | exact (structural) |
+| M8.1 | M8 | Aluminum standard | 25% |
+| M8.2 | M8 | CFRP thin | structural |
+| M8.3 | M8 | PC NIR transparency | structural comparison |
+| M8.4 | M8 | Numerical stability | structural |
+| M9.1 | M9 | Retinal baseline | 2% |
+| M9.2 | M9 | Eye-safer band | 5% |
+| M9.3 | M9 | Gauss/tophat ratio = √2 | 0.1% (structural) |
+| M9.4 | M9 | Chronic viewing saturation | 2% |
+| M10.1 | M10 | Steady-state case | 0.1% |
+| M10.2 | M10 | Transient 50 kW case | 1% |
+| M10.3 | M10 | Insufficient cooling | 1% |
+
+Total: 29 tests.
+
+**Validation report format** (from M11 UI button):
+
+```
+╔════════════════════════════════════════════════════════════════╗
+║       HEL Engineering Calculator — Validation Report          ║
+║                     [timestamp]                                ║
+╠════════════════════════════════════════════════════════════════╣
+║ Test ID  │ Description          │ Expected │ Actual │ Pass?   ║
+╟──────────┼──────────────────────┼──────────┼────────┼─────────╢
+║ M1.1     │ Diffraction divergence│ 13.55µr  │ 13.55µr│   ✓     ║
+║ ...      │ ...                  │ ...      │ ...    │   ...   ║
+╚════════════════════════════════════════════════════════════════╝
+Summary: 29/29 PASS (0.8 s total)
+Reference citations attached per test.
+```
+
+Any FAIL is reported prominently; the tool continues to operate but displays a banner warning the user that at least one physics test is failing.
+
+---
+
+## 4. Module Execution Order (Orchestration)
+
+When the user clicks "Run Analysis," modules execute in strict dependency order:
+
+```
+M1 (laser source)
+ └─→ M2 (beam director)
+      └─→ M3 (geometry)
+           └─→ M4 (atmosphere) ──┐
+                └─→ M5 (turbulence)  │
+                     └─→ M7 (spot+PIB) ←─┐
+                          ←──── M6 (blooming) [ITERATED with M7]
+                               └─→ M8 (burn-through)
+                                    └─→ M10 (power/thermal)
+
+In parallel:
+M1 → M9 (NOHD)    [independent of the propagation chain]
+```
+
+The M6↔M7 iteration: start with `S_TB = 1, w_bloom = 0`; compute M7's `w_total`; pass to M6; update `S_TB, w_bloom`; re-run M7. Iterate until `w_total` changes less than 1% between iterations, max 10 iterations.
+
+For the sweep plots (Plots A, B, C), the orchestrator calls this chain once per range point across the user-specified sweep.
+
+---
+
+**[Continued in Part 4 — UI mapping, orchestration, file layout, and appendices]**
+
+## 5. UI-to-Module Mapping
+
+The Streamlit interface aggregates user inputs into the dicts expected by each physics module. This section specifies how each UI input routes to which module input, and how each module output routes to which UI element.
+
+### 5.1 Input Panels → Module Inputs
+
+**Panel layout convention.** All six panels are `st.expander` widgets in the sidebar. Each panel's expander header carries a small leading icon (Streamlit emoji shortcode is acceptable) for fast visual scanning: A `🔦` (laser source), B `🎯` (beam director), C `📐` (engagement geometry), D `🌫️` (atmosphere), E `🛡️` (aimpoint and material), F `⚙️` (system resources and safety). Default expansion state on first load: **A, C, E expanded; B, D, F collapsed.** Rationale — panels A (laser source), C (engagement geometry), and E (aimpoint and material) are the most frequently changed inputs in trade-study workflows; B (beam director optical/jitter), D (atmosphere), and F (system resources) typically hold steadier values across a sweep. This default is a starting point only; Streamlit remembers user-driven expansion state within a session.
+
+**Panel A — Laser Source → M1**
+| UI label | Input key | Unit | Default | Sanity range |
+|---|---|---|---|---|
+| Output power | `P0` | kW (→ W) | 3.0 | 0.1 – 100 |
+| Beam quality M² | `M2` | — | 1.2 | 1.0 – 10.0 |
+| Exit aperture diameter | `D` | cm (→ m) | 10.0 | 1 – 50 |
+| Wavelength | `wavelength` | µm (→ m) | 1.07 | 0.5 – 5.0 |
+
+**Panel B — Beam Director → M2, partially M7**
+| UI label | Input key | Unit | Default | Sanity range |
+|---|---|---|---|---|
+| Optical transmission | `eta_opt` | — | 0.85 | 0.50 – 0.99 |
+| Pointing jitter (per-axis 1-σ RMS) | `sigma_jit` | µrad (→ rad) | 10 | 0.1 – 1000 |
+
+**Panel C — Engagement Geometry → M3**
+| UI label | Input key | Unit | Default | Sanity range |
+|---|---|---|---|---|
+| Emplacement altitude AGL | `H_e` | m | 2 | 0 – 3000 |
+| Slant range to target | `R` | m | 1500 | 50 – 50000 |
+| Target altitude AGL | `H_t` | m | 200 | 0 – 5000 |
+| Target velocity | `v_tgt` | m/s | 20 | 0 – 100 |
+| Crosswind (perpendicular) | `v_perp` | m/s | 3 | 0 – 30 |
+
+**Panel D — Atmosphere → M4, M5**
+| UI label | Input key | Unit | Default | Sanity range |
+|---|---|---|---|---|
+| Visibility | `V` | km | 23 | 0.5 – 50 |
+| Relative humidity | `RH` | % (→ fraction) | 60 | 0 – 100 |
+| Ambient temperature | `T_ambient` | °C (→ K) | 27 | -20 – 55 |
+| Cn² model | `cn2_model` | enum | `HV_5_7` | constant / HV_5_7 / HV_day / HV_night |
+| Cn² value (if constant) | `Cn2_value` | m^(-2/3) | 1e-14 | 1e-17 – 1e-12 |
+| Ground Cn² (if HV) | `Cn2_ground` | m^(-2/3) | 1.7e-14 | 1e-16 – 1e-12 |
+| HV wind speed | `v_HV` | m/s | 21 | 0 – 60 |
+
+**Panel E — Aimpoint & Material → M7, M8**
+| UI label | Input key | Unit | Default | Sanity range |
+|---|---|---|---|---|
+| Aimpoint diameter | `d_aim` | cm (→ m) | 5 | 0.5 – 30 |
+| Material | `material` | enum | `CFRP` | 7-material set |
+| Thickness | `thickness` | mm (→ m) | 2.0 | 0.1 – 20 |
+| Absorptivity A_λ (override) | `A_lambda` | — | from table | 0.05 – 0.99 |
+| Backside BC | `backside_BC` | enum | `insulated` | insulated / convective |
+
+**Panel F — System Resources & Safety → M9, M10**
+| UI label | Input key | Unit | Default | Sanity range |
+|---|---|---|---|---|
+| Wall-plug efficiency | `eta_wallplug` | — | 0.30 | 0.05 – 0.50 |
+| Cooling capacity | `Q_cool` | kW (→ W) | 15 | 0 – 500 |
+| Coolant thermal mass | `C_thermal` | kJ/K (→ J/K) | 200 | 10 – 5000 |
+| ΔT max | `dT_max` | K | 30 | 5 – 80 |
+| Exposure duration (for MPE) | `t_exp` | s | 0.25 | 0.25 – 100 |
+
+### 5.2 Module Outputs → Display Panels & Plots
+
+**Panel 1 — Spot Broadening & Strehl Decomposition** (at user-selected reference range):
+- Angular-error bar: θ_diff_pure (M1, split display), θ_M² (M1), θ_turb (M5), θ_jit (panel B)
+- Strehl bar: S_TB (M6), S_opt (=1)
+- Effective peak-irradiance ratio vs diff-limited baseline: `S_TB · (w_diff²/w_total²)`
+
+**Panel 2 — Engagement Summary**:
+- P_aim (M7), I_avg_aim (M7), I_peak (M7)
+- tau_BT (M8), available_dwell (M3)
+- **Verdict with margin and traffic-light color:**
+  - Define `margin = (available_dwell − tau_BT) / tau_BT`. (`margin > 0` means dwell exceeds time-to-burn-through; the larger, the more comfortable the engagement.)
+  - **Verdict label and color:**
+    - `margin ≥ 0.30` → **"ENGAGEABLE"** with green indicator (`COLOR_SUCCESS` per `ui/style.py`); display margin as a percentage (e.g., "ENGAGEABLE — 47% margin").
+    - `0.00 ≤ margin < 0.30` → **"MARGINAL"** with orange/amber indicator (`COLOR_WARNING`); display margin (e.g., "MARGINAL — 8% margin").
+    - `margin < 0.00` → **"NOT ENGAGEABLE"** with red indicator (`COLOR_CAUTION`); display the shortfall as a positive percentage (e.g., "NOT ENGAGEABLE — exceeds dwell by 35%").
+  - The numeric values `tau_BT` and `available_dwell` are always displayed alongside the verdict (in seconds) so the user can see the underlying numbers, not just the label.
+  - **Edge case:** if `tau_BT` is zero or undefined (e.g., M8 reports immediate burn-through or material below ablation threshold), display "ENGAGEABLE — instantaneous" with green indicator and skip the margin calculation. If `available_dwell` is zero or undefined (target out of range or no line of sight), display "NOT ENGAGEABLE — no dwell available" with red indicator.
+
+**Panel 3 — System Feasibility**:
+- P_in (M10), Q_waste (M10), t_sustain (M10)
+- engagements_per_hour (M10)
+- NOHD_tophat, NOHD_gausspeak (M9), laser_class (M9)
+
+**Panel 4 — Assumptions (aggregated)**:
+- Union of all `assumptions_flagged` lists from M1–M10 for the current calculation
+- Always-visible; updates as user changes inputs
+
+**Panel 5 — Atmospheric Extinction Breakdown**:
+- Stacked bar: α_mol_abs, α_mol_scat, α_aer_abs, α_aer_scat from M4
+- Total α_atm = sum; displayed in both 1/km and percentage share
+
+**Plot A — On-Target Performance vs Slant Range**:
+- X: range; Y-left: I_peak (W/cm²); Y-right: PIB fraction
+- Curves: actual I_peak, diff-limited I_peak, PIB, S_TB, atmospheric transmission τ_atm
+- Reference lines: material damage threshold for selected material/thickness
+- **Hover tooltip content** (displayed when the user hovers over any point on any curve):
+  - Range (m, two significant figures)
+  - I_peak at this range (W/cm², three significant figures) and ratio to material damage threshold (e.g., "87% of damage threshold")
+  - PIB fraction at this range (two decimal places, e.g., "0.62")
+  - S_TB at this range (two decimal places)
+  - τ_atm at this range (two decimal places)
+
+**Plot B — Time-to-Burn-Through vs Slant Range**:
+- X: range; Y: tau_BT (log scale)
+- Shaded region: "engageable" (tau_BT < available_dwell)
+- Reference line: available_dwell at each range
+- **Hover tooltip content:**
+  - Range (m, two significant figures)
+  - tau_BT at this range (s, three significant figures)
+  - available_dwell at this range (s, three significant figures)
+  - Margin (signed percentage, computed as in Panel 2 verdict definition above)
+
+**Plot C — Beam Diameter vs Range with Individual Contributions**:
+- X: range; Y: 1/e² diameter (cm, linear)
+- Solid: d_spot total; dashed: pure diffraction (2·w₀·sqrt(1+(L/z_R)²)), M² excess, turbulence, jitter
+- Shared reference-range slider with Plot A
+- **Hover tooltip content** (per curve hovered):
+  - Range (m, two significant figures)
+  - Diameter on the hovered curve (cm, three significant figures)
+  - Total d_spot at this range (cm, three significant figures) — included on every curve's tooltip so the user always sees the total alongside the contribution
+  - Curve label (e.g., "diffraction", "M² excess", "turbulence", "jitter", "total")
+
+**Cross-plot hover synchronization.** Plotly's unified hover-mode is enabled across Plots A, B, and C: when the user hovers over a range on any of the three plots, a vertical line is drawn at the same range on the other two plots, with each plot's tooltip showing its own values at that range. This lets the user trace a single engagement range across all three views in one motion. Implementation note: this is enabled via Plotly's `hovermode='x unified'` per figure, plus a small Streamlit callback that synchronizes the hovered x-coordinate across the three `st.plotly_chart` instances.
+
+### 5.3 UI Behavior Contract
+
+1. **No cached state between sessions, but state is shareable via URL.** Every session starts from the defaults. To share a specific input configuration with a colleague, the user clicks a "Share this analysis" button (in the sidebar) which generates a URL with the current input set encoded as query parameters (via Streamlit's `st.query_params`). Opening that URL recreates the exact input state, allowing reproducible team review. URL length stays well within browser limits because the parameter set is small (~30 numeric/enum values). JSON-file save/load remains a deferred v1.5 feature for users who prefer file-based archival; URL sharing covers the common case.
+
+2. **Recompute-on-change with caching.** Streamlit's `@st.cache_data` decorator wraps each physics-module call. Changing a Panel A input invalidates M1 and everything downstream; changing only a Panel F input invalidates only M9/M10.
+
+3. **Sweep caching.** Plots A, B, C compute over a range sweep. The sweep is cached as a single array; moving the reference slider does not recompute the sweep, only re-renders the highlighted point.
+
+4. **Assumption panel is always visible.** It cannot be collapsed; this prevents the user from inadvertently trusting results that rely on default or interpolated values.
+
+5. **Unit labels on every input and output.** No implicit units anywhere in the UI.
+
+6. **Validate button runs M11.** Always available in the sidebar. Does not block the main analysis flow.
+
+7. **Share-this-analysis button.** A clearly labeled button (sidebar, near the Validate button) generates a shareable URL encoding the full current input state via `st.query_params`. Clicking the button copies the URL to the clipboard and shows a brief confirmation toast (e.g., "Link copied"). On page load, if query parameters are present in the URL, the UI initializes input panels from those parameters instead of from defaults; if any parameter is malformed or out of its sanity range, the UI silently falls back to that input's default and adds a flag to the assumptions panel ("Input X out of range from URL, using default").
+
+---
+
+## 6. File Layout
+
+```
+hel-calculator/
+├── README.md                       # Landing page for GitHub repo
+├── CLAUDE.md                       # Project rules for Claude Code (read every session)
+├── SPEC.md                         # THIS DOCUMENT
+├── ARCHITECTURE.md                 # Concrete file layout + interface definitions
+├── TESTING.md                      # Validation-suite guide
+├── requirements.txt                # Pinned dependencies
+├── .github/
+│   └── workflows/
+│       └── test.yml                # GitHub Actions CI (pytest on every commit)
+├── physics/                        # Layer 1: Physics core (pure Python, no UI)
+│   ├── __init__.py
+│   ├── m1_laser_source.py
+│   ├── m2_beam_director.py
+│   ├── m3_geometry.py
+│   ├── m4_atmosphere.py
+│   ├── m4_data_tables.py           # α_mol, α_aer tables
+│   ├── m5_turbulence.py
+│   ├── m6_blooming.py
+│   ├── m7_spot_pib.py
+│   ├── m8_burnthrough.py
+│   ├── m8_material_tables.py       # ρ, cp, k, T_fail, A_λ per material
+│   ├── m9_nohd.py
+│   ├── m10_power_thermal.py
+│   └── m11_validation.py           # Self-test runner (calls pytest)
+├── tests/                          # Layer 2: Validation suite
+│   ├── __init__.py
+│   ├── test_m1_laser_source.py
+│   ├── test_m2_beam_director.py
+│   ├── test_m3_geometry.py
+│   ├── test_m4_atmosphere.py
+│   ├── test_m5_turbulence.py
+│   ├── test_m6_blooming.py
+│   ├── test_m7_spot_pib.py
+│   ├── test_m8_burnthrough.py
+│   ├── test_m9_nohd.py
+│   ├── test_m10_power_thermal.py
+│   └── test_convention_consistency.py  # Structural tests across modules
+├── ui/                             # Layer 3: Streamlit interface
+│   ├── __init__.py
+│   ├── app.py                      # Main Streamlit entry point
+│   ├── panels.py                   # The 6 input panels
+│   ├── outputs.py                  # The 5 output panels
+│   ├── plots.py                    # Plotly plot constructors (A, B, C)
+│   ├── orchestrator.py             # Calls modules in dependency order (M6↔M7 iteration)
+│   └── auth.py                     # Shared-credential login
+└── docs/                           # Reference material
+    ├── Plan_v0p8.docx              # Project plan (reference)
+    └── references.md               # Bibliography
+```
+
+**Strict separation:**
+- `physics/` never imports from `ui/` or `tests/`
+- `tests/` imports from `physics/` only
+- `ui/` imports from `physics/` only (via `orchestrator.py`)
+- No cross-imports between the three layers
+
+This enforces the three-layer architecture from plan §2.3.
+
+---
+
+## 7. Dependency Pinning (`requirements.txt`)
+
+```
+streamlit==1.38.0
+numpy==1.26.4
+scipy==1.13.1
+plotly==5.22.0
+pytest==8.3.2
+pandas==2.2.2
+```
+
+Python version: 3.11 or 3.12 (specified in Streamlit Cloud config, not requirements.txt).
+
+Any update to these versions requires re-running the validation suite and verifying all 29 tests still pass within tolerance before the commit is merged to main.
+
+---
+
+## 8. GitHub Actions Workflow (`.github/workflows/test.yml`)
+
+```yaml
+name: Validation Tests
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+      - name: Run validation suite
+        run: pytest tests/ -v --tb=short
+```
+
+Streamlit Cloud observes the main branch; CI pass is a soft requirement (Streamlit Cloud deploys regardless), but a failing CI status is visibly flagged in the GitHub UI and Claude Code treats a failing `test.yml` run as a block on claiming the commit as "done."
+
+---
+
+## 9. Implementation Checklist for Claude Code
+
+When implementing each module in Phase 1 through Phase 5, Claude Code shall satisfy this checklist before claiming the module complete:
+
+**Per-module checklist:**
+- [ ] Module file exists at specified path with the specified function signature
+- [ ] All inputs validated for type and range (raises `ValueError` with descriptive message if out-of-range)
+- [ ] All outputs in the dict with specified keys and units
+- [ ] `assumptions_flagged` list populated appropriately
+- [ ] All equations match SPEC.md letter-for-letter (no "optimizations" that change formulas)
+- [ ] Reference citation in the module docstring
+- [ ] Every validation case from the SPEC is implemented as a pytest test
+- [ ] All pytest tests pass within stated tolerance
+- [ ] Module is pure: no file I/O, no network, no global state, no UI dependencies
+- [ ] Module does not import from `ui/` or `tests/`
+
+**Per-phase checklist:**
+- [ ] All modules in the phase satisfy the per-module checklist
+- [ ] CI is green on main branch
+- [ ] Streamlit Cloud deploys and the tool loads at the URL
+- [ ] User has reviewed and accepted the phase deliverable
+
+**When the SPEC is wrong:**
+If during implementation Claude Code finds that SPEC.md contains an error — a wrong equation, a wrong tolerance, a missing input — the procedure is:
+1. STOP implementation on that module
+2. Describe the problem to the user in chat
+3. Wait for user decision: "fix SPEC first, then proceed" or "revert and re-scope"
+4. Update SPEC.md with a dated note in the affected section
+5. Resume implementation against the corrected SPEC
+
+Do NOT silently fix errors in code without updating the SPEC. The SPEC is the contract; the code implements the contract. Divergence between the two is a bug to be corrected at the SPEC level, not worked around in the code.
+
+---
+
+## 10. Open Items Deferred to Implementation Review
+
+These items are known gaps in this SPEC that should be closed during Phase 1 (before committing the corresponding module) but are not blockers to starting:
+
+1. **α_mol tables:** current values are engineering placeholders (HIGH UNCERTAINTY flag). Before v1.0 final, replace with HITRAN/MODTRAN-derived tabulations. Cross-check at least one value (e.g., α_mol at 1.07 µm, 60% RH) against a published reference.
+
+2. **A_λ table:** current values are engineering defaults (HIGH UNCERTAINTY flag). For any material used in a formal trade study, the user should override with measured data or program-specific values.
+
+3. **MPE at 1.07 µm specifically:** the formula-derived MPE at 0.25 s exposure is ~25.5 W/m² (with C_A correction), which is about half the plan document's round-number 50 W/m². SPEC.md uses the formula-derived value. Cross-check against the latest ANSI Z136.1 revision in force at tool-release time.
+
+4. **Blooming broadening scaling:** the empirical factor 0.3 in `w_bloom = w_at_target · sqrt((N_D/5)² - 1) · 0.3` is an engineering estimate. If a more rigorous form becomes available (e.g., from a benchmark HELEEOS comparison), update.
+
+5. **available_dwell heuristic:** the current `2·R·tan(FOV/2)/v_tgt` formula is a first-order engagement-basket estimate. A full tracker-dependent model is a v2 feature.
+
+6. **Convective backside BC for M8:** the `h_conv = 10 + 6.2·sqrt(v_tgt)` correlation is a general engineering approximation. If user has vehicle-specific data, this can be overridden.
+
+These are not Phase-0 blockers. They are documented here so they are not lost, and so Claude Code knows to surface them when the user is ready to move from "working tool" to "trade-study-ready tool."
+
+---
+
+## Appendix A — Module Dependency Graph (concrete)
+
+```
+USER INPUTS
+    │
+    ├─→ Panel A (P0, M2, D, λ) ─┬─→ M1 ──┬──────────────┐
+    │                           │        │              │
+    ├─→ Panel B (η_opt,σ_jit) ──┼─→ M2   │              ↓
+    │                           │        │           M9 (NOHD)
+    ├─→ Panel C (geometry)  ────┼─→ M3   │              │
+    │                           │        ↓              │
+    ├─→ Panel D (atm,Cn²)   ────┼─→ M4 → M5             │
+    │                           │   │     │             │
+    ├─→ Panel E (aim,mat)   ────┼───│─────│─┐           │
+    │                           │   │     │ │           │
+    └─→ Panel F (power,safety) ─┼───│─────│─│─→ M10     │
+                                │   ↓     ↓ │   │       │
+                                └─→ M7 ←→ M6 │   │       │
+                                     │       │   │       │
+                                     ↓       │   │       │
+                                     M8 ←────┘   │       │
+                                     │           │       │
+                                     ↓           ↓       ↓
+                                   PLOT A/B/C  PANELS 1-5 NOHD DISPLAY
+```
+
+---
+
+## Appendix B — Reference Library
+
+Primary sources cited in this SPEC:
+
+1. **Andrews, L. C. & Phillips, R. L.** *Laser Beam Propagation through Random Media* (2nd ed., SPIE Press, 2005). Ch. 6 (r₀, w_turb), Ch. 12 (atmospheric channel models).
+
+2. **Siegman, A. E.** *Lasers* (University Science Books, 1986). Ch. 17 (Gaussian beam propagation, M² formalism).
+
+3. **Born, M. & Wolf, E.** *Principles of Optics* (7th ed., Cambridge, 1999). Ch. 8 (Gaussian diffraction, PIB).
+
+4. **Gebhardt, F. G.** "Twenty-five years of thermal blooming: an overview," *Proc. SPIE* 1221 (1990), pp. 2–25. (Gebhardt N_D formulation, 4√2 prefactor.)
+
+5. **Gebhardt, F. G.** "High-power laser propagation," *Applied Optics* 15(6), 1479–1493 (1976). (Original blooming derivation.)
+
+6. **Carslaw, H. S. & Jaeger, J. C.** *Conduction of Heat in Solids* (2nd ed., Oxford, 1959). (Finite-difference heat equation, boundary conditions, Stefan condition.)
+
+7. **Steen, W. M. & Mazumder, J.** *Laser Material Processing* (4th ed., Springer, 2010). Ch. 5–6 (laser-matter interaction, metal processing).
+
+8. **ANSI Z136.1-2014**, *Safe Use of Lasers*. (MPE formulas, laser classification, NOHD.)
+
+9. **IEC 60825-1:2014**, *Safety of laser products — Part 1*. (Complementary MPE tables.)
+
+10. **Kruse, P. W.** *Elements of Infrared Technology* (Wiley, 1962). (Aerosol extinction formula.)
+
+11. **McClatchey, R. A., et al.** "Optical Properties of the Atmosphere," AFCRL-TR-72-0497 (1972). (Molecular absorption baselines.)
+
+12. **Hufnagel, R. E.** "Variations of atmospheric turbulence," *OSA Technical Digest* (1974); **Valley, G. C.** "Isoplanatic degradation of tilt correction and short-term imaging systems," *Applied Optics* 19(4), 574 (1980). (HV turbulence profile.)
+
+13. **Perram, G. P., et al.** *An Introduction to Laser Weapon Systems* (Directed Energy Professional Society, 2010). (HEL engineering conventions, trade-study methodology.)
+
+---
+
+## Appendix C — Glossary
+
+(Reference plan document §Appendix A for the full glossary. Key terms for SPEC purposes:)
+
+- **1/e² radius (w):** the radial distance at which a Gaussian beam's intensity falls to 1/e² ≈ 13.5% of peak. Canonical beam-size measure throughout this SPEC.
+- **assumptions_flagged:** first-class list output from every module; aggregated to Panel 4.
+- **engagement_viable:** Boolean result indicating whether delivered dwell ≥ required burn-through time.
+- **PIB:** Power-in-the-Bucket; fraction of total transmitted power inside aimpoint disk.
+- **Strehl ratio:** ratio of actual to diffraction-limited peak irradiance; captures phase-only wavefront distortions.
+- **Gebhardt N_D:** dimensionless thermal-blooming distortion number.
+- **NOHD:** Nominal Ocular Hazard Distance per ANSI Z136.1.
+- **r₀ (Fried):** spatial coherence length of the atmospheric channel, spherical-wave form in this SPEC.
+
+---
+
+**END OF SPEC.md v1.1 (Phase 0 draft, post-audit fixes)**
