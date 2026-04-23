@@ -19,31 +19,19 @@ validation suites). They validate the *coordinator* behavior:
   5. The ``by_module`` namespace carries every module's output dict.
   6. The aggregated ``assumptions_flagged`` list is de-duplicated.
 
-**Known contract gap (pre-existing, not introduced by this slice):**
-``tests/conftest.py::canonical_inputs`` sets ``cn2_model='HV_5_7'`` (the
-SPEC §5.1 Panel D intended default) but ``physics/m5_turbulence.py``
-currently only implements ``cn2_model='constant'`` — HV_5_7 is
-deliberately enumerated-but-unimplemented pending a SPEC §3 M5
-validation case (M5 raises ``NotImplementedError`` with that exact
-message). These orchestrator tests override to ``'constant'`` locally
-so they exercise the chain through a code path that exists. When the
-UI slice (slice 4) wires the Streamlit app to ``canonical_inputs``
-defaults, either HV_5_7 must land in M5 or the Panel D default must
-change to ``'constant'`` — whichever the user chooses under CLAUDE
-§4.3. Tracked separately; not blocking for slice 2a.
+**SPEC v1.5 note:** ``canonical_inputs`` uses ``cn2_model='HV_5_7'``
+(the SPEC §5.1 Panel D default). Between slice-2a commit 1 and SPEC
+v1.5 the M5 module raised ``NotImplementedError`` for that model, and
+this file carried a ``_chain_inputs`` helper that pinned the value to
+``'constant'``. SPEC v1.5 implements HV_5_7 against a dedicated §3 M5.5
+validation case, so the workaround is removed — tests now run against
+the canonical fixture directly.
 """
 
 import pytest
 
 from physics import orchestrator
 from physics.orchestrator import run_full_chain
-
-
-def _chain_inputs(canonical: dict) -> dict:
-    """Canonical inputs with ``cn2_model`` pinned to the one mode the
-    M5 module actually implements today (see module docstring "Known
-    contract gap")."""
-    return {**canonical, "cn2_model": "constant"}
 
 
 # --- Test 1: canonical-inputs smoke + output-contract check ------------------
@@ -80,7 +68,7 @@ def test_orchestrator_canonical_inputs_runs_without_raising(canonical_inputs):
     If any per-module input contract drifts from what the orchestrator
     feeds it, this test fails before the physics-level tests even run.
     """
-    result = run_full_chain(_chain_inputs(canonical_inputs))
+    result = run_full_chain(canonical_inputs)
     missing = [k for k in _REQUIRED_KEYS_PER_MODULE if k not in result]
     assert not missing, f"Orchestrator output missing module keys: {missing}"
     missing = [k for k in _ORCHESTRATOR_KEYS if k not in result]
@@ -99,7 +87,7 @@ def test_orchestrator_m67_loop_converges_on_canonical_inputs(canonical_inputs):
     flag and quietly understate or overstate w_total in every live
     calculation on the canonical operating point.
     """
-    result = run_full_chain(_chain_inputs(canonical_inputs))
+    result = run_full_chain(canonical_inputs)
     assert result["m67_converged"] is True, (
         "M6↔M7 loop failed to converge on the canonical SPEC §5.1 inputs "
         f"(iterations={result['m67_iteration_count']}). A routine engagement "
@@ -130,7 +118,7 @@ def test_orchestrator_flags_non_convergence_instead_of_raising(canonical_inputs)
         m5_turbulence,
     )
 
-    u = _chain_inputs(canonical_inputs)
+    u = canonical_inputs
     # Re-run the upstream chain so _iterate_m6_m7 gets valid out1..out5.
     out1 = m1_laser_source.compute(
         {k: u[k] for k in ("P0", "M2", "D", "wavelength")}
@@ -186,7 +174,7 @@ def test_orchestrator_validation_error_propagates(canonical_inputs):
     If the orchestrator silently swallowed the exception, Panel A would
     accept garbage and the user would see a nonsense result downstream.
     """
-    bad_inputs = {**_chain_inputs(canonical_inputs), "P0": -1000.0}
+    bad_inputs = {**canonical_inputs, "P0": -1000.0}
     with pytest.raises(ValueError):
         run_full_chain(bad_inputs)
 
@@ -199,7 +187,7 @@ def test_orchestrator_by_module_namespace_present(canonical_inputs):
     M6 Strehl numbers alongside M7 spot numbers — the flat-merge strips
     the namespace, so the namespaced view is a first-class contract.
     """
-    result = run_full_chain(_chain_inputs(canonical_inputs))
+    result = run_full_chain(canonical_inputs)
     assert "by_module" in result
     by_mod = result["by_module"]
     assert isinstance(by_mod, dict)
@@ -227,7 +215,7 @@ def test_orchestrator_flags_are_deduplicated(canonical_inputs):
     which flag strings appear. It only asserts the dedup invariant, so
     it does not have to be edited every time a module adds a new flag.
     """
-    result = run_full_chain(_chain_inputs(canonical_inputs))
+    result = run_full_chain(canonical_inputs)
     flags = result["assumptions_flagged"]
     assert isinstance(flags, list)
     assert len(flags) == len(set(flags)), (

@@ -9,20 +9,49 @@ Immutable SPEC formulas per CLAUDE §7.1:
   - spherical-wave r₀:  r0_sph = (0.423·k²·∫Cn²·(z/L)^(5/3) dz)^(-3/5)
   - engineering w_turb: w_turb = 2L/(k·r0_sph)
 
-Supported `cn2_model` values in this commit: 'constant'.
-Other SPEC-enumerated values ('HV_5_7', 'HV_day', 'HV_night', 'custom')
+Supported `cn2_model` values in this commit: 'constant', 'HV_5_7'.
+Remaining SPEC-enumerated values ('HV_day', 'HV_night', 'custom')
 raise NotImplementedError pending their own SPEC §3 M5 validation cases.
 
 Reference: Andrews & Phillips, *Laser Beam Propagation through Random
-Media* (2nd ed., 2005), Ch. 6 and Ch. 12.
+Media* (2nd ed., 2005), Ch. 6 and Ch. 12. Hufnagel 1974; Valley 1980
+for the HV-5/7 profile (SPEC §3 M5 v1.5).
 """
 
 import math
+
+from scipy.integrate import quad
 
 from physics.common import validate_enum, validate_range
 
 
 _CN2_MODELS = ["constant", "HV_5_7", "HV_day", "HV_night", "custom"]
+
+
+def _hv_5_7_cn2_at_altitude(h: float, v_HV: float, Cn2_ground: float) -> float:
+    """Hufnagel-Valley 5/7 Cn² profile per SPEC §3 M5.
+
+    Cn²(h) = 0.00594·(v_HV/27)²·(1e-5·h)^10·exp(-h/1000)
+             + 2.7e-16·exp(-h/1500)
+             + Cn2_ground·exp(-h/100)
+
+    Inputs:
+      h         — altitude above ground (m), h ≥ 0
+      v_HV      — upper-atmosphere wind (m/s); the SPEC default is 21 m/s
+      Cn2_ground — ground-level Cn² (m^-2/3)
+
+    Reference: Andrews & Phillips §12; Hufnagel 1974; Valley 1980.
+
+    Domain: the profile is defined for h ≥ 0; this helper clamps negative h
+    to 0 defensively (can occur at a numerical integration node if H_e is
+    reported slightly below zero).
+    """
+    if h < 0.0:
+        h = 0.0
+    high_alt = 0.00594 * (v_HV / 27.0) ** 2 * (1.0e-5 * h) ** 10 * math.exp(-h / 1000.0)
+    boundary = 2.7e-16 * math.exp(-h / 1500.0)
+    ground = Cn2_ground * math.exp(-h / 100.0)
+    return high_alt + boundary + ground
 
 
 def compute(inputs: dict) -> dict:
@@ -52,6 +81,14 @@ def compute(inputs: dict) -> dict:
 
     For cn2_model='constant':
         ∫ = Cn² · L · (3/8)   [closed form, no numerical integration]
+
+    For cn2_model='HV_5_7' (SPEC §3 M5.5):
+        h(z) = H_e + (H_t − H_e) · z/L   [linear altitude along slant]
+        Cn²(h) = 0.00594·(v_HV/27)²·(1e-5·h)^10·exp(-h/1000)
+                 + 2.7e-16·exp(-h/1500)
+                 + Cn2_ground·exp(-h/100)
+        ∫ evaluated by scipy.integrate.quad (adaptive); degenerates to the
+        closed form when H_e = H_t since the profile is then h-independent.
     """
     _validate_inputs(inputs)
 
@@ -64,6 +101,22 @@ def compute(inputs: dict) -> dict:
     if cn2_model == "constant":
         Cn2 = inputs["Cn2_value"]
         Cn2_integrated = Cn2 * L * (3.0 / 8.0)
+    elif cn2_model == "HV_5_7":
+        # Linear altitude along the slant path: h(z) = H_e + (H_t − H_e)·z/L.
+        # Integrand: Cn²(h(z)) · (z/L)^(5/3). Integrated with scipy.quad —
+        # adaptive; (z/L)^(5/3) vanishes at z=0 (no singularity), HV profile
+        # is smooth for h ≥ 0, so default tolerance is comfortably inside
+        # the SPEC §3 M5.5 2% tolerance.
+        H_e = inputs["H_e"]
+        H_t = inputs["H_t"]
+        v_HV = inputs["v_HV"]
+        Cn2_ground = inputs["Cn2_ground"]
+
+        def integrand(z: float) -> float:
+            h = H_e + (H_t - H_e) * (z / L)
+            return _hv_5_7_cn2_at_altitude(h, v_HV, Cn2_ground) * (z / L) ** (5.0 / 3.0)
+
+        Cn2_integrated, _abserr = quad(integrand, 0.0, L)
     else:
         raise NotImplementedError(
             f"cn2_model={cn2_model!r} is enumerated in SPEC §3 M5 but has no "
@@ -80,6 +133,12 @@ def compute(inputs: dict) -> dict:
         "engineering form w_turb = 2L/(k·r₀) used (conservative; Andrews & "
         "Phillips §6.5, CLAUDE §7.1)",
     ]
+    if cn2_model == "HV_5_7":
+        assumptions_flagged.append(
+            "HV-5/7 Cn² profile assumed (Hufnagel 1974 / Valley 1980; "
+            "Andrews & Phillips §12) — valid for typical mid-latitude daytime "
+            "conditions; outside that regime re-check Cn2_ground / v_HV"
+        )
 
     return {
         "Cn2_integrated": Cn2_integrated,

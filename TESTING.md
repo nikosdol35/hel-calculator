@@ -21,7 +21,7 @@ The suite is the safety net that makes the tool trustworthy over time — not at
 
 ## 2. What the Suite Tests
 
-29 tests total, organized into four kinds:
+30 tests total, organized into four kinds:
 
 **Closed-form tests (exact arithmetic)** — verify that a module's code reproduces a formula with a hand-derivable answer. Tolerance: 0.01–0.1%. Example: M1.1 (θ_diff from given P, M², D, λ).
 
@@ -37,7 +37,7 @@ Tolerance assignments are **per-test** and are pinned in SPEC.md §3 and in the 
 
 ## 3. Test Inventory Summary
 
-Full inventory lives in SPEC.md §3 M11 (the 29-row table). Summary here for reference:
+Full inventory lives in SPEC.md §3 M11 (the 30-row table). Summary here for reference:
 
 | Module | Tests | Coverage |
 |---|---|---|
@@ -45,14 +45,14 @@ Full inventory lives in SPEC.md §3 M11 (the 29-row table). Summary here for ref
 | M2 — Beam director | 1 | transmission arithmetic |
 | M3 — Geometry | 1 | slant-range geometry |
 | M4 — Atmosphere | 3 | aerosol clear, aerosol hazy, wavelength interpolation |
-| M5 — Turbulence | 4 | r₀ uniform Cn², w_turb at 5 km, sph/plane ratio (structural), near-field r₀ |
+| M5 — Turbulence | 5 | r₀ uniform Cn², w_turb at 5 km, sph/plane ratio (structural), near-field r₀, HV_5_7 ground-level |
 | M6 — Blooming | 3 | dimensional, moderate blooming canonical, low-power limit |
 | M7 — Spot & PIB | 4 | pure diffraction, +turbulence, C-UAS near-field, convention consistency (structural) |
 | M8 — Burn-through | 4 | aluminum standard, CFRP thin, PC NIR transparency, numerical stability |
 | M9 — NOHD | 4 | retinal baseline, eye-safer band, √2 ratio (structural), chronic viewing |
 | M10 — Power/thermal | 3 | steady-state, transient 50 kW, insufficient cooling |
 
-**Total: 29 tests.**
+**Total: 30 tests.**
 
 Two kinds of tests in the table deserve special attention:
 
@@ -91,7 +91,7 @@ tests/
 ├── test_m2_beam_director.py             ← 1 test: test_m2_transmission
 ├── test_m3_geometry.py                  ← 1 test: test_m3_geometry
 ├── test_m4_atmosphere.py                ← 3 tests
-├── test_m5_turbulence.py                ← 4 tests
+├── test_m5_turbulence.py                ← 5 tests
 ├── test_m6_blooming.py                  ← 3 tests
 ├── test_m7_spot_pib.py                  ← 4 tests
 ├── test_m8_burnthrough.py               ← 4 tests
@@ -308,7 +308,7 @@ Exactly the pattern that gave us M5.3, M7.3, and M7.4. When a bug is found in an
 3. Verify the test passes.
 4. Add the test to SPEC.md §3 with a clear description of what regression it guards against.
 
-This is the discipline that keeps the safety net growing. The test inventory is not fixed at 29 — every real bug found should add a test.
+This is the discipline that keeps the safety net growing. The test inventory is not fixed at 30 — every real bug found should add a test.
 
 ---
 
@@ -327,7 +327,7 @@ These are deliberately out of scope for v1; do not add them unless SPEC is updat
 ## 12. Summary
 
 **Rules of thumb:**
-- 29 tests, SPEC-pinned, no exceptions
+- 30 tests, SPEC-pinned, no exceptions
 - Tolerance matches physical uncertainty, not wishful thinking
 - Structural tests prevent regressions (keep them, don't weaken them)
 - `pytest.approx` always; raw `==` on floats never

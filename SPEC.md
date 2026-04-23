@@ -1,6 +1,6 @@
 # SPEC.md — HEL Engineering Calculator
 
-**Version:** 1.4 (Phase 2 UI slice 2a: orchestrator relocation, no physics changes)
+**Version:** 1.5 (Phase 2 UI slice 2a follow-up: HV_5_7 Cn² model implemented; test count 29→30)
 **Supersedes:** `HEL_Calculator_Project_Plan_v0p8.docx` §3–§6 (which remains the plan-of-record; this SPEC is the implementation contract derived from it)
 **Status:** Implementation contract. Any requested feature not described here requires a SPEC update before implementation.
 
@@ -10,6 +10,7 @@
 - v1.2 — four UI enhancements added (no physics or module changes): (a) §5.1 introduction now specifies default panel expansion state and iconography conventions; (b) §5.2 Panel 2 verdict now includes a numeric margin and a traffic-light color in addition to the binary ENGAGEABLE/NOT ENGAGEABLE label; (c) §5.2 Plots A, B, C subsections now specify hover-tooltip content and cross-plot hover synchronization; (d) §5.3 adds URL-encoded parameter sharing as a v1 feature (was previously deferred to v1.2 as JSON only). All other content unchanged from v1.1.
 - v1.3 (2026-04-23) — §3 M8 `test_m8_aluminum_standard` and `test_m8_cfrp_thin` input values corrected. Inputs in v1.2 were low by ~100× relative to the stated `tau_BT` targets (e.g. `I_aim=5e4 W/m²` on 2 mm Al with `A_λ=0.5` yields ~210 s to melt, not the stated 4–8 s; at T_melt the environmental losses actually exceed the 25 kW/m² absorbed flux so the surface would equilibrate below T_melt). Corrected inputs (`I_aim=2e6 W/m²` for Al, `I_aim=5e5 W/m²` for CFRP) are HEL-engagement realistic (= 200 W/cm² and 50 W/cm²) and reproduce the original SPEC tau_BT targets to within the stated 25% / < 2 s tolerances. No physics, PDE, or failure-criterion text changed — values only. Caught during M8 implementation per CLAUDE §4.3 procedure.
 - v1.4 (2026-04-23) — **structural-only: orchestrator.py relocated from `ui/` to `physics/`** to enable direct unit-test coverage of the M6↔M7 fixed-point loop under the ARCHITECTURE §2 import rules. The chain coordinator has no Streamlit imports and no UI side effects, so it belongs in Layer 1. Caching (`@st.cache_data`) moves to `ui/app.py`, wrapping the orchestrator call at the UI boundary — the standard Streamlit pattern. §6 file-layout tree updated (orchestrator.py under `physics/`, dropped from `ui/`) and the import-rules bullet simplified (`ui/` imports from `physics/` only, no parenthetical about `orchestrator.py`). No physics, no equations, no validation cases touched.
+- v1.5 (2026-04-23) — **HV_5_7 Cn² model implemented.** SPEC v1.1–v1.4 enumerated `'HV_5_7'` as a valid `cn2_model` value (and §5.1 Panel D set it as the UI default), but `physics/m5_turbulence.py` shipped only the `'constant'` branch — the HV_5_7 branch raised `NotImplementedError`. Slice 2a of the UI layer surfaced this as a live contract gap (`tests/test_orchestrator.py` had to override `canonical_inputs['cn2_model']` to `'constant'` to exercise the chain). Resolved here per CLAUDE §4.3 by (a) adding a new §3 M5 validation case `test_m5_hv_5_7_ground_level` pinning the expected r₀_sph and w_turb for a ground-level slant path with the HV_5_7 profile at H_e=H_t=0, where the profile reduces analytically to a uniform Cn² = `Cn2_ground + 2.7e-16`; (b) implementing the Hufnagel-Valley 5/7 integral in `physics/m5_turbulence.py` via `scipy.integrate.quad` along the linear altitude path h(z) = H_e + (H_t−H_e)·z/L (Andrews & Phillips §12; Hufnagel 1974; Valley 1980); and (c) adding the new test case to `tests/test_m5_turbulence.py`. M5 test count 4→5; total test count 29→30. §3 M11 inventory table updated accordingly. No immutable CLAUDE §7.1 formula touched; this closes the `'HV_5_7'` enum entry against an implementation rather than a `NotImplementedError`.
 
 ---
 
@@ -389,6 +390,13 @@ so `r0_sph = (0.423 · k² · Cn² · L · 3/8)^(-3/5)`, which is exactly `1.86�
 - Same Cn² and wavelength but R_slant=1500
 - Expected: r0_sph ≈ 0.0711 m (7.11 cm); w_turb ≈ 0.00719 m (0.72 cm)
 - Tolerance: 2%
+
+`test_m5_hv_5_7_ground_level`:
+- Inputs: cn2_model='HV_5_7', Cn2_ground=1.7e-14, v_HV=21, wavelength=1.07e-6, R_slant=5000, H_e=0, H_t=0
+- Rationale: with both emplacement and target at ground level the altitude path h(z) ≡ 0, so the HV-5/7 profile reduces to `Cn²(0) = 2.7e-16 + Cn2_ground = 1.727e-14` — a uniform-Cn² case solvable in closed form against which the HV_5_7 numerical-integration branch is verified.
+- Expected: r0_sph ≈ 0.0249 m (2.49 cm); w_turb ≈ 0.0685 m (6.85 cm)
+- Tolerance: 2%
+- Rationale for a structural companion check: the test file additionally asserts that HV_5_7 at H_e=H_t=0 matches the `'constant'` model with `Cn2_value = Cn2_ground + 2.7e-16` to within 0.1%, guarding against regression to a plane-wave integral or an incorrect profile-summation order.
 
 ---
 
@@ -911,6 +919,7 @@ This signature is what `ui/app.py` expects when the "Run Validation Suite" butto
 | M5.2 | M5 | w_turb at 5 km | 2% |
 | M5.3 | M5 | Spherical/plane ratio | 0.1% (structural) |
 | M5.4 | M5 | r₀ at 1.5 km (near-field) | 2% |
+| M5.5 | M5 | HV_5_7 ground-level slant | 2% |
 | M6.1 | M6 | Dimensional check | structural |
 | M6.2 | M6 | Moderate blooming (10 kW canonical) | ±30% |
 | M6.3 | M6 | Low-power limit | structural |
@@ -930,7 +939,7 @@ This signature is what `ui/app.py` expects when the "Run Validation Suite" butto
 | M10.2 | M10 | Transient 50 kW case | 1% |
 | M10.3 | M10 | Insufficient cooling | 1% |
 
-Total: 29 tests.
+Total: 30 tests.
 
 **Validation report format** (from M11 UI button):
 
@@ -944,7 +953,7 @@ Total: 29 tests.
 ║ M1.1     │ Diffraction divergence│ 13.55µr  │ 13.55µr│   ✓     ║
 ║ ...      │ ...                  │ ...      │ ...    │   ...   ║
 ╚════════════════════════════════════════════════════════════════╝
-Summary: 29/29 PASS (0.8 s total)
+Summary: 30/30 PASS (0.8 s total)
 Reference citations attached per test.
 ```
 
@@ -1199,7 +1208,7 @@ pandas==2.2.2
 
 Python version: 3.11 or 3.12 (specified in Streamlit Cloud config, not requirements.txt).
 
-Any update to these versions requires re-running the validation suite and verifying all 29 tests still pass within tolerance before the commit is merged to main.
+Any update to these versions requires re-running the validation suite and verifying all 30 tests still pass within tolerance before the commit is merged to main.
 
 ---
 
