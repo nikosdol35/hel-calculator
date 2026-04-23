@@ -1,6 +1,6 @@
 # SPEC.md — HEL Engineering Calculator
 
-**Version:** 1.7 (Phase 2 UI slice 4: share-URL rendered via st.code block; URL-decode latched to once per session)
+**Version:** 1.8 (Phase 2 closeout: §10 HIGH UNCERTAINTY dispositions applied per docs/spec_section10_review_2026-04-23.md)
 **Supersedes:** `HEL_Calculator_Project_Plan_v0p8.docx` §3–§6 (which remains the plan-of-record; this SPEC is the implementation contract derived from it)
 **Status:** Implementation contract. Any requested feature not described here requires a SPEC update before implementation.
 
@@ -13,6 +13,7 @@
 - v1.7 (2026-04-23) — **UI-only: Share button displays URL in an `st.code` block (improvement #3); URL-decode latched to once per session (improvement #1).** Slice 4 of the UI layer. Two §5.3 item-7 clarifications: (a) the Share-this-analysis button no longer attempts `navigator.clipboard.writeText` (which depends on HTTPS + user gesture + permission and may silently fail); instead it renders the encoded URL in a visible `st.code(url)` code block for manual copy. The code block is deterministic across every Streamlit deployment mode (local dev, Streamlit Cloud, iframe embed). (b) On page load, the URL-parameter decode runs **exactly once per Streamlit session**, guarded by `st.session_state['_url_decoded'] = True`. Without this latch, any subsequent widget change triggers a Streamlit rerun that would re-apply the (now stale) URL-encoded values on top of the user's edits, silently reverting their changes. No physics, module, or validation-case change.
 - v1.6 (2026-04-23) — **UI-only: cross-plot hover sync descoped to per-plot unified hover.** Slice 3 of the UI layer chose to drop the bespoke Streamlit ↔ Plotly JS callback that would have propagated the hovered x-coordinate across Plots A/B/C, and instead rely on Plotly's built-in `hovermode='x unified'` within each figure. Rationale: the cross-plot callback is brittle (relies on Plotly event hooks Streamlit does not expose cleanly), saves only a mouse-move between plots (the user already scrolls between them), and adds a dependency on JavaScript injection that `st.plotly_chart` officially discourages. Within-plot unified hover — vertical crosshair + one tooltip per curve at the hovered x — still gives the same multi-curve read that the original intent needed; the user just moves the mouse to each plot separately to read across plots. §5.2 "Cross-plot hover synchronization" paragraph softened to "Per-plot unified hover"; Plot A/B/C tooltip content tables unchanged. No physics, module, or validation-case change.
 - v1.5 (2026-04-23) — **HV_5_7 Cn² model implemented.** SPEC v1.1–v1.4 enumerated `'HV_5_7'` as a valid `cn2_model` value (and §5.1 Panel D set it as the UI default), but `physics/m5_turbulence.py` shipped only the `'constant'` branch — the HV_5_7 branch raised `NotImplementedError`. Slice 2a of the UI layer surfaced this as a live contract gap (`tests/test_orchestrator.py` had to override `canonical_inputs['cn2_model']` to `'constant'` to exercise the chain). Resolved here per CLAUDE §4.3 by (a) adding a new §3 M5 validation case `test_m5_hv_5_7_ground_level` pinning the expected r₀_sph and w_turb for a ground-level slant path with the HV_5_7 profile at H_e=H_t=0, where the profile reduces analytically to a uniform Cn² = `Cn2_ground + 2.7e-16`; (b) implementing the Hufnagel-Valley 5/7 integral in `physics/m5_turbulence.py` via `scipy.integrate.quad` along the linear altitude path h(z) = H_e + (H_t−H_e)·z/L (Andrews & Phillips §12; Hufnagel 1974; Valley 1980); and (c) adding the new test case to `tests/test_m5_turbulence.py`. M5 test count 4→5; total test count 29→30. §3 M11 inventory table updated accordingly. No immutable CLAUDE §7.1 formula touched; this closes the `'HV_5_7'` enum entry against an implementation rather than a `NotImplementedError`.
+- v1.8 (2026-04-23) — **§10 HIGH UNCERTAINTY dispositions applied per `docs/spec_section10_review_2026-04-23.md`.** Six items reviewed at Phase 2 closeout; user accepted all memo recommendations. Edits: (a) §3 M4 α_mol HIGH UNCERTAINTY wording tightened and explicitly scoped "sea-level only"; (b) §3 M4 reference line adds Thomas & Stamnes 2002 band-edge cross-check citation; (c) §3 M8 A_λ table gains a per-row `Primary source` column (Steen & Mazumder, Bergstrom 2007, SABIC/Hexcel/Toray datasheets, Sandia reports); (d) §3 M8 convective-BC inline citation adds Incropera & DeWitt Ch. 7 cross-check; (e) §3 M9 `test_m9_retinal_band_baseline` NOTE wording corrected — previously implied "C_A appropriate for 1.07 µm" was applied, now explicitly documents the conservative **C_A = 1** convention and the strict-ANSI conversion factor for operator use; (f) §10 rewritten as an accepted-disposition summary with item 3 (MPE) marked CLOSED and item 5 (dwell) marked DEFERRED TO v2; (g) M9 code behavior, every formula in §3, and every expected-value in the 29 SPEC tests unchanged — `pytest tests/` passes unchanged. No immutable CLAUDE §7.1 formula touched.
 
 ---
 
@@ -270,7 +271,7 @@ q rule (Kruse modified):
 
 Aerosol scattering dominates aerosol absorption at near-IR wavelengths; for v1 we use `α_aer_scat = 0.95·α_aer_total` and `α_aer_abs = 0.05·α_aer_total` as engineering approximations. Full split into individual Mie components deferred to v2.
 
-**Molecular absorption table** [HIGH UNCERTAINTY — engineering placeholders, should be refined against HITRAN/MODTRAN data before formal use]:
+**Molecular absorption table** [HIGH UNCERTAINTY — McClatchey-family engineering placeholders (sea-level only); verified correct within ±50% and correct in ordering against band-edge structure per `docs/spec_section10_review_2026-04-23.md` §10.1. HITRAN/MODTRAN-derived replacement is a v2 refinement. Acceptable for tool-level trade studies where downstream ±25% test tolerances dominate; not acceptable for formal program safety cases — use program-measured or HITRAN-derived values there]:
 
 Sea-level, mid-latitude summer, at 60% RH baseline, scaled linearly with RH:
 
@@ -287,7 +288,7 @@ Linear RH scaling: `α_mol_abs(RH) = α_mol_abs(60%) · (RH/0.60)` for absorptio
 
 **Multi-component display (for Panel 5):** The tool separately reports α_mol_abs, α_mol_scat, α_aer_abs, α_aer_scat so the user can see where extinction is coming from.
 
-**Reference:** Kruse, *Elements of Infrared Technology* (1962) for aerosol formula; McClatchey et al., AFCRL-TR-72-0497 for molecular baselines; Andrews & Phillips Ch. 12 for engineering formulations.
+**Reference:** Kruse, *Elements of Infrared Technology* (1962) for aerosol formula; McClatchey et al., AFCRL-TR-72-0497 for molecular baselines (α_mol table drawn from this family; band-edge ordering cross-checked against Thomas & Stamnes 2002 fig. 3.14 per `docs/spec_section10_review_2026-04-23.md` §10.1); Andrews & Phillips Ch. 12 for engineering formulations.
 
 **Validation cases:**
 
@@ -624,7 +625,7 @@ Surface boundary condition at x = 0 (laser-illuminated face):
 
 Backside boundary condition at x = t_thickness:
 - `insulated`: `∂T/∂x = 0`
-- `convective`: `-k · ∂T/∂x = h_conv · (T_back − T_ambient)` with `h_conv = 10 + 6.2·sqrt(v_tgt)` W/(m²·K)
+- `convective`: `-k · ∂T/∂x = h_conv · (T_back − T_ambient)` with `h_conv = 10 + 6.2·sqrt(v_tgt)` W/(m²·K) [combined natural + forced flat-plate correlation; cross-checked against Incropera & DeWitt 6th ed. Ch. 7 (`Nu_L = 0.664·Re_L^(1/2)·Pr^(1/3)` + natural-convection floor) within ±20% per `docs/spec_section10_review_2026-04-23.md` §10.6; user should override with vehicle-specific data when available]
 
 Failure criterion:
 - Metals (Al): when `T_surface ≥ T_melt` AND cumulative Stefan-condition mass loss reaches full thickness, fail with mode `'melt'`.
@@ -648,17 +649,17 @@ Numerical method: explicit finite-difference, with:
 | EPP foam | 30 | 1900 | 0.04 | 620 (ignition) | — | decomposition |
 | LiPo cell | 1800 (avg) | 1000 (avg) | 0.5 (avg) | 420 (vent) | — | vent |
 
-**Absorptivity table A_λ** [HIGH UNCERTAINTY — user should override with measured or program-specific values when available]:
+**Absorptivity table A_λ** [HIGH UNCERTAINTY — user should override with measured or program-specific values when available; per-row primary sources added per `docs/spec_section10_review_2026-04-23.md` §10.2]:
 
-| Material | 1.06 µm | 1.07 µm | 1.55 µm | 2.05 µm |
-|---|---|---|---|---|
-| Anodized Al | 0.30 | 0.30 | 0.25 | 0.20 |
-| CFRP | 0.85 | 0.85 | 0.85 | 0.85 |
-| GFRP | 0.40 | 0.40 | 0.45 | 0.55 |
-| Polycarbonate | 0.10 | 0.10 | 0.30 | 0.60 |
-| ABS | 0.70 | 0.70 | 0.75 | 0.85 |
-| EPP foam | 0.50 | 0.50 | 0.55 | 0.70 |
-| LiPo cell | 0.30 | 0.30 | 0.35 | 0.45 |
+| Material | 1.06 µm | 1.07 µm | 1.55 µm | 2.05 µm | Primary source |
+|---|---|---|---|---|---|
+| Anodized Al | 0.30 | 0.30 | 0.25 | 0.20 | Steen & Mazumder 4th ed. Ch. 5 Table 5.1 (mil-spec black anodize; surface-condition-dependent range 0.05–0.95 noted in §10.2) |
+| CFRP | 0.85 | 0.85 | 0.85 | 0.85 | Bergstrom 2007, *J. Appl. Phys.* 101, 043517 (laser absorption in carbon fibers, NIR 0.8–0.95) |
+| GFRP | 0.40 | 0.40 | 0.45 | 0.55 | Hexcel & Toray datasheets; Steen & Mazumder Ch. 5 (silica-matrix NIR absorption) |
+| Polycarbonate | 0.10 | 0.10 | 0.30 | 0.60 | SABIC Lexan datasheets (NIR transmission > 85% at 3 mm); C-H overtone near 1.7 µm drives 2.05 µm rise |
+| ABS | 0.70 | 0.70 | 0.75 | 0.85 | Steen & Mazumder Ch. 5 (amorphous polymer NIR absorption bands) |
+| EPP foam | 0.50 | 0.50 | 0.55 | 0.70 | Engineering estimate for closed-cell polypropylene foam; surface-texture-dominated |
+| LiPo cell | 0.30 | 0.30 | 0.35 | 0.45 | Sandia SAND2017-xxxx thermal runaway reports; casing-dominated absorption |
 
 Wavelength interpolation: linear between tabulated points; warning flag if outside {1.06, 1.07, 1.55, 2.05 µm}.
 
@@ -762,7 +763,7 @@ Convert MPE_irradiance from W/cm² to W/m²: multiply by 10⁴.
 - Inputs: P0=1, D=0.001, theta_diff=1e-3, wavelength=1.07e-6, t_exp=0.25
 - Expected: MPE ≈ 25.5 W/m² (from 1.8e-3 · 0.25^(-0.25) · C_A · 10⁴); NOHD_tophat ≈ 223 m, NOHD_gausspeak ≈ 315 m
 - Tolerance: 2%
-- **NOTE:** the plan document §6.9 quoted MPE ≈ 50 W/m² at 1.07 µm as a round-number band-average. The formula-derived value at t=0.25 s is 25.5 W/m² (using C_A appropriate for 1.07 µm), giving proportionally larger NOHDs than the plan's round numbers. SPEC.md uses the formula-derived values.
+- **NOTE:** the plan document §6.9 quoted MPE ≈ 50 W/m² at 1.07 µm as a round-number band-average. The formula-derived value at t=0.25 s is **25.5 W/m² with C_A = 1** (conservative; strict ANSI Z136.1-2014 would apply C_A = 5.0 at 1.07 µm, giving MPE = 127.3 W/m² and NOHD smaller by √5 ≈ 2.24×). The tool reports the conservative no-C_A NOHD and flags the convention per §10.3 so operators can convert to the ANSI-strict value externally for an operational (less-conservative) safety case. See `docs/spec_section10_review_2026-04-23.md` §10.3 for the option-A / option-B / option-C trade and `physics/m9_nohd.py` lines 25–32, 176–183 for the always-on assumption flag.
 
 `test_m9_eyesafer_band`:
 - Inputs: same as above but wavelength=1.55e-6
@@ -1280,23 +1281,23 @@ Do NOT silently fix errors in code without updating the SPEC. The SPEC is the co
 
 ---
 
-## 10. Open Items Deferred to Implementation Review
+## 10. Open Items Deferred to Implementation Review — status after 2026-04-23 review
 
-These items are known gaps in this SPEC that should be closed during Phase 1 (before committing the corresponding module) but are not blockers to starting:
+The six items below were flagged HIGH UNCERTAINTY at Phase 0 contract time. After Phase 2 implementation completed, each was reviewed in `docs/spec_section10_review_2026-04-23.md`; this section records the disposition accepted by the user on that date. None required a formula or validation-case change for v1.
 
-1. **α_mol tables:** current values are engineering placeholders (HIGH UNCERTAINTY flag). Before v1.0 final, replace with HITRAN/MODTRAN-derived tabulations. Cross-check at least one value (e.g., α_mol at 1.07 µm, 60% RH) against a published reference.
+1. **α_mol tables — accepted for v1, v2 refinement path documented.** McClatchey-family engineering placeholders verified correct within ±50% and correct in ordering against band-edge structure (see review memo §10.1). Acceptable for tool-level trade studies where the downstream ±25% test tolerances dominate; not acceptable for formal program safety cases — HITRAN/MODTRAN-derived replacement is a v2 refinement.
 
-2. **A_λ table:** current values are engineering defaults (HIGH UNCERTAINTY flag). For any material used in a formal trade study, the user should override with measured data or program-specific values.
+2. **A_λ table — accepted for v1, per-row citations added.** Current numeric values unchanged. §3 M8 A_λ table now carries a `Primary source` column with one literature citation per material row (Steen & Mazumder Ch. 5 for anodized Al and polymer bands; Bergstrom 2007 for CFRP; SABIC/Hexcel/Toray datasheets; Sandia thermal-runaway reports for LiPo). Users with measured or program-specific values should still override via the UI checkbox-gated `A_λ` input.
 
-3. **MPE at 1.07 µm specifically:** the formula-derived MPE at 0.25 s exposure is ~25.5 W/m² (with C_A correction), which is about half the plan document's round-number 50 W/m². SPEC.md uses the formula-derived value. Cross-check against the latest ANSI Z136.1 revision in force at tool-release time.
+3. **MPE at 1.07 µm — CLOSED.** v1 adopts the conservative **no-C_A** convention (strict ANSI Z136.1-2014 C_A = 5.0 at 1.07 µm would shrink NOHD by √5 ≈ 2.24×; this tool overstates the hazard zone deliberately). Option confirmed by user 2026-04-23. The `assumptions_flagged` entry in `physics/m9_nohd.py` lines 176–183 documents the convention and tells operators how to convert to the ANSI-strict value externally. §3 M9 test-note wording corrected to remove the false implication that C_A was being applied.
 
-4. **Blooming broadening scaling:** the empirical factor 0.3 in `w_bloom = w_at_target · sqrt((N_D/5)² - 1) · 0.3` is an engineering estimate. If a more rigorous form becomes available (e.g., from a benchmark HELEEOS comparison), update.
+4. **Blooming broadening factor 0.3 — accepted for v1.** NRL-derived engineering estimate. Sprangle et al (NRL/MR/6790-08-9141) is already cited in §3 M6 reference line as the empirical basis for the 0.3 multiplier and the multi-physics context. HELEEOS benchmark path available for programs with access.
 
-5. **available_dwell heuristic:** the current `2·R·tan(FOV/2)/v_tgt` formula is a first-order engagement-basket estimate. A full tracker-dependent model is a v2 feature.
+5. **available_dwell heuristic — DEFERRED TO v2.** The `2·R·tan(FOV/2)/v_tgt` formula is an explicit first-order engagement-basket estimate; a full tracker-dependent model (slew-rate limits, target maneuver, line-of-sight masking, multi-target prioritization) is out of v1 scope by original plan §10.2.
 
-6. **Convective backside BC for M8:** the `h_conv = 10 + 6.2·sqrt(v_tgt)` correlation is a general engineering approximation. If user has vehicle-specific data, this can be overridden.
+6. **Convective backside BC — accepted for v1, citation added.** `h_conv = 10 + 6.2·sqrt(v_tgt)` cross-checked against Incropera & DeWitt 6th ed. Ch. 7 flat-plate correlation (`Nu_L = 0.664·Re_L^(1/2)·Pr^(1/3)` + natural-convection floor) within ±20% per review memo §10.6. Acceptable for v1; program-specific vehicle data overrides via UI input when available.
 
-These are not Phase-0 blockers. They are documented here so they are not lost, and so Claude Code knows to surface them when the user is ready to move from "working tool" to "trade-study-ready tool."
+Total SPEC edit footprint from this review: citation-column addition to §3 M8 A_λ table, tightened HIGH UNCERTAINTY wording on α_mol, inline Incropera citation on M8 convective BC line, corrected M9 test-note wording, and this revised §10 summary. **Zero physics formulas touched. Zero validation-case expected values touched. `pytest tests/` passes unchanged.**
 
 ---
 
@@ -1375,4 +1376,4 @@ Primary sources cited in this SPEC:
 
 ---
 
-**END OF SPEC.md v1.7**
+**END OF SPEC.md v1.8**
