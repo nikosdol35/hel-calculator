@@ -1,9 +1,7 @@
 """Shared validation helpers used by every physics module.
 
 Pure functions, no state, no side effects. Signatures match ARCHITECTURE.md
-§4.3 contract. Only helpers needed for implemented modules are present;
-the remaining ARCH §4.3 helper (validate_enum) lands alongside its first
-consuming module (M5)."""
+§4.3 contract. Full set is present as of the M5 commit."""
 
 import math
 
@@ -20,6 +18,12 @@ def validate_range(value: float, name: str, lo: float, hi: float) -> None:
     """Raise ValueError if value is outside the inclusive [lo, hi] range."""
     if not (lo <= value <= hi):
         raise ValueError(f"{name} must be in [{lo}, {hi}], got {value}")
+
+
+def validate_enum(value: str, name: str, allowed: list[str]) -> None:
+    """Raise ValueError if value is not in the allowed list."""
+    if value not in allowed:
+        raise ValueError(f"{name} must be one of {allowed}, got {value!r}")
 
 
 def wavelength_in_validated_set(wavelength_m: float, tol_nm: float = 5.0) -> bool:
