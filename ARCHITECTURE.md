@@ -1,6 +1,6 @@
 # ARCHITECTURE.md — HEL Engineering Calculator
 
-**Version:** 1.3 (Phase 2 UI slice 2a: orchestrator relocation)
+**Version:** 1.4 (Phase 2 UI slice 3: cross-plot hover-sync callback descoped)
 **Complements:** `SPEC.md` §6 (file layout) and project plan v0.8 §2.3 (three-layer separation)
 **Scope:** Concrete implementation map — file paths, function signatures, import rules, data flow.
 
@@ -8,6 +8,7 @@
 - v1.0 — initial draft
 - v1.1 — post-audit fixes: (a) M9 moved earlier in orchestrator pseudocode to reflect its true independence from the propagation chain; (b) timing estimates in §5.2 explicitly flagged as pre-implementation, to be replaced with Phase 1 benchmark; (c) §6 extended to cover all UI files (added §6.6 orchestrator, §6.7 style, §6.8 __init__); (d) M11 row in §4.2 aligned with SPEC.md v1.1 explicit signature.
 - v1.2 — UI alignment with SPEC v1.2: cross-references added so that each of the four UI enhancements added in SPEC v1.2 has a corresponding structural anchor in this document. (a) §6.1 (app.py) now lists URL state encode/decode and the cross-plot hover-sync callback as responsibilities; (b) §6.3 (panels.py) notes default expansion state, emoji iconography, and that initial values come from URL params if present; (c) §6.4 (outputs.py) cross-references the three-tier verdict in SPEC §5.2 Panel 2; (d) §6.5 (plots.py) notes that figures use Plotly `hovermode='x unified'` per SPEC §5.2; (e) §5.1 page-load sequence note added (URL decode happens before panel rendering on first run). No file structure changes, no function-signature changes, no new files. Color constants in §6.7 already aligned (`COLOR_SUCCESS / COLOR_WARNING / COLOR_CAUTION` were defined in v1.0 and are now consumed by SPEC v1.2 verdict logic).
+- v1.4 (2026-04-23) — **cross-plot hover-sync callback removed from §6.1 and §6.5** to match SPEC v1.6. The bespoke Streamlit ↔ Plotly JS callback that would have propagated the hovered x-coordinate across Plots A/B/C is descoped; each plot now relies on Plotly's built-in `hovermode='x unified'` (which was already required by §6.5, so that line is unchanged). §6.1 step 6 (hover-sync wiring) is deleted; step count 1–6 → 1–5. The "Total expected length" for app.py drops from 80–120 to 70–110 lines. §6.5 loses the "lives in `ui/app.py`" trailing sentence about the cross-plot callback. No file changes, no signature changes, no new files. Rationale lives in SPEC v1.6.
 - v1.3 (2026-04-23) — **orchestrator relocated from `ui/` to `physics/`.** The chain coordinator is pure Python (no Streamlit imports) and the M6↔M7 fixed-point loop is physics-critical, so it belongs in Layer 1 where `tests/` can import it directly under the §2 import rules. Updates: (a) §3 repo tree moves `orchestrator.py` under `physics/` and drops it from `ui/`; (b) §5.1 step 2 and §5.3 pseudocode headers updated to the new path; (c) §6.1 (app.py) gains a responsibility to wrap `physics.orchestrator.run_full_chain` in `@st.cache_data` (the caching wrapper lives in `app.py` so `orchestrator.py` stays pure); (d) §6.6 deleted, §6.7 renumbered to §6.6, §6.8 renumbered to §6.7; (e) UI layer file count corrected from 8 to 7 (6 functional + 1 `__init__.py`). No function-signature changes, no physics behavior changes. Resolves the self-contradiction in v1.1–1.2 §6.6 which said the orchestrator was "testable without Streamlit running" while §2 forbade `tests/` from importing from `ui/`.
 
 ---
@@ -311,9 +312,8 @@ The one file Streamlit Cloud runs with `streamlit run ui/app.py`. Responsibiliti
 3. Lay out the page: left sidebar = 6 input panels, main area = plots + output panels
 4. Wire up the "Run Analysis" button and result rendering; the click handler calls `physics.orchestrator.run_full_chain` via the `@st.cache_data`-wrapped helpers defined in §5.3 — the wrappers live in `app.py` (not in `orchestrator.py`) so the orchestrator stays pure Python and directly testable from `tests/`
 5. Wire up the "Share this analysis" sidebar button (per SPEC §5.3 item 7) which encodes the current input dict to `st.query_params` and copies the resulting URL to the clipboard
-6. Wire up the cross-plot hover synchronization callback (per SPEC §5.2): when the user hovers on Plot A, B, or C, the hovered x-coordinate is propagated to the other two charts
 
-Total expected length: 80–120 lines (was 60–100 in v1.1; URL handling and hover-sync callback add ~15–20 lines).
+Total expected length: 70–110 lines (cross-plot hover-sync callback descoped in v1.4 per SPEC v1.6; per-plot unified hover is handled inside each Plotly figure in `ui/plots.py`).
 
 ### 6.2 `ui/auth.py` — login gate
 
@@ -366,7 +366,7 @@ def plot_b_time_to_burnthrough(sweep: list[dict]) -> plotly.graph_objects.Figure
 def plot_c_beam_diameter_breakdown(sweep: list[dict]) -> plotly.graph_objects.Figure: ...
 ```
 
-Each returns a Plotly `Figure` object that `ui/app.py` passes to `st.plotly_chart`. No global state; pure constructors. Per SPEC §5.2, each figure sets `hovermode='x unified'` and populates hover tooltips with the per-plot content specified there (Plot A: range/I_peak/PIB/S_TB/τ_atm; Plot B: range/tau_BT/dwell/margin; Plot C: range/curve diameter/total/curve label). The cross-plot hover synchronization callback that propagates the hovered x-coordinate across all three charts lives in `ui/app.py` (§6.1), not here, to keep `plots.py` constructors pure and stateless.
+Each returns a Plotly `Figure` object that `ui/app.py` passes to `st.plotly_chart`. No global state; pure constructors. Per SPEC §5.2, each figure sets `hovermode='x unified'` and populates hover tooltips with the per-plot content specified there (Plot A: range/I_peak/PIB/S_TB/τ_atm; Plot B: range/tau_BT/dwell/margin; Plot C: range/curve diameter/total/curve label). Cross-plot hover synchronization was considered for v1 but descoped in SPEC v1.6 / ARCH v1.4 — each plot's unified hover is entirely self-contained within its Plotly figure and no app-level callback is required.
 
 ### 6.6 `ui/style.py` — shared visual constants
 
