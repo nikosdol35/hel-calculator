@@ -611,4 +611,4 @@ Do not make silent architectural changes in code. The architecture is the contra
 
 ---
 
-**END OF ARCHITECTURE.md v1.1 (Phase 0 draft, post-audit fixes)**
+**END OF ARCHITECTURE.md v1.5**

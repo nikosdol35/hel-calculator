@@ -1375,4 +1375,4 @@ Primary sources cited in this SPEC:
 
 ---
 
-**END OF SPEC.md v1.1 (Phase 0 draft, post-audit fixes)**
+**END OF SPEC.md v1.7**
