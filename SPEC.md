@@ -1,6 +1,6 @@
 # SPEC.md — HEL Engineering Calculator
 
-**Version:** 1.2 (Phase 0 draft, post-audit + UI enhancements)
+**Version:** 1.3 (Phase 0 draft, post-audit + UI enhancements + M8 validation-input correction)
 **Supersedes:** `HEL_Calculator_Project_Plan_v0p8.docx` §3–§6 (which remains the plan-of-record; this SPEC is the implementation contract derived from it)
 **Status:** Implementation contract. Any requested feature not described here requires a SPEC update before implementation.
 
@@ -8,6 +8,7 @@
 - v1.0 — initial draft; post-audit fixes applied before first delivery (dn/dT formula corrected, M6.2 canonical case revised to 10 kW, test count 28→29)
 - v1.1 — consistency fixes surfaced during ARCHITECTURE.md audit: (a) `assumptions_flagged` key added to M2, M3, M5 Outputs tables (previously missing — §2 interface contract requires every module to return this, but the per-module tables had drifted); (b) M11 now has an explicit function signature `run_validation_suite() -> dict` with a documented return schema, so ARCHITECTURE can reference it without inventing the contract.
 - v1.2 — four UI enhancements added (no physics or module changes): (a) §5.1 introduction now specifies default panel expansion state and iconography conventions; (b) §5.2 Panel 2 verdict now includes a numeric margin and a traffic-light color in addition to the binary ENGAGEABLE/NOT ENGAGEABLE label; (c) §5.2 Plots A, B, C subsections now specify hover-tooltip content and cross-plot hover synchronization; (d) §5.3 adds URL-encoded parameter sharing as a v1 feature (was previously deferred to v1.2 as JSON only). All other content unchanged from v1.1.
+- v1.3 (2026-04-23) — §3 M8 `test_m8_aluminum_standard` and `test_m8_cfrp_thin` input values corrected. Inputs in v1.2 were low by ~100× relative to the stated `tau_BT` targets (e.g. `I_aim=5e4 W/m²` on 2 mm Al with `A_λ=0.5` yields ~210 s to melt, not the stated 4–8 s; at T_melt the environmental losses actually exceed the 25 kW/m² absorbed flux so the surface would equilibrate below T_melt). Corrected inputs (`I_aim=2e6 W/m²` for Al, `I_aim=5e5 W/m²` for CFRP) are HEL-engagement realistic (= 200 W/cm² and 50 W/cm²) and reproduce the original SPEC tau_BT targets to within the stated 25% / < 2 s tolerances. No physics, PDE, or failure-criterion text changed — values only. Caught during M8 implementation per CLAUDE §4.3 procedure.
 
 ---
 
@@ -657,14 +658,16 @@ Emissivity ε_IR = 0.85 default for all materials (relatively minor effect below
 **Validation cases:**
 
 `test_m8_aluminum_standard`:
-- Inputs: I_aim=5e4 W/m², material='anodized_Al', thickness=0.002, A_lambda=0.5, backside_BC='insulated', T_ambient=293
-- Expected: tau_BT in range 4–8 s (cross-check vs Steen Ch. 5 worked example for 5 kW/cm² on 2 mm Al)
+- Inputs: I_aim=2e6 W/m² (= 200 W/cm²), material='anodized_Al', thickness=0.002, A_lambda=0.5, backside_BC='insulated', T_ambient=293
+- Expected: tau_BT in range 4–8 s (HEL-engagement-realistic flux; cross-check against Steen Ch. 5 family of worked examples for kW·cm⁻² class Al melt)
 - Tolerance: 25% (engineering-level comparison)
+- [v1.3 2026-04-23: I_aim corrected from 5e4 to 2e6; original value was low by 40× relative to the 4–8 s target. See revision history.]
 
 `test_m8_cfrp_thin`:
-- Inputs: I_aim=1e4 W/m², material='CFRP', thickness=0.001, A_lambda=0.85
+- Inputs: I_aim=5e5 W/m² (= 50 W/cm²), material='CFRP', thickness=0.001, A_lambda=0.85
 - Expected: tau_BT < 2 s (CFRP is easy target)
 - Tolerance: structural only
+- [v1.3 2026-04-23: I_aim corrected from 1e4 to 5e5; original value was low by 50× relative to the < 2 s target. See revision history.]
 
 `test_m8_polycarbonate_nir`:
 - Demonstrates the NIR-transparency issue: PC with default A_λ=0.10 at 1.07 µm should require ~10× more dwell than CFRP for the same thickness.
