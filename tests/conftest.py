@@ -19,7 +19,7 @@ def canonical_inputs():
         # Panel C — Engagement Geometry
         "H_e": 2, "R": 1500, "H_t": 200, "v_tgt": 20, "v_perp": 3,
         # Panel D — Atmosphere
-        "V": 23, "RH": 0.60, "T_ambient": 300,
+        "V": 23, "RH": 0.60, "T_ambient": 300, "P_atm": 101325,
         "cn2_model": "HV_5_7", "Cn2_value": 1e-14,
         "Cn2_ground": 1.7e-14, "v_HV": 21,
         # Panel E — Aimpoint & Material
