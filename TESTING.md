@@ -320,7 +320,7 @@ These are deliberately out of scope for v1; do not add them unless SPEC is updat
 - **Performance benchmarks.** The ARCHITECTURE.md §5.2 timing estimates are not validated by tests. A benchmark suite could be added later.
 - **End-to-end UI tests (Selenium/Playwright).** Plot rendering and panel interactions are verified by manual user testing against the live URL. Automating this is a v2 concern.
 - **Mutation testing.** Tools like `mutmut` verify that tests actually catch bugs. Useful but not essential for v1.
-- **Cross-module integration tests beyond the structural ones.** The orchestrator chain (M1 → M2 → ... → M10 with M6↔M7 iteration) is not currently exercised by a dedicated integration test. The M11 runner effectively tests this via UI invocation, but a headless `test_orchestrator_chain.py` could be added if integration bugs appear.
+- **Sweep-across-range integration tests.** The single-point orchestrator chain (M1 → M2 → ... → M10 with M6↔M7 iteration) is exercised directly by `tests/test_orchestrator.py` (added once `physics/orchestrator.py` landed — the file was moved out of `ui/` into `physics/` in ARCHITECTURE v1.3 / SPEC v1.4 precisely to make this test possible under the §2 import rules). What is still out of scope for v1 is a range-sweep integration test that runs the chain at every point of a sweep array and asserts continuity/monotonicity properties — the per-plot sweeps (A, B, C) are validated by manual review against the live Streamlit app rather than by pytest.
 
 ---
 

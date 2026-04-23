@@ -1,6 +1,6 @@
 # ARCHITECTURE.md — HEL Engineering Calculator
 
-**Version:** 1.2 (Phase 0 draft, post-audit + UI alignment with SPEC v1.2)
+**Version:** 1.3 (Phase 2 UI slice 2a: orchestrator relocation)
 **Complements:** `SPEC.md` §6 (file layout) and project plan v0.8 §2.3 (three-layer separation)
 **Scope:** Concrete implementation map — file paths, function signatures, import rules, data flow.
 
@@ -8,6 +8,7 @@
 - v1.0 — initial draft
 - v1.1 — post-audit fixes: (a) M9 moved earlier in orchestrator pseudocode to reflect its true independence from the propagation chain; (b) timing estimates in §5.2 explicitly flagged as pre-implementation, to be replaced with Phase 1 benchmark; (c) §6 extended to cover all UI files (added §6.6 orchestrator, §6.7 style, §6.8 __init__); (d) M11 row in §4.2 aligned with SPEC.md v1.1 explicit signature.
 - v1.2 — UI alignment with SPEC v1.2: cross-references added so that each of the four UI enhancements added in SPEC v1.2 has a corresponding structural anchor in this document. (a) §6.1 (app.py) now lists URL state encode/decode and the cross-plot hover-sync callback as responsibilities; (b) §6.3 (panels.py) notes default expansion state, emoji iconography, and that initial values come from URL params if present; (c) §6.4 (outputs.py) cross-references the three-tier verdict in SPEC §5.2 Panel 2; (d) §6.5 (plots.py) notes that figures use Plotly `hovermode='x unified'` per SPEC §5.2; (e) §5.1 page-load sequence note added (URL decode happens before panel rendering on first run). No file structure changes, no function-signature changes, no new files. Color constants in §6.7 already aligned (`COLOR_SUCCESS / COLOR_WARNING / COLOR_CAUTION` were defined in v1.0 and are now consumed by SPEC v1.2 verdict logic).
+- v1.3 (2026-04-23) — **orchestrator relocated from `ui/` to `physics/`.** The chain coordinator is pure Python (no Streamlit imports) and the M6↔M7 fixed-point loop is physics-critical, so it belongs in Layer 1 where `tests/` can import it directly under the §2 import rules. Updates: (a) §3 repo tree moves `orchestrator.py` under `physics/` and drops it from `ui/`; (b) §5.1 step 2 and §5.3 pseudocode headers updated to the new path; (c) §6.1 (app.py) gains a responsibility to wrap `physics.orchestrator.run_full_chain` in `@st.cache_data` (the caching wrapper lives in `app.py` so `orchestrator.py` stays pure); (d) §6.6 deleted, §6.7 renumbered to §6.6, §6.8 renumbered to §6.7; (e) UI layer file count corrected from 8 to 7 (6 functional + 1 `__init__.py`). No function-signature changes, no physics behavior changes. Resolves the self-contradiction in v1.1–1.2 §6.6 which said the orchestrator was "testable without Streamlit running" while §2 forbade `tests/` from importing from `ui/`.
 
 ---
 
@@ -75,6 +76,7 @@ hel-calculator/
 │   ├── m9_nohd.py                  ← M9 module
 │   ├── m10_power_thermal.py        ← M10 module
 │   ├── m11_validation.py           ← Self-test runner (invokes pytest)
+│   ├── orchestrator.py             ← Chain coordinator (M1→M10, M6↔M7 iter); called by ui/app.py
 │   └── common.py                   ← Shared helpers (unit conversions, validators)
 │
 ├── tests/                          ← LAYER 2: Validation suite
@@ -100,7 +102,6 @@ hel-calculator/
 │   ├── panels.py                   ← The 6 input panels (A–F)
 │   ├── outputs.py                  ← The 5 numeric output panels
 │   ├── plots.py                    ← Plotly chart constructors (A, B, C)
-│   ├── orchestrator.py             ← Wires modules in dependency order (M6↔M7 iter)
 │   └── style.py                    ← Shared CSS/color constants
 │
 └── docs/                           ← Reference material
@@ -200,12 +201,14 @@ This section traces a single user interaction through the three layers.
 
 1. `ui/app.py` has registered a Streamlit button. Click handler in `ui/app.py`:
    ```python
+   from physics.orchestrator import run_full_chain
+   ...
    if st.button("Run Analysis"):
-       result = orchestrator.run_full_chain(user_inputs)
+       result = run_full_chain(user_inputs)          # cached wrapper in app.py per §5.3
        outputs.render_all(result)
    ```
 
-2. `ui/orchestrator.py` has a single public function:
+2. `physics/orchestrator.py` has a single public function:
    ```python
    def run_full_chain(user_inputs: dict) -> dict:
        """
@@ -268,8 +271,13 @@ The numbers in this section are pre-implementation estimates based on typical nu
 
 ### 5.3 Caching strategy
 
+The caching wrappers live in `ui/app.py` (not in `physics/orchestrator.py`) so the orchestrator stays pure Python — no Streamlit import, directly unit-testable from `tests/`.
+
 ```python
-# ui/orchestrator.py
+# ui/app.py — caching wrappers around physics.orchestrator
+from physics.orchestrator import run_full_chain
+
+
 @st.cache_data(max_entries=50)
 def run_full_chain_cached(user_inputs_tuple):
     """
@@ -301,7 +309,7 @@ The one file Streamlit Cloud runs with `streamlit run ui/app.py`. Responsibiliti
 1. Check authentication (`ui/auth.py`)
 2. On first page load, decode any `st.query_params` present in the URL into an initial input dict (per SPEC §5.3 item 1); fall back to defaults for missing or malformed parameters and flag any out-of-range values for the assumptions panel
 3. Lay out the page: left sidebar = 6 input panels, main area = plots + output panels
-4. Wire up the "Run Analysis" button and result rendering
+4. Wire up the "Run Analysis" button and result rendering; the click handler calls `physics.orchestrator.run_full_chain` via the `@st.cache_data`-wrapped helpers defined in §5.3 — the wrappers live in `app.py` (not in `orchestrator.py`) so the orchestrator stays pure Python and directly testable from `tests/`
 5. Wire up the "Share this analysis" sidebar button (per SPEC §5.3 item 7) which encodes the current input dict to `st.query_params` and copies the resulting URL to the clipboard
 6. Wire up the cross-plot hover synchronization callback (per SPEC §5.2): when the user hovers on Plot A, B, or C, the hovered x-coordinate is propagated to the other two charts
 
@@ -360,21 +368,7 @@ def plot_c_beam_diameter_breakdown(sweep: list[dict]) -> plotly.graph_objects.Fi
 
 Each returns a Plotly `Figure` object that `ui/app.py` passes to `st.plotly_chart`. No global state; pure constructors. Per SPEC §5.2, each figure sets `hovermode='x unified'` and populates hover tooltips with the per-plot content specified there (Plot A: range/I_peak/PIB/S_TB/τ_atm; Plot B: range/tau_BT/dwell/margin; Plot C: range/curve diameter/total/curve label). The cross-plot hover synchronization callback that propagates the hovered x-coordinate across all three charts lives in `ui/app.py` (§6.1), not here, to keep `plots.py` constructors pure and stateless.
 
-### 6.6 `ui/orchestrator.py` — module chain coordinator
-
-```python
-def run_full_chain(user_inputs: dict) -> dict:
-    """See §5.1 — executes all physics modules in dependency order including
-    the M6↔M7 fixed-point iteration. Returns a single merged result dict."""
-
-def _iterate_m6_m7(user_inputs, out1, out2, out3, out4, out5,
-                   max_iter=10, tol=0.01) -> tuple[dict, dict]:
-    """Fixed-point loop resolving the blooming-spot coupling. Private."""
-```
-
-Kept separate from `app.py` so the data-flow logic is testable without Streamlit running (e.g., from a REPL or a unit test).
-
-### 6.7 `ui/style.py` — shared visual constants
+### 6.6 `ui/style.py` — shared visual constants
 
 ```python
 # Color palette (color-blind-safe, consistent across plots)
@@ -390,11 +384,11 @@ PLOT_HEIGHT_PX = 420
 
 Shared by `plots.py` and `outputs.py`. No logic, only constants.
 
-### 6.8 `ui/__init__.py`
+### 6.7 `ui/__init__.py`
 
-Empty (by convention) — marks `ui/` as a Python package. No exports at the package level; all code is reached via explicit module imports (`from ui import app`, `from ui.orchestrator import run_full_chain`, etc.).
+Empty (by convention) — marks `ui/` as a Python package. No exports at the package level; all code is reached via explicit module imports (`from ui import app`, `from ui.panels import collect_all`, etc.). Cross-layer imports follow the same idiom: `from physics.orchestrator import run_full_chain`.
 
-**UI layer total: 8 files** (7 functional + 1 `__init__.py`).
+**UI layer total: 7 files** (6 functional + 1 `__init__.py`).
 
 ---
 
