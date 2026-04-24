@@ -46,17 +46,20 @@ import math
 import streamlit as st
 
 from ui.components import (
+    explanation,
     metric_card,
     section_header,
     status_chip,
 )
 from ui.labels import (
     ADVISORY,
+    EXPLANATIONS,
     MATERIAL_DISPLAY_NAMES,
     VERDICT_TEMPLATES,
     output_label,
     output_tooltip,
     output_unit,
+    verdict_explanation,
 )
 
 
@@ -330,7 +333,12 @@ def render_tab_overview(result: dict) -> None:
     section_header("Engagement verdict")
     _verdict_chip(result)
 
-    st.write("")  # small vertical spacer
+    # Plain-language explanation right under the chip — tells a non-specialist
+    # reader *why* the engagement is (or is not) feasible, quoting the two
+    # time values the verdict compares. ``verdict_explanation`` in labels.py
+    # mirrors the branching in ``_verdict_chip`` so the prose and chip always
+    # agree on which tier applies.
+    explanation(verdict_explanation(result))
 
     by = result["by_module"]
     p_aim = by["m7"]["P_aim"]
@@ -341,6 +349,7 @@ def render_tab_overview(result: dict) -> None:
     q_waste = by["m10"]["Q_waste"]
 
     section_header("Engagement summary")
+    explanation(EXPLANATIONS["overview_summary"])
     c1, c2, c3 = st.columns(3)
     with c1: _card("P_aim",   p_aim)
     with c2: _card("I_peak",  i_peak)
@@ -356,6 +365,7 @@ def render_tab_overview(result: dict) -> None:
     eng_per_hr = by["m10"]["engagements_per_hour"]
 
     section_header("Compute headroom")
+    explanation(EXPLANATIONS["overview_headroom"])
     c1, c2 = st.columns(2)
     with c1:
         if math.isfinite(t_sustain):
@@ -382,6 +392,7 @@ def render_tab_overview(result: dict) -> None:
         use_container_width=True,
         config=PLOTLY_MODEBAR_CONFIG,
     )
+    explanation(EXPLANATIONS["overview_margin_plot"], variant="plot")
 
     # --- CSV snapshot export ----------------------------------------------
     # A small footer button that hands the user a four-column CSV of the
@@ -443,6 +454,7 @@ def render_tab_engagement(
         f"Spot & Strehl decomposition — reference range "
         f"{reference_range / 1000:.2f} km"
     )
+    explanation(EXPLANATIONS["engagement_spot_strehl"])
 
     by = result["by_module"]
 
@@ -523,21 +535,26 @@ def render_tab_engagement(
     # Always render all three frames — when sweep is None/empty, each
     # constructor returns a frame-only figure with a centered advisory
     # (SPEC §5.3 item 10: no silent plot skip on infeasible geometry).
+    # An ``explanation(..., variant="plot")`` sits under each chart so
+    # a non-specialist viewer reads what the curves mean in two sentences.
     st.plotly_chart(
         plots.plot_a_on_target_performance(sweep, log_y=log_y),
         use_container_width=True,
         config=PLOTLY_MODEBAR_CONFIG,
     )
+    explanation(EXPLANATIONS["plot_a_intro"], variant="plot")
     st.plotly_chart(
         plots.plot_b_time_to_burnthrough(sweep),
         use_container_width=True,
         config=PLOTLY_MODEBAR_CONFIG,
     )
+    explanation(EXPLANATIONS["plot_b_intro"], variant="plot")
     st.plotly_chart(
         plots.plot_c_beam_diameter_breakdown(sweep),
         use_container_width=True,
         config=PLOTLY_MODEBAR_CONFIG,
     )
+    explanation(EXPLANATIONS["plot_c_intro"], variant="plot")
 
 
 # =============================================================================

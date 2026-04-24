@@ -341,6 +341,32 @@ def metric_card(
 
 
 # =============================================================================
+# explanation — calm plain-language prose block
+# =============================================================================
+
+def explanation(text: str, *, variant: Literal["default", "plot"] = "default") -> None:
+    """Render a short plain-language passage beneath a section header or plot.
+
+    Sits between the denser data surfaces (cards, charts) and tells a
+    non-specialist viewer what they are reading in three sentences or
+    less. Voice-and-tone rules are enforced by the copy-style lint on
+    the calling files (``ui/outputs.py`` etc.), not here.
+
+    Args:
+        text: The passage to render. Already-resolved user copy — usually
+            a lookup into ``EXPLANATIONS`` or a ``verdict_explanation(...)``
+            return value, not a literal at the call site.
+        variant: ``"default"`` renders under a section header (12 px
+            gap from the header, generous gap before the next section).
+            ``"plot"`` tightens the top gap and loosens the bottom gap
+            so the passage visually belongs to the chart above it and
+            releases to the next section below.
+    """
+    cls = "hel-explanation hel-explanation--plot" if variant == "plot" else "hel-explanation"
+    st.markdown(f'<p class="{cls}">{text}</p>', unsafe_allow_html=True)
+
+
+# =============================================================================
 # status_chip — hue + icon + text
 # =============================================================================
 
@@ -563,5 +589,6 @@ __all__ = [
     "error_card",
     "footer_strip",
     "progress_bar",
+    "explanation",
     "Severity",
 ]
