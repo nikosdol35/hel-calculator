@@ -33,7 +33,7 @@ Goes into `tests/` directly; no files under `validation/` for this layer. See th
 
 ## Layer 4 — HIGH UNCERTAINTY closeout (Package 4)
 
-- `uncertainty_closeout.md` — per-item review of SPEC §10 entries.
+- `uncertainty_closeout.md` — per-item review of SPEC §10 entries, dispositioning each as close-at-current / revise-with-citation / defer-to-v2 after Packages 1–3. Zero paired SPEC + code edits required in this package; the one physics-level paired edit of the campaign (v1.12 M9 pulsed-regime MPE typo) was applied during Package 3.
 
 ## Layer 5 — Independent replication (Package 5)
 
@@ -56,3 +56,4 @@ Layer 2 test coverage and Layer 3 numerical-methods reports complement the deriv
 
 - 2026-04-24 — tree created; Package 1 files written.
 - 2026-04-24 — Package 3 Layer 3 numerical-methods files written (`methods/m8_solver.md`, `methods/m6_m7_iteration.md`, `methods/m5_r0_integral.md`, `methods/m4_interp.md`) with companion tests in `tests/test_m8_numerics.py`, `tests/test_m6_m7_convergence.py`, `tests/test_m5_numerics.py`. Layer 3.4 (M4 interp) is doc-only — reuses the Package 2 `tests/test_helpers.py` coverage.
+- 2026-04-24 — Package 4 Layer 4 HIGH UNCERTAINTY closeout written (`uncertainty_closeout.md`). All six SPEC §10 items re-reviewed against 2026-04-24 literature and Packages 1–3 outputs. Five confirm prior disposition (close-at-current); one surfaces an ANSI Z136.1-2022 citation-refresh path (v2-scope, tool's current no-C_A 2014 formulas remain conservative under 2022); one remains deferred to v2 (available_dwell tracker-model). Zero paired SPEC + code edits required this package.
