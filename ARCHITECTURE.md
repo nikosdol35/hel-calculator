@@ -1,6 +1,6 @@
 # ARCHITECTURE.md — HEL Engineering Calculator
 
-**Version:** 1.5 (Phase 2 UI slice 4: URL-decode latch specified; app.py share-URL behavior aligned with SPEC v1.7)
+**Version:** 1.6 (Phase 3 UI redesign PR 1: new `ui/theme.py`, `ui/components.py`, `ui/labels.py`, `ui/icons.py`, `ui/presets.py`; tabbed main area; footer provenance strip; copy-style lint)
 **Complements:** `SPEC.md` §6 (file layout) and project plan v0.8 §2.3 (three-layer separation)
 **Scope:** Concrete implementation map — file paths, function signatures, import rules, data flow.
 
@@ -11,6 +11,7 @@
 - v1.5 (2026-04-23) — **§5.1 page-load sequence gains an explicit `st.session_state['_url_decoded']` latch** (SPEC v1.7 improvement #1), preventing subsequent Streamlit reruns from re-applying stale URL-parameter values on top of the user's edits. §6.1 (app.py) responsibilities unchanged structurally but the share-URL behavior is now "display in `st.code` block" not "copy to clipboard" per SPEC v1.7 improvement #3. No function-signature, file-layout, or import-rule change.
 - v1.4 (2026-04-23) — **cross-plot hover-sync callback removed from §6.1 and §6.5** to match SPEC v1.6. The bespoke Streamlit ↔ Plotly JS callback that would have propagated the hovered x-coordinate across Plots A/B/C is descoped; each plot now relies on Plotly's built-in `hovermode='x unified'` (which was already required by §6.5, so that line is unchanged). §6.1 step 6 (hover-sync wiring) is deleted; step count 1–6 → 1–5. The "Total expected length" for app.py drops from 80–120 to 70–110 lines. §6.5 loses the "lives in `ui/app.py`" trailing sentence about the cross-plot callback. No file changes, no signature changes, no new files. Rationale lives in SPEC v1.6.
 - v1.3 (2026-04-23) — **orchestrator relocated from `ui/` to `physics/`.** The chain coordinator is pure Python (no Streamlit imports) and the M6↔M7 fixed-point loop is physics-critical, so it belongs in Layer 1 where `tests/` can import it directly under the §2 import rules. Updates: (a) §3 repo tree moves `orchestrator.py` under `physics/` and drops it from `ui/`; (b) §5.1 step 2 and §5.3 pseudocode headers updated to the new path; (c) §6.1 (app.py) gains a responsibility to wrap `physics.orchestrator.run_full_chain` in `@st.cache_data` (the caching wrapper lives in `app.py` so `orchestrator.py` stays pure); (d) §6.6 deleted, §6.7 renumbered to §6.6, §6.8 renumbered to §6.7; (e) UI layer file count corrected from 8 to 7 (6 functional + 1 `__init__.py`). No function-signature changes, no physics behavior changes. Resolves the self-contradiction in v1.1–1.2 §6.6 which said the orchestrator was "testable without Streamlit running" while §2 forbade `tests/` from importing from `ui/`.
+- v1.6 (2026-04-24) — **Phase 3 UI redesign, structural scaffolding for PR 1 of six.** Adds five new UI files and two repo-level additions, and re-shapes the main area from single-scroll to tabbed. (a) §3 repo tree adds `ui/theme.py` (shared palette + CSS + Plotly template + font loader), `ui/components.py` (reusable metric card, status chip, section header, skeleton frame, numeric formatter, footer strip), `ui/labels.py` (single source of truth for SPEC-key → UI-label → tooltip mapping; every user-visible string in `ui/` reads from this file), `ui/icons.py` (Lucide SVG inline helper — ~12 icons bundled, no npm/CDN), and `ui/presets.py` (named scenario dicts driving the sidebar preset dropdown). Also adds `tests/test_copy_style.py` (copy-style lint that fails CI if forbidden tokens — `SPEC §`, `M[0-9]`, `_flagged`, emoji ranges — appear in user-visible `ui/` strings) and `scripts/check_contrast.py` (one-shot WCAG-AA verifier, NOT in CI; run once per palette change) alongside the plan-of-record `docs/phase3_ui_redesign_plan_2026-04-23.md` (reference document). UI layer file count 7 → 12 (11 functional + 1 `__init__.py`); total test files gain `test_copy_style.py` for a total of 13 test files. (b) §5.1 step 3 page-layout description changes from "main area = plots + output panels" to "main area = six tabs (Overview / Engagement / Target effects / Safety / Atmosphere / Diagnostics) + footer provenance strip"; the tabbed structure is a SPEC §5.2 re-mapping of the same five numeric panels and three plots plus three new plots — **no physics, no orchestrator, no module-output-key change**. (c) §6.1 app.py responsibilities gain: load theme via `ui.theme.apply(app_mode: 'dark' | 'light')`; render the footer provenance strip (`HEL Engineering Calculator · SPEC v1.9 · ARCH v1.6 · build YYYY-MM-DD`) on every page; the tab container replaces the single-scroll result flow. App.py line-count budget 70–110 → 100–160 to absorb the tab wiring and theme bootstrap. (d) New §6.8 `ui/theme.py`, §6.9 `ui/components.py`, §6.10 `ui/labels.py`, §6.11 `ui/icons.py`, §6.12 `ui/presets.py`. §6.6 `ui/style.py` is retained as a **compatibility shim** that re-exports `COLOR_SUCCESS / COLOR_WARNING / COLOR_CAUTION / PLOT_HEIGHT_PX` from `ui.theme` so existing `ui/outputs.py` and `ui/plots.py` imports keep working until PR 2 migrates them. (e) §6.5 `ui/plots.py` gains a responsibility line: every figure applies the shared Plotly template from `ui.theme.PLOTLY_TEMPLATE` (which encodes palette, gridline, axis, spike, and hover-box tokens) so one edit re-themes every chart. No function signatures changed for existing plot constructors. **No physics, no module I/O, no `assumptions_flagged` semantics, and no CLAUDE §7.1 formula is touched.** Companion SPEC edits: §5.1 sidebar layout restated behaviorally (preset dropdown + six sections + Run Analysis + Validate button + Share button + light/dark toggle), §5.2 re-mapped to the six tabs with three new plot specifications, §5.3 UI behavior contract extended with the compute-time-feedback, always-render-plot-frame, and copy-style-lint commitments. Released as `SPEC.md v1.9`.
 
 ---
 
@@ -95,24 +96,34 @@ hel-calculator/
 │   ├── test_m9_nohd.py
 │   ├── test_m10_power_thermal.py
 │   ├── test_convention_consistency.py   ← Cross-module structural tests (M7.4)
-│   └── test_import_rules.py             ← Verifies Layer 1 has no UI imports
+│   ├── test_import_rules.py             ← Verifies Layer 1 has no UI imports
+│   └── test_copy_style.py               ← Copy-style lint: forbidden tokens in user-visible ui/ strings (v1.6)
 │
 ├── ui/                             ← LAYER 3: Streamlit interface
 │   ├── __init__.py
 │   ├── app.py                      ← Streamlit entry point (run with `streamlit run`)
 │   ├── auth.py                     ← Shared-credential login gate
-│   ├── panels.py                   ← The 6 input panels (A–F)
-│   ├── outputs.py                  ← The 5 numeric output panels
-│   ├── plots.py                    ← Plotly chart constructors (A, B, C)
-│   └── style.py                    ← Shared CSS/color constants
+│   ├── panels.py                   ← The 6 input sections (sidebar)
+│   ├── outputs.py                  ← Numeric-panel renderers (per-tab)
+│   ├── plots.py                    ← Plotly chart constructors (shared template from theme.py)
+│   ├── theme.py                    ← Palette + CSS + Plotly template + font loader (v1.6)
+│   ├── components.py               ← metric_card / status_chip / section_header / skeleton_card / format_value / footer_strip (v1.6)
+│   ├── labels.py                   ← SPEC-key → UI-label → tooltip mapping (single source of truth, v1.6)
+│   ├── icons.py                    ← Lucide SVG inline helper (~12 icons bundled, v1.6)
+│   ├── presets.py                  ← Named scenario dicts for sidebar preset dropdown (v1.6)
+│   └── style.py                    ← Compatibility shim — re-exports COLOR_* and PLOT_HEIGHT_PX from ui.theme (retained for PR 1; consumers migrate to ui.theme in PR 2)
+│
+├── scripts/                        ← One-shot developer utilities (NOT in CI)
+│   └── check_contrast.py           ← WCAG-AA verifier for ui/theme.py palette pairs (v1.6)
 │
 └── docs/                           ← Reference material
     ├── Plan_v0p8.docx              ← The project plan (read-only reference)
     ├── references.md               ← Bibliography (matches SPEC Appendix B)
+    ├── phase3_ui_redesign_plan_2026-04-23.md   ← Phase 3 design document (v1.6 reference)
     └── CHANGELOG.md                ← Human-readable version history (optional)
 ```
 
-**Total files:** roughly 40, most of them small (one module = one file, one test file per module, one UI file per concern). Every file has a single, clearly named purpose.
+**Total files:** roughly 50 (v1.6), most of them small (one module = one file, one test file per module, one UI file per concern). Every file has a single, clearly named purpose.
 
 ---
 
@@ -263,7 +274,7 @@ This section traces a single user interaction through the three layers.
        return out7, out6
    ```
 
-5. Result dict flows to `ui/outputs.py`, which renders the 5 numeric panels, and to `ui/plots.py`, which renders plots A, B, C via Plotly.
+5. Result dict flows to `ui/outputs.py` and `ui/plots.py`. **Since v1.6** the main area is a `st.tabs([...])` container with six tabs in reading order — **Overview / Engagement / Target effects / Safety / Atmosphere / Diagnostics** (per SPEC v1.9 §5.2). `ui/outputs.py` provides per-tab renderers; `ui/plots.py` provides the Plotly figures each tab embeds. The same merged-result dict is passed to every tab; tabs render independently and without cross-tab callbacks. A footer provenance strip (`HEL Engineering Calculator · SPEC v1.9 · ARCH v1.6 · build YYYY-MM-DD`) rendered by `ui.components.footer_strip()` sits below the tab container on every page — that is where the version provenance that previously lived in the page subtitle now resides.
 
 **Page-load sequence (first run, before any user click):** before §5.1 step 1 above can apply, `ui/app.py` performs URL-parameter decoding **exactly once per Streamlit session**, guarded by the `st.session_state['_url_decoded']` latch (per SPEC §5.3 item 7, v1.7). If `st.query_params` is non-empty and the latch is unset, each parameter is parsed, range-checked against the SPEC §5.1 sanity ranges, and either accepted (becoming the panel's initial value) or silently dropped with a flag added to the assumptions panel ("Input X out of range from URL, using default"). If `st.query_params` is empty, all panels initialize from the SPEC §5.1 defaults. After decoding (or on the first-load skip), `st.session_state['_url_decoded']` is set to `True` so subsequent reruns triggered by widget edits do not re-apply the now-stale URL values on top of the user's changes. Only after this initialization do the panel widgets render in the sidebar.
 
@@ -308,13 +319,14 @@ M11's validation suite is NOT cached — it should re-run on demand every time t
 
 The one file Streamlit Cloud runs with `streamlit run ui/app.py`. Responsibilities:
 
-1. Check authentication (`ui/auth.py`)
-2. On first page load, decode any `st.query_params` present in the URL into an initial input dict (per SPEC §5.3 item 1); fall back to defaults for missing or malformed parameters and flag any out-of-range values for the assumptions panel
-3. Lay out the page: left sidebar = 6 input panels, main area = plots + output panels
-4. Wire up the "Run Analysis" button and result rendering; the click handler calls `physics.orchestrator.run_full_chain` via the `@st.cache_data`-wrapped helpers defined in §5.3 — the wrappers live in `app.py` (not in `orchestrator.py`) so the orchestrator stays pure Python and directly testable from `tests/`
-5. Wire up the "Share this analysis" sidebar button (per SPEC §5.3 item 7) which encodes the current input dict to `st.query_params` and copies the resulting URL to the clipboard
+1. Apply the app-wide theme via `ui.theme.apply(app_mode)` immediately after `st.set_page_config` (v1.6). The theme module injects the palette CSS, loads the Inter + JetBrains Mono font stack, and registers the shared Plotly template that every figure in `ui/plots.py` consumes. `app_mode` defaults to `'dark'` and is toggled by a sidebar footer control (per SPEC §5.2, §5.3 item 8).
+2. Check authentication (`ui/auth.py`).
+3. On first page load, decode any `st.query_params` present in the URL into an initial input dict (per SPEC §5.3 item 1); fall back to defaults for missing or malformed parameters and flag any out-of-range values for the diagnostics tab. Guard the decode with `st.session_state['_url_decoded']` so it runs exactly once per session (per SPEC v1.7 improvement #1).
+4. Lay out the page: **left sidebar** = preset dropdown (`ui.presets`) + six input sections (`ui.panels`) + "Run Analysis" button + "Validate" button + "Share this analysis" button + light/dark toggle; **main area** = `st.tabs([...])` with six tabs in SPEC §5.2 order (Overview / Engagement / Target effects / Safety / Atmosphere / Diagnostics); **footer** = a single-line provenance strip rendered by `ui.components.footer_strip()`.
+5. Wire up the "Run Analysis" button and per-tab result rendering; the click handler calls `physics.orchestrator.run_full_chain` via the `@st.cache_data`-wrapped helpers defined in §5.3 — the wrappers live in `app.py` (not in `orchestrator.py`) so the orchestrator stays pure Python and directly testable from `tests/`. The button wires the SPEC §5.3 item 9 compute-time-feedback sequence (button-disable pulse → thin progress bar → fade-in) via `ui.components.progress_bar()`.
+6. Wire up the "Share this analysis" sidebar button (per SPEC §5.3 item 7) which encodes the current input dict to `st.query_params` and renders the resulting URL in an `st.code(url)` block for manual copy (per SPEC v1.7 improvement #3).
 
-Total expected length: 70–110 lines (cross-plot hover-sync callback descoped in v1.4 per SPEC v1.6; per-plot unified hover is handled inside each Plotly figure in `ui/plots.py`).
+Total expected length: 100–160 lines (v1.6; expanded from 70–110 to absorb theme bootstrap, tab container wiring, and footer strip).
 
 ### 6.2 `ui/auth.py` — login gate
 
@@ -338,7 +350,7 @@ def collect_all() -> dict:
     """Calls all panel functions and returns merged user_inputs dict."""
 ```
 
-All six panels are Streamlit `st.expander` widgets in the sidebar. Per SPEC §5.1, each expander's label includes a leading emoji icon (A `🔦`, B `🎯`, C `📐`, D `🌫️`, E `🛡️`, F `⚙️`), and default expansion state on first load is **A, C, E expanded; B, D, F collapsed**. Each input is a `st.number_input` or `st.selectbox` with explicit min/max matching SPEC sanity ranges. Initial values for each input come from the URL-decoded dict produced by `ui/app.py` on page load (per SPEC §5.3 item 1) when present, otherwise from the defaults in SPEC.md §5.1.
+All six panels are Streamlit `st.expander` widgets in the sidebar. Per SPEC §5.1 (v1.9), each expander's label is a plain-English section name with no emoji: "Laser source", "Beam director", "Engagement geometry", "Atmosphere", "Target & aimpoint", "System resources". Default expansion state on first load is **Laser source, Engagement geometry, Target & aimpoint expanded; Beam director, Atmosphere, System resources collapsed** — the same first/third/fifth-open pattern as v1.2 but keyed off the new section names. Each input is a `st.number_input` or `st.selectbox` with explicit min/max matching SPEC sanity ranges; **every input's visible label and tooltip are read from `ui.labels`** (v1.6) — no user-visible string is hard-coded inside `panels.py`. Initial values for each input come from the URL-decoded dict produced by `ui/app.py` on page load (per SPEC §5.3 item 1) when present, otherwise from the defaults in SPEC.md §5.1 or from a preset selected via the sidebar preset dropdown (`ui.presets`).
 
 ### 6.4 `ui/outputs.py` — numeric panels
 
@@ -355,7 +367,7 @@ def render_all(result: dict, reference_range: float) -> None:
     """Renders all 5 panels in sequence."""
 ```
 
-`render_panel_2_engagement` implements the three-tier verdict (ENGAGEABLE / MARGINAL / NOT ENGAGEABLE) per SPEC §5.2 Panel 2, using the `COLOR_SUCCESS / COLOR_WARNING / COLOR_CAUTION` constants from `ui/style.py` (§6.7) for the traffic-light indicator. Function signatures are unchanged from v1.1; the verdict logic lives inside the function body.
+`render_panel_2_engagement` implements the three-tier verdict (ENGAGEABLE / MARGINAL / NOT ENGAGEABLE) per SPEC §5.2 Panel 2, using the status-token palette from `ui.theme` (green / amber / red) for the verdict chip. **Since v1.6** the verdict is rendered via `ui.components.status_chip(...)` (hue + Lucide icon + text — color-blind dual-encoded), not the v1.5 inline-HTML banner. **Every label and caption emitted by these panel functions is read from `ui.labels`**; no user-visible string is hard-coded inside `outputs.py`. Function signatures are unchanged from v1.1; what changes in v1.6 is the rendering idiom (metric cards via `ui.components.metric_card`) and the per-tab dispatch: `render_all(result, reference_range)` is replaced by six per-tab functions called by the tab container in `ui/app.py`. The existing `render_panel_N_*` functions continue to exist during PR 1 as internal helpers; PR 2 rewrites them to emit metric cards.
 
 ### 6.5 `ui/plots.py` — Plotly constructors
 
@@ -369,27 +381,102 @@ def plot_c_beam_diameter_breakdown(sweep: list[dict]) -> plotly.graph_objects.Fi
 
 Each returns a Plotly `Figure` object that `ui/app.py` passes to `st.plotly_chart`. No global state; pure constructors. Per SPEC §5.2, each figure sets `hovermode='x unified'` and populates hover tooltips with the per-plot content specified there (Plot A: range/I_peak/PIB/S_TB/τ_atm; Plot B: range/tau_BT/dwell/margin; Plot C: range/curve diameter/total/curve label). Cross-plot hover synchronization was considered for v1 but descoped in SPEC v1.6 / ARCH v1.4 — each plot's unified hover is entirely self-contained within its Plotly figure and no app-level callback is required.
 
-### 6.6 `ui/style.py` — shared visual constants
+**Since v1.6, every figure applies the shared Plotly template from `ui.theme.PLOTLY_TEMPLATE`** (palette, gridlines, axes, spike-line styling, hover-box styling, tabular-nums tick labels) before any per-plot customization. One edit in `ui/theme.py` re-themes every chart in the app. Each figure also enables spike lines (`fig.update_xaxes(showspikes=True, spikesnap='cursor', spikemode='across', spikedash='dot')` and the symmetric y-axis call) for MATLAB-style crosshair hover, and installs the curated modebar config (zoom / pan / reset / PNG only; Plotly logo removed; visible on hover) via `st.plotly_chart(..., config=ui.theme.PLOTLY_MODEBAR_CONFIG)`. PR 5 (Phase 3) adds three new figure constructors — temperature-vs-time, τ_BT material comparison, NOHD cross-section, transmission vs range, extinction breakdown — under the same signature pattern; the function signatures of existing constructors A/B/C are unchanged in v1.6.
+
+### 6.6 `ui/style.py` — compatibility shim (v1.6)
+
+As of v1.6, `ui/style.py` is a thin shim that re-exports the status colors and plot-height default from `ui.theme` so that `ui/outputs.py` and `ui/plots.py` imports continue to resolve while PR 1 lands the new theme layer without touching every import site. The file is retained through PR 1 only; PR 2 migrates both consumers to import directly from `ui.theme` and this shim is deleted.
 
 ```python
-# Color palette (color-blind-safe, consistent across plots)
-COLOR_PRIMARY   = "#1f4e79"
-COLOR_REFERENCE = "#808080"  # diffraction-limited reference curves
-COLOR_SUCCESS   = "#2e7d32"
-COLOR_WARNING   = "#e65100"
-COLOR_CAUTION   = "#bf360c"
-
-# Plot sizing defaults
-PLOT_HEIGHT_PX = 420
+# ui/style.py — DEPRECATED (v1.6). Re-exports from ui.theme for backward compatibility.
+from ui.theme import (
+    COLOR_PRIMARY,
+    COLOR_REFERENCE,
+    COLOR_SUCCESS,
+    COLOR_WARNING,
+    COLOR_CAUTION,
+    PLOT_HEIGHT_PX,
+)
 ```
-
-Shared by `plots.py` and `outputs.py`. No logic, only constants.
 
 ### 6.7 `ui/__init__.py`
 
 Empty (by convention) — marks `ui/` as a Python package. No exports at the package level; all code is reached via explicit module imports (`from ui import app`, `from ui.panels import collect_all`, etc.). Cross-layer imports follow the same idiom: `from physics.orchestrator import run_full_chain`.
 
-**UI layer total: 7 files** (6 functional + 1 `__init__.py`).
+### 6.8 `ui/theme.py` — shared visual tokens, CSS, Plotly template (v1.6)
+
+Single source of truth for every visual token used in the app. Exports (names indicative; final names finalized in PR 1 code):
+
+- **`PALETTE_DARK` / `PALETTE_LIGHT`** — dict of token → hex for every surface, foreground, accent, status, and plot-only token (`bg.base`, `bg.surface`, `fg.primary`, `fg.secondary`, `accent.primary`, `status.ok`, `plot.gridline`, etc., per Phase 3 plan §3).
+- **`COLOR_PRIMARY / COLOR_REFERENCE / COLOR_SUCCESS / COLOR_WARNING / COLOR_CAUTION / PLOT_HEIGHT_PX`** — legacy names consumed by `ui/style.py` shim; values sourced from `PALETTE_*` so the old import path still resolves to the new palette.
+- **`PLOTLY_TEMPLATE`** — a `plotly.graph_objects.layout.Template` preset with paper bg, plot-area bg, gridlines, axes, spike lines, hover-box styling, tabular-nums tick labels, and default margins (`l=56, r=32, t=40, b=48`).
+- **`PLOTLY_MODEBAR_CONFIG`** — the `config=` dict passed to `st.plotly_chart` to keep only `zoom2d / pan2d / zoomIn2d / zoomOut2d / resetScale2d / toImage`, strip the Plotly logo, and set `modeBarButtonsToRemove=['lasso2d','select2d','toggleSpikelines','autoScale2d']`.
+- **`apply(app_mode: str = 'dark') -> None`** — the bootstrap call made once by `ui/app.py`. Injects the CSS for Inter + JetBrains Mono font loading, the palette custom properties, the card / chip / section-header / focus-ring / scrollbar rules, and the `prefers-reduced-motion` overrides. Registers `PLOTLY_TEMPLATE` under the `hel_dark` / `hel_light` name and sets it as the default via `plotly.io.templates.default`.
+
+No logic beyond palette tables, template construction, and CSS string injection. Imports: `streamlit`, `plotly.graph_objects`, `plotly.io`. No imports from elsewhere in `ui/`.
+
+### 6.9 `ui/components.py` — reusable UI primitives (v1.6)
+
+Small, pure render helpers used by `ui/outputs.py`, `ui/panels.py`, and `ui/app.py`:
+
+```python
+def metric_card(label: str, value: str, unit: str, *, tooltip: str | None = None, flag: str | None = None) -> None:
+    """KPI card: big tabular-nums value + label + unit; optional tooltip and 'est.' flag."""
+
+def status_chip(text: str, kind: str) -> None:
+    """kind ∈ {'ok', 'warn', 'error', 'info'}. Hue + Lucide icon + text."""
+
+def section_header(text: str, *, icon: str | None = None) -> None:
+    """h3-styled section title for use inside a tab."""
+
+def skeleton_card() -> None:
+    """Placeholder card rendered before first Run Analysis."""
+
+def format_value(value: float, unit: str, *, sig_figs: int = 3) -> tuple[str, str]:
+    """Return (formatted_value, unit) per SPEC §5.3 numerical-display rules."""
+
+def footer_strip(spec_version: str, arch_version: str, build_date: str) -> None:
+    """One-line provenance strip rendered on every page."""
+
+def progress_bar() -> None:
+    """Indeterminate progress bar used by the Run Analysis compute-time-feedback sequence."""
+```
+
+Imports: `streamlit`, `ui.icons`, `ui.theme`. No physics imports.
+
+### 6.10 `ui/labels.py` — single source of truth for user-visible strings (v1.6)
+
+Two dicts:
+
+```python
+INPUT_LABELS: dict[str, dict] = {
+    # "<input_key>": {"label": "<3–5 word title>", "tooltip": "<1 sentence>", "unit": "<ui unit symbol>"}
+}
+OUTPUT_LABELS: dict[str, dict] = {
+    # "<result_key>": {"label": "...", "tooltip": "...", "unit": "..."}
+}
+```
+
+Every label used in `ui/panels.py` and `ui/outputs.py` is looked up here — no user-visible string is hard-coded anywhere else in `ui/`. The `tests/test_copy_style.py` lint enforces this by grepping the other `ui/` files for forbidden tokens (`SPEC §`, `M[0-9]`, `_flagged`, emoji ranges, raw SPEC input keys like `θ_diff_pure`). `ui/labels.py` itself is exempt from the lint.
+
+### 6.11 `ui/icons.py` — Lucide SVG inline helper (v1.6)
+
+Tiny helper module that returns inline SVG markup for the ~12 Lucide icons actually used in the app (`check-circle`, `alert-triangle`, `x-circle`, `info`, `layout-dashboard`, `target`, `flame`, `shield`, `cloud`, `activity`, `chevron-down`, `sun-moon`). Each icon is a string constant containing the Lucide SVG path; `icon(name, size=16, stroke=1.5)` wraps it with the requested attributes and an `aria-hidden="true"` so screen readers skip decorative instances. For icon-only interactive controls the caller supplies an `aria-label` on the surrounding button. No network fetch, no npm, no runtime dependency on the Lucide package.
+
+### 6.12 `ui/presets.py` — named scenario dicts (v1.6)
+
+```python
+PRESETS: dict[str, dict] = {
+    "C-UAS short range":         {...},   # defaults tuned for the SPEC canonical 3 kW / 1.5 km case
+    "Counter-rocket":            {...},
+    "Long-range surveillance":   {...},
+    "Custom":                    {...},   # equal to SPEC §5.1 defaults
+}
+```
+
+The sidebar preset dropdown writes the selected dict into `st.session_state` and reruns; each input widget reads its initial value from `st.session_state` if present. No physics, no computation — this is a shorthand for common input configurations.
+
+**UI layer total: 12 files** (11 functional + 1 `__init__.py`).
 
 ---
 
@@ -611,4 +698,4 @@ Do not make silent architectural changes in code. The architecture is the contra
 
 ---
 
-**END OF ARCHITECTURE.md v1.5**
+**END OF ARCHITECTURE.md v1.6**
