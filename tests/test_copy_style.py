@@ -83,13 +83,32 @@ FORBIDDEN_SUBSTRINGS: tuple[str, ...] = (
 
 
 # -----------------------------------------------------------------------------
-# Module-tag regex (e.g. "M6", "M10", "M1 → M10"). Matches a standalone
-# capital M followed by 1-2 digits; requires a word boundary on each side
-# so variable names like ``M2`` used as a dict key or Greek-letter strings
-# (``M²`` — the ² is not a digit character class member) are not flagged.
-# ``M²`` is permitted because ² (U+00B2) is not a [0-9] class member.
+# Module-tag regex (e.g. "M6↔M7", "M1 → M10", "per M6 tolerance"). Matches a
+# standalone capital M followed by 1-2 digits with word boundaries on each
+# side. Two things are deliberately exempt from the match result:
+#
+#   1. Strings that are EXACTLY the module tag — e.g. ``"M2"`` as a dict key
+#      or a function argument to ``input_label("M2")``. These are SPEC-dict
+#      identifiers, not user-visible copy. See ``_is_identifier_literal``.
+#   2. Greek letters, the micro sign µ, degrees °, superscript ² / ³, ×, etc.
+#      ``M²`` is permitted because ² (U+00B2) is not a [0-9] class member.
+#
+# The rule catches what matters — module tags embedded in prose like
+# "M6↔M7 loop converged" — without flagging the bare SPEC keys every UI
+# module has to pass around.
 # -----------------------------------------------------------------------------
 MODULE_TAG_RE = re.compile(r"\bM\d{1,2}\b")
+
+
+def _is_identifier_literal(text: str, match: re.Match[str]) -> bool:
+    """Return True when the match spans the entire (stripped) string.
+
+    A literal like ``"M2"`` appearing as a dict key or a lookup argument is a
+    SPEC-dict identifier, not a piece of user-facing copy; the module-tag
+    rule should skip it. A literal like ``"M6↔M7 loop converged"`` contains
+    the tag inside a longer sentence, so the rule fires as intended.
+    """
+    return text.strip() == match.group()
 
 
 # -----------------------------------------------------------------------------
@@ -172,7 +191,7 @@ def _violations_in_file(path: Path) -> list[str]:
                 )
 
         m = MODULE_TAG_RE.search(text)
-        if m:
+        if m and not _is_identifier_literal(text, m):
             violations.append(
                 f"{path.name}:{line}  module tag {m.group()!r} in user "
                 f"copy — reference the module by its user-facing name instead"
@@ -224,3 +243,40 @@ def test_scan_list_covers_phase3_pr1_surface() -> None:
         "If you are adding a file (e.g. PR 4 brings plots.py into scope), "
         "update the expected_names set in this guard too."
     )
+
+
+def test_module_tag_rule_discriminates_identifier_vs_prose(tmp_path: Path) -> None:
+    """Guard on the ``_is_identifier_literal`` exemption. A bare ``"M2"``
+    string (SPEC dict key) must NOT be flagged; a module tag embedded in a
+    longer sentence (e.g. ``"M6↔M7 loop converged"``) MUST be flagged.
+
+    If someone widens the exemption — say, by stripping whitespace too
+    aggressively or by matching substrings — real violations will silently
+    slip through. This test pins the discrimination.
+    """
+    sample = tmp_path / "sample.py"
+    sample.write_text(
+        # Identifier-style literals — all exempt.
+        'x = {"M2": 1.0, "M6": 2.0}\n'
+        'y = lookup("M10")\n'
+        # Prose-style literals — all flagged.
+        'a = "M6↔M7 loop converged"\n'
+        'b = "per SPEC §3 M6 tolerance"\n'
+        'c = "M1 → M10 pipeline"\n',
+        encoding="utf-8",
+    )
+    violations = _violations_in_file(sample)
+    # "SPEC §" also trips the forbidden-substring rule on line b; strip those
+    # out and count only module-tag messages so this test stays focused.
+    tag_violations = [v for v in violations if "module tag" in v]
+    # Expect exactly three: one per prose literal (a, b, c).
+    assert len(tag_violations) == 3, (
+        f"Expected 3 module-tag violations (one per prose literal), got "
+        f"{len(tag_violations)}:\n  " + "\n  ".join(tag_violations)
+    )
+    # And none of them can be identifier-only literals.
+    for v in tag_violations:
+        assert "↔" in v or "→" in v or "tolerance" in v, (
+            f"Tag-violation surface suggests an identifier literal was "
+            f"flagged (exemption may be broken): {v}"
+        )
