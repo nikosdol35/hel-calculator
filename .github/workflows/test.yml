@@ -3,8 +3,11 @@ name: Validation Tests
 on:
   push:
     branches: [main]
+  # Run CI on every pull request regardless of target branch. The
+  # validation campaign ships as stacked PRs (Package 2 → Package 1,
+  # Package 3 → Package 2, etc.) and each stage needs its own green
+  # signal before the next merges forward.
   pull_request:
-    branches: [main]
 
 jobs:
   test:
