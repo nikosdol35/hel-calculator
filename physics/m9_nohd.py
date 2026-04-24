@@ -12,7 +12,7 @@ Equations (SPEC §3 M9):
 
 MPE per ANSI Z136.1-2014, CW intrabeam viewing:
     Band A (0.400–1.400 µm):
-      t <  18e-6 s    MPE = 5e-3 / t_exp                [W/cm²]
+      t <  18e-6 s    MPE = 5e-7 / t_exp                [W/cm²]
       t ≤  10    s    MPE = 1.8e-3 · t_exp^(-1/4)       [W/cm²]
       t >  10    s    MPE = 1.0e-3                      [W/cm²]  (chronic)
     Band B (1.400–4.000 µm):
@@ -72,7 +72,12 @@ def _mpe_irradiance_wpm2(wavelength_m: float, t_exp: float) -> float:
         # Band A — retinal hazard.
         if t_exp < 18.0e-6:
             # Pulsed regime; v1 is CW-only but the branch is defensive.
-            mpe_wpcm2 = 5.0e-3 / t_exp
+            # Per ANSI Z136.1-2014 Table 5a, single-pulse retinal MPE is
+            # 5e-7 J/cm² (radiant exposure); irradiance = H/t. The constant
+            # is chosen to meet the 18-µs–10-s branch at t = 18 µs (within
+            # 0.5 %, the ANSI rounding step). Corrected from the v≤1.11
+            # typo of 5e-3 that produced a 10⁴ discontinuity at the join.
+            mpe_wpcm2 = 5.0e-7 / t_exp
         elif t_exp <= 10.0:
             mpe_wpcm2 = 1.8e-3 * t_exp ** (-0.25)
         else:

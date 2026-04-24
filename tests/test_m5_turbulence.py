@@ -38,12 +38,18 @@ def _uniform_cn2_inputs(canonical_inputs, **overrides):
 def test_m5_r0_uniform_cn2(canonical_inputs):
     """SPEC §3 M5 'test_m5_r0_uniform_cn2'. Expected r0_sph ≈ 0.0345 m."""
     result = m5_turbulence.compute(_uniform_cn2_inputs(canonical_inputs))
+    # SPEC §3 M5 tolerance = 2 %: r0_sph combines the 0.423 Fried
+    # prefactor (∼1 % uncertainty from Kolmogorov assumption) with a
+    # scipy.integrate.quad integration (machine precision). 2 % budgets
+    # the prefactor uncertainty; tighter would catch the constant itself.
     assert result["r0_sph"] == pytest.approx(0.0345, rel=0.02)
 
 
 def test_m5_w_turb_5km(canonical_inputs):
     """SPEC §3 M5 'test_m5_w_turb_5km'. Expected w_turb ≈ 0.0494 m."""
     result = m5_turbulence.compute(_uniform_cn2_inputs(canonical_inputs))
+    # SPEC §3 M5 tolerance = 2 %: w_turb = 2L/(k·r0) inherits r0_sph's
+    # 2 % budget directly (rest of the formula is exact).
     assert result["w_turb"] == pytest.approx(0.0494, rel=0.02)
 
 
@@ -61,6 +67,10 @@ def test_m5_spherical_vs_plane_ratio(canonical_inputs):
 
     ratio = result["r0_sph"] / r0_plane
     expected_ratio = (3.0 / 8.0) ** (-3.0 / 5.0)
+    # rel = 0.1 %: structural ratio of two closed-form expressions that
+    # SHOULD be algebraically exact. Any drift here means the spherical
+    # weighting kernel drifted away from (z/L)^(5/3) — which is the
+    # CLAUDE §7.1 invariant this test exists to defend.
     assert ratio == pytest.approx(expected_ratio, rel=0.001)
 
 
@@ -69,6 +79,9 @@ def test_m5_r0_at_1500m(canonical_inputs):
     w_turb ≈ 0.00719 m at R_slant = 1500 m."""
     inputs = _uniform_cn2_inputs(canonical_inputs, R_slant=1500)
     result = m5_turbulence.compute(inputs)
+    # SPEC §3 M5 tolerance = 2 %: same 0.423-prefactor uncertainty as
+    # the 5 km case. Parametrised range-variation coverage; tolerance
+    # choice locked to SPEC §3.
     assert result["r0_sph"] == pytest.approx(0.0711, rel=0.02)
     assert result["w_turb"] == pytest.approx(0.00719, rel=0.02)
 
@@ -129,6 +142,9 @@ def test_m5_hv_5_7_ground_level(canonical_inputs):
 
     Tolerance: 2% (matches SPEC §3 M5 first-principles tolerance)."""
     result = m5_turbulence.compute(_hv_5_7_inputs(canonical_inputs))
+    # SPEC §3 M5 tolerance = 2 %: HV-5/7 adds scale-height integration
+    # on top of the 0.423 prefactor. At H_e=H_t=0 the profile collapses
+    # to a constant; the 2 % budget matches the uniform-Cn² case.
     assert result["r0_sph"] == pytest.approx(0.0249, rel=0.02)
     assert result["w_turb"] == pytest.approx(0.0685, rel=0.02)
 
@@ -158,6 +174,10 @@ def test_m5_hv_5_7_matches_constant_at_ground(canonical_inputs):
     )
     hv = m5_turbulence.compute(hv_inputs)
     const = m5_turbulence.compute(const_inputs)
+    # rel = 0.1 %: structural equivalence check — two code paths that
+    # SHOULD produce identical integrals at H_e=H_t=0. The only drift
+    # source is scipy.integrate.quad's adaptive tolerance, which runs
+    # well below 0.1 %. Tighter would fight quad's own tolerance.
     assert hv["r0_sph"] == pytest.approx(const["r0_sph"], rel=0.001)
     assert hv["w_turb"] == pytest.approx(const["w_turb"], rel=0.001)
     assert hv["Cn2_integrated"] == pytest.approx(const["Cn2_integrated"], rel=0.001)

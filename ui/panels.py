@@ -48,7 +48,6 @@ from ui.labels import (
     SECTION_LABELS,
     input_label,
     input_tooltip,
-    input_unit,
 )
 
 

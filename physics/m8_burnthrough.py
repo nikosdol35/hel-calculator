@@ -165,6 +165,10 @@ def compute(inputs: dict) -> dict:
         # Failure-criterion evaluation (BEFORE the time step so tau_BT
         # is the instant the criterion first holds)
         if failure_mode_target == "melt":
+            # melt_budget is only None for materials without a latent heat
+            # (non-metals); the failure_mode_target==melt branch is only
+            # taken for metals, so melt_budget is guaranteed non-None here.
+            assert melt_budget is not None
             if melting:
                 if net_surface_flux > 0.0:
                     melt_energy += net_surface_flux * dt

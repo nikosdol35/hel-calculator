@@ -42,6 +42,7 @@ from __future__ import annotations
 import csv
 import io
 import math
+from typing import Literal
 
 import streamlit as st
 
@@ -118,7 +119,7 @@ def _card(
     *,
     override_label: str | None = None,
     flag_est: bool = False,
-    size: str = "lg",
+    size: Literal["lg", "md"] = "lg",
     sig_figs: int = 3,
 ) -> None:
     """Thin wrapper around ``metric_card`` that fills label/unit/tooltip from
@@ -716,9 +717,11 @@ def _compute_material_comparison(result: dict) -> dict[str, float] | None:
     t_amb = result.get("T_ambient")
     a_lambda = result.get("A_lambda")
 
-    if None in (thickness, wavelength, v_tgt, t_amb):
+    if thickness is None or wavelength is None or v_tgt is None or t_amb is None:
         return None
 
+    # mypy: the None guard above narrows the four fields; the casts below
+    # are float(...) on values already known to be non-None numeric inputs.
     key = (
         float(i_aim), float(thickness), float(wavelength),
         str(backside_bc), float(v_tgt), float(t_amb),
@@ -932,7 +935,7 @@ _SEVERITY_PATTERNS: tuple[tuple[str, str], ...] = (
 _SEVERITY_ORDER: dict[str, int] = {"error": 0, "warn": 1, "info": 2, "ok": 3}
 
 
-def _classify_flag_severity(flag: str) -> str:
+def _classify_flag_severity(flag: str) -> Literal["ok", "warn", "error", "info"]:
     """Return the severity of a single assumption-flag string.
 
     Uses a keyword heuristic against ``_SEVERITY_PATTERNS``; first match
@@ -943,7 +946,11 @@ def _classify_flag_severity(flag: str) -> str:
     lowered = flag.lower()
     for needle, severity in _SEVERITY_PATTERNS:
         if needle in lowered:
-            return severity
+            # _SEVERITY_PATTERNS entries are hand-curated to match the
+            # Literal["ok","warn","error","info"] alphabet; the tuple-of-str
+            # annotation is kept for readability, and the cast here tells
+            # mypy the invariant is maintained.
+            return severity  # type: ignore[return-value]
     return "info"
 
 

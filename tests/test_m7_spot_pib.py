@@ -44,6 +44,10 @@ def test_m7_pure_diffraction_5km():
     w_diff = 0.05·√(1 + (5000/7340)²) = 0.0605 m; d_spot = 0.1210 m;
     PIB = 1 - exp(-2·0.025²/0.0605²) = 0.2894."""
     result = m7_spot_pib.compute(_ideal_5km_inputs())
+    # SPEC §3 M7 tolerance = 2 %: exact-Gaussian w_diff is closed form
+    # but the hand-check target (0.0605 m) is rounded to 4 sig figs.
+    # 2 % absorbs both the SPEC-target rounding and any residual from
+    # the L/zR ratio calculation. Tighter would catch rounding, not code.
     assert result["w_diff"] == pytest.approx(0.0605, rel=0.02)
     assert result["d_spot"] == pytest.approx(0.1210, rel=0.02)
     assert result["PIB_fraction"] == pytest.approx(0.289, rel=0.02)
@@ -56,6 +60,10 @@ def test_m7_diff_plus_turb_5km():
     inputs = _ideal_5km_inputs()
     inputs["r0_sph"] = 0.0345
     result = m7_spot_pib.compute(inputs)
+    # SPEC §3 M7 tolerance = 2 %: w_total inherits M5's 2 % budget on
+    # r0_sph via w_turb, propagated through an exact quadrature sum.
+    # PIB exponent is quadratic in w_total so accuracy at 2 % here is
+    # sufficient to discriminate the engineering vs rigorous form.
     assert result["w_turb"] == pytest.approx(0.0494, rel=0.02)
     assert result["w_total"] == pytest.approx(0.0781, rel=0.02)
     assert result["PIB_fraction"] == pytest.approx(0.185, rel=0.02)
@@ -83,18 +91,25 @@ def test_m7_typical_c_uas_1500m():
     }
     result = m7_spot_pib.compute(inputs)
 
-    # Exact-Gaussian value (correct):
+    # SPEC §3 M7 tolerance = 2 %: THIS IS THE NEAR-FIELD REGRESSION
+    # GUARD. Exact-Gaussian value 5.10 cm; far-field asymptote would
+    # give 1.02 cm (5× smaller). 2 % is 1 mm, far below the 40 mm gap
+    # — tight enough to catch a near-field → far-field regression
+    # instantly, loose enough to not false-alarm on SPEC rounding.
     assert result["w_diff"] == pytest.approx(0.0510, rel=0.02)
 
     # Explicit assertion that we are NOT producing the far-field value:
-    k = 2.0 * math.pi / inputs["wavelength"]
     w_diff_farfield = inputs["M2"] * inputs["wavelength"] * inputs["R_slant"] / (
         math.pi * inputs["w0"]
     )
+    # 2 % around the hand-checked far-field value — this line is the
+    # explicit "we are NOT producing this wrong number" anchor.
     assert w_diff_farfield == pytest.approx(0.0102, rel=0.02)  # hand-check
     # 5× separation — trivially distinguishable at 2% tolerance.
     assert abs(result["w_diff"] - w_diff_farfield) / result["w_diff"] > 0.5
 
+    # SPEC §3 M7 tolerance = 2 %: PIB is a smooth closed-form function
+    # of w; matches the rest of the M7 budget.
     assert result["PIB_fraction"] == pytest.approx(0.376, rel=0.02)
 
 
@@ -117,12 +132,18 @@ def test_m7_convention_consistency():
 
     pib_w = 1.0 - math.exp(-2.0 * R ** 2 / w ** 2)
     pib_sigma = 1.0 - math.exp(-R ** 2 / (2.0 * sigma ** 2))
+    # rel = 1e-12: this is a pure algebraic-identity check — the two
+    # conventions are mathematically identical, so any drift is a code
+    # bug (factor-of-2 slip, reciprocal swap). Machine precision is the
+    # only defensible tolerance.
     assert pib_w == pytest.approx(pib_sigma, rel=1e-12)
     assert result["PIB_fraction"] == pytest.approx(pib_w, rel=1e-12)
 
     P_delivered = inputs["P_exit"] * inputs["tau_atm"] * inputs["S_TB"]
     ipeak_w = 2.0 * P_delivered / (math.pi * w ** 2)
     ipeak_sigma = P_delivered / (2.0 * math.pi * sigma ** 2)
+    # rel = 1e-12: same reasoning — the two I_peak forms are identical
+    # algebra, and CLAUDE §7.1 invariant #4 demands the factor of 2.
     assert ipeak_w == pytest.approx(ipeak_sigma, rel=1e-12)
     assert result["I_peak"] == pytest.approx(ipeak_w, rel=1e-12)
 
@@ -140,6 +161,10 @@ def test_m7_quadrature_independence():
         result["w_diff"] ** 2 + result["w_turb"] ** 2
         + result["w_jit"] ** 2 + inputs["w_bloom"] ** 2
     )
+    # rel = 1e-12: quadrature identity — CLAUDE §7.1 invariant
+    # w_total² = w_diff² + w_turb² + w_jit² + w_bloom². Machine
+    # precision is the only tolerance that exposes a linear-addition
+    # bug (which would overweight every component by ~30 %).
     assert result["w_total"] == pytest.approx(expected, rel=1e-12)
 
 
@@ -161,6 +186,10 @@ def test_m7_no_double_count_turbulence():
     # inverse ratio of w_total² values. Check they match exactly.
     expected_ratio = r_without["w_total"] ** 2 / r_with["w_total"] ** 2
     actual_ratio = r_with["I_peak"] / r_without["I_peak"]
+    # rel = 1e-12: structural identity — if turbulence enters only
+    # through w_turb (CLAUDE §7.1 invariant #6), the ratio of I_peak
+    # values must equal the inverse square ratio of w_total. Any slack
+    # would hide a double-count of turbulence via hidden Strehl factor.
     assert actual_ratio == pytest.approx(expected_ratio, rel=1e-12)
 
 

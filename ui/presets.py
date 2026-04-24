@@ -23,6 +23,8 @@ References:
 
 from __future__ import annotations
 
+from typing import Any, Callable
+
 
 # ---------------------------------------------------------------------------
 # Preset parameter dicts.
@@ -157,7 +159,7 @@ PRESET_PARAMETERS: dict[str, dict] = {
 # appear in the sidebar on the next rerun.
 
 # Each entry is ``(session_state_key, convert_from_si)``.
-_SI_TO_WIDGET: dict[str, tuple[str, object]] = {
+_SI_TO_WIDGET: dict[str, tuple[str, Callable[[Any], Any]]] = {
     "P0":            ("P0_kW",          lambda v: v / 1000.0),
     "M2":            ("M2",             lambda v: v),
     "D":             ("D_cm",           lambda v: v * 100.0),
