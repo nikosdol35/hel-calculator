@@ -22,8 +22,6 @@ Coverage goals per validation/README.md Layer 2.6:
 
 from __future__ import annotations
 
-import math
-
 import pytest
 
 from physics.common import (
@@ -115,20 +113,40 @@ def test_wavelength_validated_set_exact_matches() -> None:
 
 def test_wavelength_validated_set_within_default_tolerance() -> None:
     """Default tolerance is 5 nm per ARCHITECTURE §4.3: ±5 nm from any
-    reference wavelength is still considered validated. ±6 nm is not."""
-    for lam in VALIDATED_WAVELENGTHS_M:
+    reference wavelength is still considered validated. ±6 nm is not.
+
+    NOTE: 1.06 µm and 1.07 µm are only 10 nm apart, so an offset that
+    appears to fall outside one reference's ±5 nm window can still land
+    inside the adjacent reference's. This test uses the isolated
+    wavelengths 1.55 µm and 2.05 µm (neighbour distances ≥ 480 nm) so
+    the ±6 nm rejection check is unambiguous.
+    """
+    isolated = [1.55e-6, 2.05e-6]
+    for lam in isolated:
         assert wavelength_in_validated_set(lam + 5.0e-9) is True
         assert wavelength_in_validated_set(lam - 5.0e-9) is True
         assert wavelength_in_validated_set(lam + 6.0e-9) is False
         assert wavelength_in_validated_set(lam - 6.0e-9) is False
 
+    # For the 1.06 / 1.07 µm cluster, the ±5 nm acceptance still holds
+    # but ±6 nm depends on which neighbour it's closest to. We verify
+    # the acceptance side only for these.
+    for lam in (1.06e-6, 1.07e-6):
+        assert wavelength_in_validated_set(lam + 5.0e-9) is True
+        assert wavelength_in_validated_set(lam - 5.0e-9) is True
+
 
 def test_wavelength_validated_set_custom_tolerance() -> None:
     """A widened tol_nm parameter expands the window; a 0-nm tolerance
-    demands exact match."""
-    assert wavelength_in_validated_set(1.06e-6 + 10.0e-9, tol_nm=15.0) is True
-    assert wavelength_in_validated_set(1.06e-6 + 10.0e-9, tol_nm=0.0) is False
-    assert wavelength_in_validated_set(1.06e-6, tol_nm=0.0) is True
+    demands exact match.
+
+    Uses the 2.05 µm reference (nearest neighbour 1.55 µm is 500 nm
+    away) so a 10 nm offset does not accidentally land on another
+    validated wavelength at tol_nm=0.
+    """
+    assert wavelength_in_validated_set(2.05e-6 + 10.0e-9, tol_nm=15.0) is True
+    assert wavelength_in_validated_set(2.05e-6 + 10.0e-9, tol_nm=0.0) is False
+    assert wavelength_in_validated_set(2.05e-6, tol_nm=0.0) is True
 
 
 def test_wavelength_validated_set_far_wavelengths_rejected() -> None:

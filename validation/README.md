@@ -55,3 +55,4 @@ Layer 2 test coverage and Layer 3 numerical-methods reports complement the deriv
 ## Revision log
 
 - 2026-04-24 — tree created; Package 1 files written.
+- 2026-04-24 — Package 3 Layer 3 numerical-methods files written (`methods/m8_solver.md`, `methods/m6_m7_iteration.md`, `methods/m5_r0_integral.md`, `methods/m4_interp.md`) with companion tests in `tests/test_m8_numerics.py`, `tests/test_m6_m7_convergence.py`, `tests/test_m5_numerics.py`. Layer 3.4 (M4 interp) is doc-only — reuses the Package 2 `tests/test_helpers.py` coverage.

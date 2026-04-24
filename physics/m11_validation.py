@@ -383,6 +383,8 @@ def _parse_junit_xml(xml_path: Path, start_utc: _dt.datetime) -> dict:
 
         if is_fail:
             failed_el = failure_el if failure_el is not None else error_el
+            # is_fail guarantees one of the two is non-None; narrow for mypy.
+            assert failed_el is not None
             error_message = (failed_el.attrib.get("message")
                              or (failed_el.text or "").strip()
                              or "test failed")

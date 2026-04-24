@@ -99,7 +99,6 @@ def test_m7_typical_c_uas_1500m():
     assert result["w_diff"] == pytest.approx(0.0510, rel=0.02)
 
     # Explicit assertion that we are NOT producing the far-field value:
-    k = 2.0 * math.pi / inputs["wavelength"]
     w_diff_farfield = inputs["M2"] * inputs["wavelength"] * inputs["R_slant"] / (
         math.pi * inputs["w0"]
     )

@@ -180,9 +180,9 @@ def test_golden_scenario(name: str, inputs: dict) -> None:
         msg = (
             f"\nScenario {name!r}: {len(mismatches)} golden-output "
             "mismatch(es):\n  - " + "\n  - ".join(mismatches)
-            + f"\n\nIf this change is intentional, run "
-            f"GOLDEN_UPDATE=1 pytest tests/test_golden.py -v "
-            f"and commit the diff alongside the SPEC/code change."
+            + "\n\nIf this change is intentional, run "
+            "GOLDEN_UPDATE=1 pytest tests/test_golden.py -v "
+            "and commit the diff alongside the SPEC/code change."
         )
         pytest.fail(msg)
 

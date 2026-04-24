@@ -19,7 +19,6 @@ from physics import (
     m2_beam_director,
     m3_geometry,
     m4_atmosphere,
-    m5_turbulence,
     m6_blooming,
     m7_spot_pib,
     m9_nohd,
