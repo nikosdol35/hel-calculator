@@ -1,10 +1,11 @@
 # ARCHITECTURE.md — HEL Engineering Calculator
 
-**Version:** 1.8 (Phase 3 UI redesign PR 4: `ui/plots.py` rewritten onto the shared `hel_dark` / `hel_light` Plotly template, multi-series data traces use hue + dash + marker-shape dual-encoding, every plot renders a frame even when the sweep is missing / infeasible / all-NaN with an in-chart advisory from `ui/labels.ADVISORY`, the curated modebar config is passed to every `st.plotly_chart` call, a log-scale toggle sits above the peak-irradiance panel, and a sidebar-footer dark / light theme toggle flips both the app CSS and the registered Plotly template in one action)
+**Version:** 1.9 (Phase 3 UI redesign PR 5: `ui/plots.py` gains six new figure constructors — `plot_overview_dwell_vs_burnthrough`, `plot_target_temperature_envelope`, `plot_target_material_comparison`, `plot_safety_nohd_zones`, `plot_atmosphere_extinction_breakdown`, `plot_atmosphere_transmission_vs_range` — so every tab finally has its plot surface; `ui/outputs.py` renders these plots inside the existing `render_tab_overview / _target_effects / _safety / _atmosphere` entry points and memoizes the M8 material-comparison fan-out with `@st.cache_data`; `ui/app.py` threads the existing `sweep` list into `render_tab_atmosphere`; `ui/labels.py` grows three new `ADVISORY` keys and a `MATERIAL_DISPLAY_NAMES` dict. No physics changes — every new plot consumes already-computed outputs from the existing orchestrator chain.)
 **Complements:** `SPEC.md` §6 (file layout) and project plan v0.8 §2.3 (three-layer separation)
 **Scope:** Concrete implementation map — file paths, function signatures, import rules, data flow.
 
 **Revision history:**
+- v1.9 (2026-04-24) — **Phase 3 UI redesign, PR 5 of six: new plots land on every tab that was previously plotless.** No physics changes, no module I/O changes, no new files. (a) `ui/plots.py` gains six new figure constructors under the same template / modebar / advisory pattern set up in PR 4. `plot_overview_dwell_vs_burnthrough(dwell, tau_bt) -> Figure` renders a grouped vertical-bar comparison (dwell vs burn-through, log-y, margin annotation). `plot_target_temperature_envelope(*, t_amb_c, t_peak_c, t_fail_c, tau_bt, dwell) -> Figure` draws a two-point surface-temperature envelope from `(0, T_amb)` to `(τ_BT, T_surface_peak)` with a horizontal failure-threshold reference and a vertical dwell marker — explicitly labelled as the simplified two-point envelope the physics layer actually reports (M8 does not expose an intermediate `T(t)` trajectory, only scalar `τ_BT` and `T_surface_peak`; the caption cites `ADVISORY["temperature_schematic"]`). `plot_target_material_comparison(*, material_tau_bt, material_labels, current_material, dwell) -> Figure` draws one horizontal bar per tabulated v1 material, tints the currently selected material in `data.a` and the rest in `data.reference`, and renders "no failure before timeout" entries at `max(τ_BT)*1.2` with a flagged label. `plot_safety_nohd_zones(*, nohd_tophat, nohd_gausspeak) -> Figure` draws the three-zone hazard cross-section (inner hazard / caution band / safe) using shaded rectangles and vertical markers at each NOHD value, with the axis extending to `outer * 1.5`. `plot_atmosphere_extinction_breakdown(*, alpha_mol_abs_si, alpha_mol_scat_si, alpha_aer_abs_si, alpha_aer_scat_si) -> Figure` draws a horizontal stacked bar of the four extinction channels with the legend below the chart. `plot_atmosphere_transmission_vs_range(sweep) -> Figure` draws atmospheric transmission τ(L) across the sweep with a horizontal `1/e` reference. All six constructors honor the PR 4 contract: `hel_dark`/`hel_light` template, `PLOTLY_MODEBAR_CONFIG`, advisory-frame branch when inputs are missing / non-finite. (b) `ui/outputs.py` wires the new plots: `render_tab_overview` appends the dwell-vs-burnthrough hero chart under a new `"Engagement margin"` section header; `render_tab_target_effects` is rewritten to emit the temperature envelope and material-comparison plots after the existing metric cards, with a new helper `_material_t_fail(material)` (lazy-imports `MATERIAL_PROPERTIES` from `physics.m8_material_tables`) and a `@st.cache_data(max_entries=32, show_spinner=False)`-wrapped `_material_comparison_cached(key)` that iterates the seven v1 materials through `physics.m8_burnthrough.compute`, mapping `failure_mode == "no_failure_before_timeout"` or `ValueError` to `math.nan` so the plot's always-render-frame branch is never triggered by a per-material failure; `render_tab_safety` appends the NOHD-zones schematic after the existing metric cards and caption; `render_tab_atmosphere` is rewritten to keep the atmospheric-summary cards, drop the previous numeric `st.table` rows, and emit the extinction breakdown followed by transmission-vs-range — it now accepts `*, sweep: list[dict] | None = None` so the transmission curve can consume the same sweep the plot-layer panels already use. (c) `ui/app.py` threads `sweep=sweep` into the `outputs.render_tab_atmosphere(...)` call site; no other `render_tab_*` signature changes. (d) `ui/labels.py` adds three `ADVISORY` keys — `temperature_schematic`, `material_comparison_unavailable`, `no_hazard_data` — and a `MATERIAL_DISPLAY_NAMES` dict mapping the seven SPEC material keys to engineer-legible display names (`anodized_Al → "Anodized aluminium"`, `CFRP → "Carbon-fibre composite"`, etc.). The `__all__` export list grows accordingly. (e) §6.5 `ui/plots.py` entry is rewritten below to list all nine constructors (three from PR 4 + six from PR 5) with final signatures, and the v1.8 trailing "PR 5 adds five new figure constructors" sentence is removed now that PR 5 is the active state. No change to `physics/`, no change to `tests/` (the existing validation suite and `tests/test_copy_style.py` scan list cover the new strings already; the new `ADVISORY` copy and `MATERIAL_DISPLAY_NAMES` values were drafted to pass the forbidden-token lint unchanged). Companion SPEC edits land in `SPEC.md v1.11`.
 - v1.0 — initial draft
 - v1.1 — post-audit fixes: (a) M9 moved earlier in orchestrator pseudocode to reflect its true independence from the propagation chain; (b) timing estimates in §5.2 explicitly flagged as pre-implementation, to be replaced with Phase 1 benchmark; (c) §6 extended to cover all UI files (added §6.6 orchestrator, §6.7 style, §6.8 __init__); (d) M11 row in §4.2 aligned with SPEC.md v1.1 explicit signature.
 - v1.2 — UI alignment with SPEC v1.2: cross-references added so that each of the four UI enhancements added in SPEC v1.2 has a corresponding structural anchor in this document. (a) §6.1 (app.py) now lists URL state encode/decode and the cross-plot hover-sync callback as responsibilities; (b) §6.3 (panels.py) notes default expansion state, emoji iconography, and that initial values come from URL params if present; (c) §6.4 (outputs.py) cross-references the three-tier verdict in SPEC §5.2 Panel 2; (d) §6.5 (plots.py) notes that figures use Plotly `hovermode='x unified'` per SPEC §5.2; (e) §5.1 page-load sequence note added (URL decode happens before panel rendering on first run). No file structure changes, no function-signature changes, no new files. Color constants in §6.7 already aligned (`COLOR_SUCCESS / COLOR_WARNING / COLOR_CAUTION` were defined in v1.0 and are now consumed by SPEC v1.2 verdict logic).
@@ -373,6 +374,7 @@ def render_all(result: dict, reference_range: float) -> None:
 ### 6.5 `ui/plots.py` — Plotly constructors
 
 ```python
+# Plot-layer panels (PR 4 — sweep-driven, slant-range x-axis)
 def plot_a_on_target_performance(
     sweep: list[dict] | None,
     *,
@@ -387,9 +389,63 @@ def plot_b_time_to_burnthrough(
 def plot_c_beam_diameter_breakdown(
     sweep: list[dict] | None,
 ) -> plotly.graph_objects.Figure: ...
+
+
+# Overview tab (PR 5)
+def plot_overview_dwell_vs_burnthrough(
+    dwell: float | None,
+    tau_bt: float | None,
+) -> plotly.graph_objects.Figure:
+    """Grouped-bar comparison of dwell vs time-to-burn-through, log-y."""
+
+
+# Target-effects tab (PR 5)
+def plot_target_temperature_envelope(
+    *,
+    t_amb_c: float | None,
+    t_peak_c: float | None,
+    t_fail_c: float | None,
+    tau_bt: float | None,
+    dwell: float | None,
+) -> plotly.graph_objects.Figure:
+    """Two-point simplified surface-temperature envelope with threshold line."""
+
+def plot_target_material_comparison(
+    *,
+    material_tau_bt: dict[str, float],
+    material_labels: dict[str, str],
+    current_material: str,
+    dwell: float | None,
+) -> plotly.graph_objects.Figure:
+    """Horizontal bar chart of burn-through time across the v1 material set."""
+
+
+# Safety tab (PR 5)
+def plot_safety_nohd_zones(
+    *,
+    nohd_tophat: float | None,
+    nohd_gausspeak: float | None,
+) -> plotly.graph_objects.Figure:
+    """Hazard-zone cross-section with shaded bands and NOHD markers."""
+
+
+# Atmosphere tab (PR 5)
+def plot_atmosphere_extinction_breakdown(
+    *,
+    alpha_mol_abs_si: float | None,
+    alpha_mol_scat_si: float | None,
+    alpha_aer_abs_si: float | None,
+    alpha_aer_scat_si: float | None,
+) -> plotly.graph_objects.Figure:
+    """Horizontal stacked bar of the four extinction channels."""
+
+def plot_atmosphere_transmission_vs_range(
+    sweep: list[dict] | None,
+) -> plotly.graph_objects.Figure:
+    """Atmospheric transmission τ(L) across the range sweep with 1/e reference."""
 ```
 
-Each returns a Plotly `Figure` object that `ui/outputs.py` passes to `st.plotly_chart`. No global state; pure constructors. Per SPEC §5.2, each figure sets `hovermode='x unified'` and populates hover tooltips with the per-plot content specified there. Cross-plot hover synchronization was considered for v1 but descoped in SPEC v1.6 / ARCH v1.4 — each plot's unified hover is entirely self-contained within its Plotly figure and no app-level callback is required.
+Each returns a Plotly `Figure` object that `ui/outputs.py` passes to `st.plotly_chart`. No global state; pure constructors. Per SPEC §5.2, each figure sets `hovermode='x unified'` (or `'closest'` for the horizontal-bar / cross-section constructors where a unified-per-x hover does not apply) and populates hover tooltips with the per-plot content specified there. Cross-plot hover synchronization was considered for v1 but descoped in SPEC v1.6 / ARCH v1.4 — each plot's unified hover is entirely self-contained within its Plotly figure and no app-level callback is required.
 
 **Shared Plotly template (v1.6 → v1.8).** Every figure picks up the template registered in `ui/theme.py` under the name `hel_dark` / `hel_light` and set as default by `ui.theme.apply(app_mode)`. The template encodes paper background, plot-area background, gridline colors and widths, axis lines, spike-line styling (both axes, `spikedash='dot'`, `spikemode='across'`, `spikesnap='cursor'`), hover-label styling, tabular-nums tick fonts, legend placement (top-right inside the frame), and default margins `l=56, r=32, t=40, b=48`. Plot constructors in v1.8 do **not** override any of those — they rely on the template for every visual property that is not specific to the individual chart. One edit in `ui/theme.py` re-themes every chart in the app.
 
@@ -401,7 +457,7 @@ Each returns a Plotly `Figure` object that `ui/outputs.py` passes to `st.plotly_
 
 **Log / linear toggle (v1.8).** `plot_a_on_target_performance` accepts an optional `log_y: bool = False` keyword; `ui/outputs.py` renders a small horizontal `st.radio` above the peak-irradiance panel and threads the selection through. The toggle sits outside the modebar so it is visible by default — an engineer-legible control rather than a hidden preference. PR 5 will add similar toggles above the extinction-breakdown and transmission-vs-range plots as those constructors land.
 
-**Phase 3 PR 5** (Phase 3, next PR) adds five new figure constructors — temperature-vs-time, τ_BT material comparison, NOHD cross-section, transmission vs range, extinction breakdown — under the same signature pattern (accept `sweep=None`, return a frame with advisory when empty).
+**PR 5 plots (v1.9).** The six new constructors above follow the same contract as the PR 4 plot-layer panels: shared template, `PLOTLY_MODEBAR_CONFIG` modebar, centered `ui/labels.ADVISORY` text in an empty-frame branch when inputs are missing or non-finite, hue + dash + marker-shape dual-encoding on any multi-series trace, and fixed heights from `ui.theme.PLOT_HEIGHTS`. `plot_target_temperature_envelope` is deliberately a two-point envelope (ambient → peak at τ_BT), not a solver-produced T(t) trajectory — the physics layer's M8 module exposes only scalar `τ_BT` and `T_surface_peak`, and the envelope is captioned under `ADVISORY["temperature_schematic"]` so the simplification is visible to the user. `plot_target_material_comparison` consumes a pre-computed `{material_key: τ_BT}` dict assembled and memoized in `ui/outputs.py` (the fan-out calls `physics.m8_burnthrough.compute(...)` once per v1 material; the helper is wrapped in `@st.cache_data(max_entries=32, show_spinner=False)` with a hashable input tuple so seven M8 solves do not re-run on every Streamlit rerun). `plot_safety_nohd_zones` sizes its x-axis to `outer * 1.5` where `outer` is the larger of the top-hat and Gaussian-peak NOHD values.
 
 ### 6.6 `ui/__init__.py`
 

@@ -44,13 +44,13 @@ import math
 import streamlit as st
 
 from ui.components import (
-    format_value,
     metric_card,
     section_header,
     status_chip,
 )
 from ui.labels import (
     ADVISORY,
+    MATERIAL_DISPLAY_NAMES,
     VERDICT_TEMPLATES,
     output_label,
     output_tooltip,
@@ -236,6 +236,18 @@ def render_tab_overview(result: dict) -> None:
     with c2:
         _card("engagements_per_hour", eng_per_hr, size="md")
 
+    # --- Hero chart: dwell vs burn-through ----------------------------------
+    # Local imports keep the unit-test import surface of ui/outputs.py light.
+    from ui import plots
+    from ui.theme import PLOTLY_MODEBAR_CONFIG
+
+    section_header("Engagement margin")
+    st.plotly_chart(
+        plots.plot_overview_dwell_vs_burnthrough(dwell, tau_bt),
+        use_container_width=True,
+        config=PLOTLY_MODEBAR_CONFIG,
+    )
+
 
 # =============================================================================
 # Engagement tab — spot-and-Strehl decomposition + range-sweep plots
@@ -380,10 +392,9 @@ def render_tab_target_effects(result: dict) -> None:
     """Render the Target effects tab.
 
     Shows the burn-through outcome (``τ_BT`` and the material context that
-    drives it — material name, thickness, absorbance, back-side BC) so the
-    user can reason about what changes if they pick a different material
-    or aimpoint. Temperature-vs-time and material-comparison plots are
-    PR 5 scope.
+    drives it — material name, thickness, absorbance, back-side BC), a
+    simplified temperature envelope, and a burn-through-comparison bar
+    across the seven v1 materials at the current reference-range flux.
     """
     section_header("Burn-through outcome")
 
@@ -411,7 +422,12 @@ def render_tab_target_effects(result: dict) -> None:
 
     c1, c2, c3, c4 = st.columns(4)
     with c1:
-        metric_card("Target material", material, unit="", size="md")
+        metric_card(
+            "Target material",
+            MATERIAL_DISPLAY_NAMES.get(material, material),
+            unit="",
+            size="md",
+        )
     with c2:
         # Display thickness in mm regardless of orchestrator's SI m.
         thickness_mm = thickness * 1000.0 if thickness is not None else None
@@ -438,10 +454,145 @@ def render_tab_target_effects(result: dict) -> None:
             size="md",
         )
 
-    st.caption(
-        "Temperature-vs-time and material-comparison plots arrive in a "
-        "future release."
+    # --- Plots: temperature envelope + material comparison -------------------
+    from ui import plots
+    from ui.theme import PLOTLY_MODEBAR_CONFIG
+
+    section_header("Temperature envelope")
+    # Assemble °C endpoints. Orchestrator carries T_ambient in K through
+    # the merged inputs, and m8 reports T_surface_peak in K; material
+    # T_fail lives in physics.m8_material_tables. The plot constructor
+    # is unit-neutral and expects °C for readable axis numbers.
+    t_amb_k = result.get("T_ambient")
+    t_peak_k = by["m8"].get("T_surface_peak")
+    t_fail_k = _material_t_fail(material)
+    t_amb_c = (t_amb_k - 273.15) if t_amb_k is not None else None
+    t_peak_c = (t_peak_k - 273.15) if t_peak_k is not None else None
+    t_fail_c = (t_fail_k - 273.15) if t_fail_k is not None else None
+
+    st.plotly_chart(
+        plots.plot_target_temperature_envelope(
+            t_amb_c=t_amb_c,
+            t_peak_c=t_peak_c,
+            t_fail_c=t_fail_c,
+            tau_bt=tau_bt,
+            dwell=dwell,
+        ),
+        use_container_width=True,
+        config=PLOTLY_MODEBAR_CONFIG,
     )
+    st.caption(ADVISORY["temperature_schematic"])
+
+    section_header("Burn-through across v1 materials")
+    material_tau = _compute_material_comparison(result)
+    st.plotly_chart(
+        plots.plot_target_material_comparison(
+            material_tau_bt=material_tau,
+            material_labels=MATERIAL_DISPLAY_NAMES,
+            current_material=material,
+            dwell=dwell,
+        ),
+        use_container_width=True,
+        config=PLOTLY_MODEBAR_CONFIG,
+    )
+    st.caption(
+        "Each bar shows time-to-burn-through for that material under the "
+        "same reference-range flux, thickness, wavelength, and back-side "
+        "boundary. Bars to the left of the dwell marker are engageable."
+    )
+
+
+# -----------------------------------------------------------------------------
+# Material-comparison helper — calls m8 per material, cached.
+# -----------------------------------------------------------------------------
+
+def _material_t_fail(material: str) -> float | None:
+    """Look up the failure temperature (K) for a v1 material name."""
+    # Lazy import: keeps outputs.py unit-test import surface clean.
+    from physics.m8_material_tables import MATERIAL_PROPERTIES
+    props = MATERIAL_PROPERTIES.get(material)
+    if props is None:
+        return None
+    t_fail = props.get("T_fail")
+    return float(t_fail) if t_fail is not None else None
+
+
+def _compute_material_comparison(result: dict) -> dict[str, float] | None:
+    """Return {material_name: tau_BT_seconds} for every v1 material.
+
+    Calls ``m8_burnthrough.compute`` once per material, keeping every
+    non-material input identical to the current analysis (flux,
+    thickness, wavelength, back-side boundary, target velocity, ambient
+    temperature). Entries that hit the internal timeout keep their
+    sentinel value so the plot constructor can render them as
+    "no burn-through" bars.
+
+    Wrapped through a ``@st.cache_data`` bridge so the 7-call cost is
+    amortised across reruns at the same inputs.
+    """
+    from physics.m8_material_tables import MATERIALS
+
+    # Build a hashable key from just the inputs m8 reads.
+    i_aim = result.get("by_module", {}).get("m7", {}).get("I_avg_aim")
+    if i_aim is None or not math.isfinite(i_aim):
+        return None
+    thickness = result.get("thickness")
+    wavelength = result.get("wavelength")
+    backside_bc = result.get("backside_BC", "insulated")
+    v_tgt = result.get("v_tgt")
+    t_amb = result.get("T_ambient")
+    a_lambda = result.get("A_lambda")
+
+    if None in (thickness, wavelength, v_tgt, t_amb):
+        return None
+
+    key = (
+        float(i_aim), float(thickness), float(wavelength),
+        str(backside_bc), float(v_tgt), float(t_amb),
+        None if a_lambda is None else float(a_lambda),
+        tuple(MATERIALS),
+    )
+    return _material_comparison_cached(key)
+
+
+@st.cache_data(max_entries=32, show_spinner=False)
+def _material_comparison_cached(key: tuple) -> dict[str, float]:
+    """Cached worker: evaluates m8 once per v1 material for one frozen key."""
+    from physics import m8_burnthrough
+    from physics.m8_material_tables import MATERIALS
+
+    (
+        i_aim, thickness, wavelength, backside_bc,
+        v_tgt, t_amb, a_lambda, _materials_tuple,
+    ) = key
+
+    out: dict[str, float] = {}
+    for material in MATERIALS:
+        inputs = {
+            "I_aim":       i_aim,
+            "material":    material,
+            "thickness":   thickness,
+            "wavelength":  wavelength,
+            "backside_BC": backside_bc,
+            "v_tgt":       v_tgt,
+            "T_ambient":   t_amb,
+        }
+        if a_lambda is not None:
+            inputs["A_lambda"] = a_lambda
+        try:
+            result = m8_burnthrough.compute(inputs)
+            tau = float(result.get("tau_BT", math.nan))
+            # no_failure_before_timeout → report as NaN so the plot's
+            # timeout-bar branch renders it at the right edge.
+            mode = result.get("failure_mode", "")
+            if mode == "no_failure_before_timeout":
+                tau = math.nan
+            out[material] = tau
+        except ValueError:
+            # Bad input for this material (e.g. thickness outside range);
+            # surface as NaN rather than crashing the whole chart.
+            out[material] = math.nan
+    return out
 
 
 # =============================================================================
@@ -454,7 +605,10 @@ def render_tab_safety(result: dict) -> None:
     Both Nominal Ocular Hazard Distance conventions (top-hat and Gaussian-
     peak) sit side-by-side; the user cites whichever is appropriate for
     the specific safety case. Laser class reads as a plain-string card.
-    The hazard-zone cross-section schematic is PR 5 scope.
+    A hazard-zone schematic below the cards shows the three zones on a
+    single range axis — inside the Gaussian-peak NOHD (hazardous under
+    both conventions), between the two NOHD values (transition zone),
+    and beyond the top-hat NOHD (safe under both).
     """
     section_header("Nominal Ocular Hazard Distance")
 
@@ -474,50 +628,86 @@ def render_tab_safety(result: dict) -> None:
         "The Gaussian-peak value is the more conservative of the two."
     )
 
+    # --- Hazard-zone schematic ---------------------------------------------
+    from ui import plots
+    from ui.theme import PLOTLY_MODEBAR_CONFIG
+
+    section_header("Hazard zones")
+    st.plotly_chart(
+        plots.plot_safety_nohd_zones(
+            nohd_tophat=nohd_th,
+            nohd_gausspeak=nohd_gp,
+        ),
+        use_container_width=True,
+        config=PLOTLY_MODEBAR_CONFIG,
+    )
+
 
 # =============================================================================
 # Atmosphere tab — extinction breakdown
 # =============================================================================
 
-def render_tab_atmosphere(result: dict) -> None:
+def render_tab_atmosphere(
+    result: dict,
+    *,
+    sweep: list[dict] | None = None,
+) -> None:
     """Render the Atmosphere tab.
 
-    Shows the total extinction coefficient split into its four contributing
-    components (molecular absorption, molecular scattering, aerosol
-    absorption, aerosol scattering) with per-component percentage share.
-    PR 5 replaces the tabular view with a horizontal stacked-bar plot.
-    """
-    section_header("Atmospheric extinction breakdown")
-    by = result["by_module"]
+    Two-part content:
 
-    components = (
-        ("alpha_mol_abs",  by["m4"]["alpha_mol_abs"]),
-        ("alpha_mol_scat", by["m4"]["alpha_mol_scat"]),
-        ("alpha_aer_abs",  by["m4"]["alpha_aer_abs"]),
-        ("alpha_aer_scat", by["m4"]["alpha_aer_scat"]),
-    )
+    1. **Extinction breakdown** — horizontal stacked bar splitting the
+       total extinction coefficient into its four physical components
+       (molecular absorption, molecular scattering, aerosol absorption,
+       aerosol scattering). Each segment is annotated with its share of
+       the total in the hover text.
+    2. **Transmission vs slant range** — line chart of τ_atm(L) across
+       the orchestrator's range sweep, with a 1/e horizontal reference
+       to read the characteristic attenuation length at a glance.
+
+    The sweep argument is optional so the renderer stays usable in
+    unit-test harnesses that do not materialise a sweep; when absent
+    the second plot renders a frame with the infeasibility advisory
+    per SPEC §5.3 item 10.
+    """
+    from ui import plots
+    from ui.theme import PLOTLY_MODEBAR_CONFIG
+
+    by = result["by_module"]
+    alpha_mol_abs = by["m4"]["alpha_mol_abs"]
+    alpha_mol_scat = by["m4"]["alpha_mol_scat"]
+    alpha_aer_abs = by["m4"]["alpha_aer_abs"]
+    alpha_aer_scat = by["m4"]["alpha_aer_scat"]
     total_si = by["m4"]["alpha_atm"]
 
+    # --- Headline cards: total extinction + reference-range transmission ---
+    section_header("Atmospheric summary")
+    c1, c2 = st.columns(2)
+    with c1: _card("alpha_atm", total_si)
+    with c2: _card("tau_atm", by["m4"].get("tau_atm"), sig_figs=4)
+
+    # --- Extinction breakdown (stacked bar) --------------------------------
+    section_header("Extinction breakdown")
+    st.plotly_chart(
+        plots.plot_atmosphere_extinction_breakdown(
+            alpha_mol_abs_si=alpha_mol_abs,
+            alpha_mol_scat_si=alpha_mol_scat,
+            alpha_aer_abs_si=alpha_aer_abs,
+            alpha_aer_scat_si=alpha_aer_scat,
+        ),
+        use_container_width=True,
+        config=PLOTLY_MODEBAR_CONFIG,
+    )
     if total_si <= 0:
         st.info(ADVISORY["vacuum_path"])
-        return
 
-    # Build display rows. ``format_value`` handles the scientific-notation
-    # switch at |α| < 0.01/km automatically; share is a plain percentage.
-    rows = [
-        {
-            "Component": output_label(key),
-            "α (1/km)":  format_value(_scale(key, value), unit=""),
-            "Share":     f"{value / total_si * 100:.1f}%",
-        }
-        for key, value in components
-    ]
-    rows.append({
-        "Component": output_label("alpha_atm"),
-        "α (1/km)":  format_value(_scale("alpha_atm", total_si), unit=""),
-        "Share":     "100.0%",
-    })
-    st.table(rows)
+    # --- Transmission vs range ---------------------------------------------
+    section_header("Transmission vs slant range")
+    st.plotly_chart(
+        plots.plot_atmosphere_transmission_vs_range(sweep),
+        use_container_width=True,
+        config=PLOTLY_MODEBAR_CONFIG,
+    )
 
 
 # =============================================================================

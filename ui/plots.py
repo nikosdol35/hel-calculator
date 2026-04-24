@@ -1,8 +1,37 @@
-"""Plotly figure constructors per SPEC §5.2 (Phase 3 PR 4 rewrite).
+"""Plotly figure constructors per SPEC §5.2 (Phase 3 PR 5 rewrite).
 
 Each function returns a ``plotly.graph_objects.Figure`` object that
 ``ui/outputs.py`` passes to ``st.plotly_chart``. Pure constructors: no
 Streamlit imports, no caching, no global state.
+
+PR 5 additions versus PR 4:
+
+* Six new constructors wire Target effects, Safety, Atmosphere, and
+  Overview to real plots (plan item: "every plot-owning tab renders its
+  plot"). The new entry points are:
+
+    - ``plot_overview_dwell_vs_burnthrough``   — Overview hero bar.
+    - ``plot_target_temperature_envelope``      — Target effects T envelope.
+    - ``plot_target_material_comparison``       — Target effects bar.
+    - ``plot_safety_nohd_zones``                — Safety range-axis zones.
+    - ``plot_atmosphere_extinction_breakdown``  — Atmosphere stacked bar.
+    - ``plot_atmosphere_transmission_vs_range`` — Atmosphere line chart.
+
+  Each one honours the PR 4 contract: shared template, always-render
+  frame + advisory when the underlying data is missing, dual-encoded
+  series palette, English-prose hover labels.
+
+* No physics changes. The material-comparison constructor receives a
+  pre-computed ``{material_name: tau_BT}`` dict; the caller in
+  ``ui/outputs.py`` does the seven-times ``m8_burnthrough.compute`` call
+  through a ``@st.cache_data`` wrapper so the render path stays fast on
+  subsequent reruns.
+
+* The temperature-vs-time view is a simplified two-point envelope
+  (ambient → peak, linear interpolation) because the M8 solver only
+  returns scalar endpoints in v1. The plot caption and the shared
+  ADVISORY["temperature_schematic"] string make the simplification
+  explicit to the reader.
 
 PR 4 changes versus PR 3:
 
@@ -616,8 +645,594 @@ def _hex_to_rgba(hex_color: str, *, alpha: float) -> str:
     return f"rgba({r},{g},{b},{alpha})"
 
 
+# ---------------------------------------------------------------------------
+# Overview hero — dwell vs burn-through comparison (PR 5).
+# ---------------------------------------------------------------------------
+
+def plot_overview_dwell_vs_burnthrough(
+    dwell: float | None,
+    tau_bt: float | None,
+) -> go.Figure:
+    """Grouped vertical bars comparing available dwell and time-to-burn-through.
+
+    The Overview tab's single hero chart. Reads "can I hold the beam on
+    target long enough to kill it?" in one glance — the dwell bar must
+    sit at or above the burn-through bar for the engagement to be
+    viable. The y-axis is log-scaled because both quantities span
+    several decades across realistic inputs.
+
+    Degenerate cases:
+
+    * ``dwell`` is ``None`` or ≤ 0 → advisory "no dwell available".
+    * ``tau_bt`` is ``None`` or NaN → advisory "no burn-through".
+    * ``tau_bt`` ≤ 0 (instantaneous) → renders a single dwell bar with
+      an informative caption rather than a malformed log-scale value.
+
+    Args:
+        dwell: available-dwell seconds from ``m3`` — None or ≤ 0 triggers
+            the no-dwell advisory frame.
+        tau_bt: time-to-burn-through seconds from ``m8`` — None / NaN
+            triggers the no-burn-through advisory frame.
+    """
+    height = PLOT_HEIGHTS["default"]
+    xtitle = ""
+    ytitle = "Time (s)"
+    title = "Available dwell vs time to burn-through"
+
+    if dwell is None or (isinstance(dwell, float) and not math.isfinite(dwell)):
+        return _empty_frame(
+            title=title, xtitle=xtitle, ytitle=ytitle,
+            advisory=ADVISORY["no_dwell_available"], height=height,
+        )
+    if dwell <= 0.0:
+        return _empty_frame(
+            title=title, xtitle=xtitle, ytitle=ytitle,
+            advisory=ADVISORY["no_dwell_available"], height=height,
+        )
+    if tau_bt is None or (isinstance(tau_bt, float) and not math.isfinite(tau_bt)):
+        return _empty_frame(
+            title=title, xtitle=xtitle, ytitle=ytitle,
+            advisory=ADVISORY["no_burnthrough"], height=height,
+        )
+
+    palette = _active_palette()
+    s_ok = palette["status.ok"]
+    s_err = palette["status.error"]
+    # Dwell always uses the data-A hue; burn-through tint follows feasibility
+    # so the reader's eye lands on the failure case directly.
+    tau_color = s_ok if tau_bt <= dwell else s_err
+
+    categories = ["Available dwell", "Time to burn-through"]
+    values = [dwell, max(tau_bt, 1e-6)]  # log-axis guard for tau_bt ≤ 0
+
+    fig = go.Figure()
+    fig.add_trace(
+        go.Bar(
+            x=categories,
+            y=values,
+            marker_color=[palette["data.a"], tau_color],
+            hovertemplate="%{x}: %{y:.3g} s<extra></extra>",
+            showlegend=False,
+        )
+    )
+
+    # Margin annotation — the headline number above the bars.
+    margin_frac = (dwell - tau_bt) / tau_bt if tau_bt > 0 else float("inf")
+    if math.isfinite(margin_frac):
+        annotation_text = f"Engagement margin: {margin_frac * 100:+.0f}%"
+    else:
+        annotation_text = "Engagement margin: instantaneous"
+    fig.add_annotation(
+        text=annotation_text,
+        xref="paper", yref="paper",
+        x=0.5, y=1.0, xanchor="center", yanchor="bottom",
+        showarrow=False,
+        font=dict(color=palette["fg.secondary"], size=12),
+    )
+
+    fig.update_layout(
+        title=title,
+        height=height,
+        hovermode="x",
+        showlegend=False,
+    )
+    fig.update_xaxes(title_text=xtitle, showgrid=False)
+    fig.update_yaxes(title_text=ytitle, type="log")
+    return fig
+
+
+# ---------------------------------------------------------------------------
+# Target effects — temperature envelope (simplified two-point view).
+# ---------------------------------------------------------------------------
+
+def plot_target_temperature_envelope(
+    *,
+    t_amb_c: float | None,
+    t_peak_c: float | None,
+    t_fail_c: float | None,
+    tau_bt: float | None,
+    dwell: float | None,
+) -> go.Figure:
+    """Two-point temperature envelope with failure-threshold annotation.
+
+    Simplified view because ``m8`` exposes only scalar endpoints in v1 —
+    the ambient baseline at ``t = 0`` and the peak surface temperature
+    at ``t = tau_bt``. The constructor draws a line between the two
+    scalars, plus a horizontal failure-threshold reference (``t_fail``)
+    and a vertical dwell reference (``dwell``) so the reader can see at
+    a glance how close the peak ran to failure and whether the
+    kinematics allowed reaching that peak in the first place.
+
+    All inputs are Celsius; the caller in ``ui/outputs.py`` converts
+    from Kelvin before calling. This keeps the constructor unit-neutral
+    (Celsius shows nicer axis numbers for the realistic range).
+
+    Renders a frame + advisory when any endpoint is missing.
+    """
+    height = PLOT_HEIGHTS["default"]
+    xtitle = "Time (s)"
+    ytitle = "Surface temperature (°C)"
+    title = "Surface temperature envelope"
+
+    if (
+        t_amb_c is None or t_peak_c is None
+        or tau_bt is None or (isinstance(tau_bt, float) and not math.isfinite(tau_bt))
+        or tau_bt <= 0.0
+    ):
+        return _empty_frame(
+            title=title, xtitle=xtitle, ytitle=ytitle,
+            advisory=ADVISORY["no_burnthrough"], height=height,
+        )
+
+    palette = _active_palette()
+
+    # X-axis: 0 → max(tau_bt, dwell) * 1.1 so the dwell marker stays in
+    # frame even when dwell > tau_bt (the "margin" case).
+    x_max = max(tau_bt, dwell or 0.0) * 1.1
+    # Y-axis: anchor to ambient and expand to include fail threshold plus
+    # a small headroom so annotations don't hit the frame edge.
+    y_max_candidates = [t_peak_c]
+    if t_fail_c is not None:
+        y_max_candidates.append(t_fail_c)
+    y_max = max(y_max_candidates) * 1.05 if max(y_max_candidates) > 0 else 1.0
+    y_min = min(t_amb_c, 0.0) - 10.0
+
+    fig = go.Figure()
+    # Rise segment (series A, amber solid, circles at the two endpoints).
+    s0 = _series_style(0, palette)
+    fig.add_trace(
+        go.Scatter(
+            x=[0.0, tau_bt],
+            y=[t_amb_c, t_peak_c],
+            mode="lines+markers",
+            name="Surface temperature",
+            line=s0["line"], marker=s0["marker"],
+            hovertemplate="t = %{x:.2g} s, T = %{y:.1f} °C<extra></extra>",
+        )
+    )
+
+    # Failure-threshold horizontal line + annotation.
+    if t_fail_c is not None and math.isfinite(t_fail_c):
+        fig.add_hline(
+            y=t_fail_c,
+            line=dict(color=palette["status.error"], width=1.5, dash="dash"),
+            annotation_text=f"Failure threshold: {t_fail_c:.0f} °C",
+            annotation_position="top right",
+            annotation_font=dict(color=palette["status.error"], size=11),
+        )
+
+    # Burn-through vertical marker.
+    fig.add_vline(
+        x=tau_bt,
+        line=dict(color=palette["data.a"], width=1.5, dash="dot"),
+        annotation_text=f"Burn-through: {tau_bt:.2g} s",
+        annotation_position="top",
+        annotation_font=dict(color=palette["data.a"], size=11),
+    )
+
+    # Available-dwell vertical marker (only when it's inside the frame).
+    if dwell is not None and math.isfinite(dwell) and dwell > 0.0:
+        fig.add_vline(
+            x=dwell,
+            line=dict(color=palette["status.ok"], width=1.5, dash="dashdot"),
+            annotation_text=f"Available dwell: {dwell:.2g} s",
+            annotation_position="bottom",
+            annotation_font=dict(color=palette["status.ok"], size=11),
+        )
+
+    fig.update_layout(
+        title=title,
+        hovermode="x",
+        height=height,
+    )
+    fig.update_xaxes(title_text=xtitle, range=[0.0, x_max])
+    fig.update_yaxes(title_text=ytitle, range=[y_min, y_max])
+    return fig
+
+
+# ---------------------------------------------------------------------------
+# Target effects — tau_BT comparison across v1 materials.
+# ---------------------------------------------------------------------------
+
+def plot_target_material_comparison(
+    *,
+    material_tau_bt: dict[str, float] | None,
+    material_labels: dict[str, str],
+    current_material: str | None,
+    dwell: float | None,
+) -> go.Figure:
+    """Horizontal bar chart of time-to-burn-through across v1 materials.
+
+    One row per material. The currently-selected material highlights in
+    the primary data hue; the other six read in the reference gray so
+    the eye lands on the current selection first. A vertical reference
+    line marks the available dwell — any bar to the left of the line is
+    engageable at the reference-range flux.
+
+    Args:
+        material_tau_bt: {material_name: tau_BT_seconds}. NaN or
+            non-finite entries are shown as "timeout" bars at the right
+            edge of the axis (so the layout stays stable).
+        material_labels: {material_name: display_label} — English-prose
+            labels from the caller (drawn from ``ui/labels.py`` or a
+            simple title-case fallback).
+        current_material: which material is selected in the input
+            panel; that bar highlights in the primary hue.
+        dwell: available-dwell seconds — draws a vertical reference
+            line when finite and positive.
+    """
+    height = PLOT_HEIGHTS["hero"]
+    xtitle = "Time to burn-through (s)"
+    ytitle = ""
+    title = "Burn-through comparison across v1 materials"
+
+    if not material_tau_bt:
+        return _empty_frame(
+            title=title, xtitle=xtitle, ytitle=ytitle,
+            advisory=ADVISORY["material_comparison_unavailable"],
+            height=height,
+        )
+
+    palette = _active_palette()
+
+    # Stable sort: ascending by tau_bt so the fastest-failing material
+    # sits at the top of the bar chart (easier to compare visually).
+    # Non-finite values sink to the bottom.
+    def _key(entry: tuple[str, float]) -> tuple[int, float]:
+        _, v = entry
+        if not math.isfinite(v):
+            return (1, 0.0)
+        return (0, v)
+
+    sorted_items = sorted(material_tau_bt.items(), key=_key)
+
+    labels: list[str] = []
+    values: list[float] = []
+    colors: list[str] = []
+    hover_texts: list[str] = []
+    for name, v in sorted_items:
+        display = material_labels.get(name, name)
+        labels.append(display)
+        is_current = (name == current_material)
+        colors.append(palette["data.a"] if is_current else palette["data.reference"])
+        if math.isfinite(v) and v > 0:
+            values.append(v)
+            hover_texts.append(f"{display}: {v:.3g} s")
+        else:
+            # Display timeout materials at the right edge using the
+            # largest finite value ×1.2 so they remain visually
+            # distinguishable from feasible ones.
+            finite_vals = [w for _, w in sorted_items
+                           if math.isfinite(w) and w > 0]
+            fill_val = (max(finite_vals) * 1.2) if finite_vals else 60.0
+            values.append(fill_val)
+            hover_texts.append(f"{display}: no burn-through before timeout")
+
+    fig = go.Figure()
+    fig.add_trace(
+        go.Bar(
+            x=values,
+            y=labels,
+            orientation="h",
+            marker_color=colors,
+            text=hover_texts,
+            hovertemplate="%{text}<extra></extra>",
+            showlegend=False,
+        )
+    )
+
+    # Available-dwell vertical marker.
+    if dwell is not None and math.isfinite(dwell) and dwell > 0.0:
+        fig.add_vline(
+            x=dwell,
+            line=dict(color=palette["status.ok"], width=1.5, dash="dashdot"),
+            annotation_text=f"Available dwell: {dwell:.2g} s",
+            annotation_position="top right",
+            annotation_font=dict(color=palette["status.ok"], size=11),
+        )
+
+    fig.update_layout(
+        title=title,
+        height=height,
+        hovermode="y",
+        showlegend=False,
+    )
+    fig.update_xaxes(title_text=xtitle, type="log")
+    fig.update_yaxes(title_text=ytitle, automargin=True)
+    return fig
+
+
+# ---------------------------------------------------------------------------
+# Safety — NOHD hazard zones along range axis.
+# ---------------------------------------------------------------------------
+
+def plot_safety_nohd_zones(
+    *,
+    nohd_tophat: float | None,
+    nohd_gausspeak: float | None,
+) -> go.Figure:
+    """Range-axis schematic with three colored hazard zones.
+
+    A compact horizontal schematic of the hazard envelope: three bands
+    along a slant-range axis, colored from error-red (eye-hazardous
+    under both conventions) through warn-amber (hazardous under the
+    more-conservative Gaussian-peak convention only) to ok-green (safe
+    under both conventions). Vertical markers pin each NOHD value so
+    the reader can read the thresholds directly off the chart.
+
+    The axis extends to 1.5× the larger of the two NOHD values so both
+    transitions are clearly visible.
+    """
+    height = PLOT_HEIGHTS["cross-section"]
+    xtitle = "Slant range (km)"
+    ytitle = ""
+    title = "Hazard zones along slant range"
+
+    if (
+        nohd_tophat is None or nohd_gausspeak is None
+        or not math.isfinite(nohd_tophat) or not math.isfinite(nohd_gausspeak)
+        or (nohd_tophat <= 0.0 and nohd_gausspeak <= 0.0)
+    ):
+        return _empty_frame(
+            title=title, xtitle=xtitle, ytitle=ytitle,
+            advisory=ADVISORY["no_hazard_data"], height=height,
+        )
+
+    palette = _active_palette()
+
+    nohd_th_km = max(nohd_tophat, 0.0) / 1000.0
+    nohd_gp_km = max(nohd_gausspeak, 0.0) / 1000.0
+    # Gaussian-peak NOHD is the more conservative (larger) of the two —
+    # pin a consistent ordering so the zone logic below stays right even
+    # if the values arrive in an unexpected order.
+    inner = min(nohd_th_km, nohd_gp_km)
+    outer = max(nohd_th_km, nohd_gp_km)
+    axis_max = max(outer * 1.5, outer + 0.1)
+
+    fig = go.Figure()
+
+    # Three shaded zones. The shape layer sits behind the vertical
+    # markers; the 0.22 alpha stays legible on both dark and light
+    # templates without overwhelming the axis grid.
+    def _zone(x0: float, x1: float, hex_color: str) -> None:
+        fig.add_shape(
+            type="rect",
+            xref="x", yref="paper",
+            x0=x0, x1=x1, y0=0.0, y1=1.0,
+            fillcolor=_hex_to_rgba(hex_color, alpha=0.22),
+            line=dict(width=0),
+            layer="below",
+        )
+
+    _zone(0.0,   inner,     palette["status.error"])
+    _zone(inner, outer,     palette["status.warn"])
+    _zone(outer, axis_max,  palette["status.ok"])
+
+    # Zone labels as paper-anchored annotations above the axis.
+    for x0, x1, text, color in (
+        (0.0,   inner,    "Hazard zone",             palette["status.error"]),
+        (inner, outer,    "Transition zone",         palette["status.warn"]),
+        (outer, axis_max, "Safe under both conventions", palette["status.ok"]),
+    ):
+        if x1 > x0:
+            fig.add_annotation(
+                x=(x0 + x1) / 2.0, y=0.88,
+                xref="x", yref="paper",
+                text=text,
+                showarrow=False,
+                font=dict(color=color, size=11),
+            )
+
+    # Vertical markers for the two NOHD conventions.
+    for x_km, label_text, color in (
+        (nohd_gp_km, f"NOHD (Gaussian-peak): {nohd_gp_km:.2f} km", palette["data.a"]),
+        (nohd_th_km, f"NOHD (top-hat): {nohd_th_km:.2f} km",       palette["data.b"]),
+    ):
+        fig.add_vline(
+            x=x_km,
+            line=dict(color=color, width=1.8, dash="solid"),
+            annotation_text=label_text,
+            annotation_position="top",
+            annotation_font=dict(color=color, size=11),
+        )
+
+    # Invisible scatter along the axis so hover works across the range.
+    fig.add_trace(
+        go.Scatter(
+            x=[0.0, axis_max],
+            y=[0.5, 0.5],
+            mode="lines",
+            line=dict(color="rgba(0,0,0,0)"),
+            hoverinfo="skip",
+            showlegend=False,
+        )
+    )
+
+    fig.update_layout(
+        title=title,
+        height=height,
+        hovermode=False,
+        showlegend=False,
+    )
+    fig.update_xaxes(title_text=xtitle, range=[0.0, axis_max])
+    fig.update_yaxes(
+        title_text=ytitle,
+        range=[0.0, 1.0],
+        showticklabels=False,
+        showgrid=False,
+        zeroline=False,
+    )
+    return fig
+
+
+# ---------------------------------------------------------------------------
+# Atmosphere — extinction breakdown (horizontal stacked bar).
+# ---------------------------------------------------------------------------
+
+def plot_atmosphere_extinction_breakdown(
+    *,
+    alpha_mol_abs_si: float,
+    alpha_mol_scat_si: float,
+    alpha_aer_abs_si: float,
+    alpha_aer_scat_si: float,
+) -> go.Figure:
+    """Horizontal stacked bar split into the four extinction components.
+
+    All four inputs are in SI 1/m; the plot converts to display 1/km.
+    When the total is effectively zero (vacuum-like path), renders the
+    frame + "vacuum_path" advisory so the tab still reads as
+    "a chart that is waiting for atmosphere".
+    """
+    height = PLOT_HEIGHTS["paired"]
+    xtitle = "Extinction coefficient (1/km)"
+    ytitle = ""
+    title = "Atmospheric extinction breakdown"
+
+    total_si = (alpha_mol_abs_si + alpha_mol_scat_si
+                + alpha_aer_abs_si + alpha_aer_scat_si)
+    if total_si <= 1e-12:
+        return _empty_frame(
+            title=title, xtitle=xtitle, ytitle=ytitle,
+            advisory=ADVISORY["vacuum_path"], height=height,
+        )
+
+    palette = _active_palette()
+
+    # Component list (label, value in 1/km, color token). Order reads
+    # left-to-right: molecular first (always present), then aerosol.
+    components = (
+        ("Molecular absorption",  alpha_mol_abs_si  * 1e3, "data.a"),
+        ("Molecular scattering",  alpha_mol_scat_si * 1e3, "data.b"),
+        ("Aerosol absorption",    alpha_aer_abs_si  * 1e3, "data.c"),
+        ("Aerosol scattering",    alpha_aer_scat_si * 1e3, "data.reference"),
+    )
+    total_km = total_si * 1e3
+
+    fig = go.Figure()
+    for label, value_km, token in components:
+        share_pct = (value_km / total_km * 100.0) if total_km > 0 else 0.0
+        fig.add_trace(
+            go.Bar(
+                x=[value_km],
+                y=["Total extinction"],
+                orientation="h",
+                name=label,
+                marker_color=palette[token],
+                hovertemplate=(
+                    f"{label}: %{{x:.3g}} 1/km ({share_pct:.1f}%)"
+                    "<extra></extra>"
+                ),
+            )
+        )
+
+    fig.update_layout(
+        title=title,
+        height=height,
+        barmode="stack",
+        hovermode="closest",
+        showlegend=True,
+        legend=dict(orientation="h", x=0.0, y=-0.35, yanchor="top"),
+    )
+    fig.update_xaxes(title_text=xtitle)
+    fig.update_yaxes(title_text=ytitle, showticklabels=False)
+    return fig
+
+
+# ---------------------------------------------------------------------------
+# Atmosphere — transmission vs slant range.
+# ---------------------------------------------------------------------------
+
+def plot_atmosphere_transmission_vs_range(
+    sweep: list[dict] | None,
+) -> go.Figure:
+    """Atmospheric transmission curve over the sweep's range axis.
+
+    Line chart of τ_atm(L) from the orchestrator's range sweep, with a
+    horizontal reference at τ = 1/e ≈ 0.368 (the characteristic
+    attenuation length). When the sweep is missing or every
+    transmission value is NaN, renders a frame + advisory.
+    """
+    height = PLOT_HEIGHTS["default"]
+    xtitle = "Slant range (km)"
+    ytitle = "Atmospheric transmission"
+    title = "Transmission vs slant range"
+
+    if not sweep:
+        return _empty_frame(
+            title=title, xtitle=xtitle, ytitle=ytitle,
+            advisory=ADVISORY["infeasible_geometry"], height=height,
+        )
+
+    palette = _active_palette()
+    x_km = _x_km(sweep)
+    tau_atm = _get(sweep, "tau_atm")
+
+    if _all_nan(tau_atm):
+        return _empty_frame(
+            title=title, xtitle=xtitle, ytitle=ytitle,
+            advisory=ADVISORY["vacuum_path"], height=height,
+        )
+
+    fig = go.Figure()
+    s0 = _series_style(0, palette)
+    fig.add_trace(
+        go.Scatter(
+            x=x_km, y=tau_atm,
+            mode="lines+markers",
+            name="Atmospheric transmission",
+            line=s0["line"], marker=s0["marker"],
+            hovertemplate="%{y:.3f}<extra></extra>",
+        )
+    )
+
+    # 1/e reference line.
+    one_over_e = 1.0 / math.e
+    fig.add_hline(
+        y=one_over_e,
+        line=dict(color=palette["data.reference"], width=1.2, dash="dashdot"),
+        annotation_text="1/e attenuation",
+        annotation_position="top right",
+        annotation_font=dict(color=palette["fg.secondary"], size=11),
+    )
+
+    fig.update_layout(
+        title=title,
+        hovermode="x unified",
+        height=height,
+    )
+    fig.update_xaxes(title_text=xtitle)
+    fig.update_yaxes(title_text=ytitle, range=[0.0, 1.05])
+    return fig
+
+
 __all__ = [
     "plot_a_on_target_performance",
     "plot_b_time_to_burnthrough",
     "plot_c_beam_diameter_breakdown",
+    "plot_overview_dwell_vs_burnthrough",
+    "plot_target_temperature_envelope",
+    "plot_target_material_comparison",
+    "plot_safety_nohd_zones",
+    "plot_atmosphere_extinction_breakdown",
+    "plot_atmosphere_transmission_vs_range",
 ]

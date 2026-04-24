@@ -452,7 +452,7 @@ with tab_safety:
     outputs.render_tab_safety(merged)
 
 with tab_atmos:
-    outputs.render_tab_atmosphere(merged)
+    outputs.render_tab_atmosphere(merged, sweep=sweep)
 
 with tab_diag:
     outputs.render_tab_diagnostics(merged)
