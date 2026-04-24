@@ -32,7 +32,7 @@ import math
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 
-from ui.style import COLOR_CAUTION, COLOR_PRIMARY, COLOR_REFERENCE, PLOT_HEIGHT_PX
+from ui.theme import COLOR_CAUTION, COLOR_PRIMARY, COLOR_REFERENCE, PLOT_HEIGHT_PX
 
 
 # ---------------------------------------------------------------------------
