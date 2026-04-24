@@ -15,22 +15,24 @@ literal, excludes module / function / class docstrings (where SPEC /
 ARCH citations are legitimate maintainer references), and checks the
 remaining strings for forbidden substrings and emoji codepoints.
 
-Scoped files (through PR 4): the six user-visible UI surfaces.
+Scoped files (through PR 6): the seven user-visible UI surfaces.
     ui/app.py, ui/auth.py, ui/panels.py, ui/outputs.py,
-    ui/components.py, ui/plots.py
+    ui/components.py, ui/plots.py, ui/presets.py
 
 PR 4 added ``ui/plots.py`` to the scan list once the plot constructors
 were rewritten to draw titles, axis labels, and series names from the
 English-prose vocabulary in ``ui/labels.py``.
+
+PR 6 added ``ui/presets.py`` once the preset-scenario dicts and their
+``apply_to_session_state`` helper landed; the file carries no user copy
+of its own (it maps SI keys to widget keys) but the scan catches any
+future leakage of prose strings into that surface.
 
 Deliberately NOT scanned:
     ui/labels.py  — this IS the source of truth for user copy; lint
                     would be circular.
     ui/theme.py   — CSS strings contain no user copy.
     ui/icons.py   — SVG path data only.
-    ui/presets.py — does not exist yet (PR 6).
-
-When PR 6 lands, extend ``SCANNED_FILES`` below to cover ``ui/presets.py``.
 
 References:
     docs/phase3_ui_redesign_plan_2026-04-23.md § "Voice and tone".
@@ -61,6 +63,7 @@ SCANNED_FILES: tuple[Path, ...] = (
     _UI_DIR / "outputs.py",
     _UI_DIR / "components.py",
     _UI_DIR / "plots.py",
+    _UI_DIR / "presets.py",
 )
 
 
@@ -235,24 +238,26 @@ def test_no_forbidden_tokens_in_user_copy(path: Path) -> None:
         )
 
 
-def test_scan_list_covers_phase3_pr4_surface() -> None:
-    """Guard: ensure the scan list actually names the six PR 4 entry
+def test_scan_list_covers_phase3_pr6_surface() -> None:
+    """Guard: ensure the scan list actually names the seven PR 6 entry
     points. If someone deletes an entry accidentally, the per-file test
     disappears silently without this check.
 
     PR 4 added ``plots.py`` once its titles / axis labels / series names
     were rewritten to draw from the English-prose ``ui/labels.py``
-    vocabulary. PR 6 will add ``presets.py`` when that file materializes.
+    vocabulary. PR 6 added ``presets.py`` once the preset-scenario dicts
+    and their session-state apply helper landed.
     """
     expected_names = {
         "app.py", "auth.py", "panels.py",
         "outputs.py", "components.py", "plots.py",
+        "presets.py",
     }
     actual_names = {p.name for p in SCANNED_FILES}
     assert expected_names == actual_names, (
         f"SCANNED_FILES drift: expected {expected_names}, got {actual_names}. "
-        "If you are adding a file (e.g. PR 6 brings presets.py into scope), "
-        "update the expected_names set in this guard too."
+        "If you are adding a file, update the expected_names set in this "
+        "guard too."
     )
 
 

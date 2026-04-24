@@ -39,6 +39,8 @@ References:
 
 from __future__ import annotations
 
+import csv
+import io
 import math
 
 import streamlit as st
@@ -179,6 +181,124 @@ def _verdict_chip(result: dict) -> None:
 
 
 # =============================================================================
+# CSV snapshot — Overview-tab export of the numeric result set
+# =============================================================================
+# One row per metric, four columns (Label, Value, Unit, Flag). Values are
+# the display-unit numbers the user sees on screen (matches ``format_value``
+# output on the metric cards), so the CSV pastes directly into a report
+# or spreadsheet without a follow-up SI-to-display conversion step.
+#
+# ``_CSV_METRIC_KEYS`` is the curated ordered list — not every key in
+# ``by_module`` is worth exporting. The ordering matches the app's
+# reading order (Overview → Engagement → Target → Safety → Atmosphere)
+# so someone scanning the CSV top-to-bottom sees the same story.
+
+_CSV_METRIC_KEYS: tuple[tuple[str, str], ...] = (
+    # (submodule_key, output_key). Overview hero row first.
+    ("m7",  "P_aim"),
+    ("m7",  "I_peak"),
+    ("m7",  "I_avg_aim"),
+    ("m7",  "PIB"),
+    ("m8",  "tau_BT"),
+    ("m8",  "T_surface_peak"),
+    ("m3",  "available_dwell"),
+    ("m10", "P_in"),
+    ("m10", "Q_waste"),
+    ("m10", "t_sustain"),
+    ("m10", "engagements_per_hour"),
+    # Strehl + spot breakdown.
+    ("m7",  "S_TB"),
+    ("m7",  "S_opt"),
+    ("m7",  "S_total"),
+    ("m7",  "w_total"),
+    ("m7",  "w_diff"),
+    ("m7",  "w_turb"),
+    ("m7",  "w_jit"),
+    ("m7",  "w_bloom"),
+    # Safety + atmosphere.
+    ("m9",  "NOHD_tophat"),
+    ("m9",  "NOHD_gausspeak"),
+    ("m4",  "alpha_atm"),
+    ("m4",  "alpha_mol_abs"),
+    ("m4",  "alpha_mol_scat"),
+    ("m4",  "alpha_aer_abs"),
+    ("m4",  "alpha_aer_scat"),
+)
+
+
+def _csv_value_for(scaled: float | int | str | None) -> str:
+    """Stringify a scaled value for CSV output.
+
+    Numeric values render with six significant figures (engineers want
+    more precision in the data file than the on-screen card shows).
+    Non-finite or ``None`` renders as an empty cell so the CSV stays
+    spreadsheet-compatible.
+    """
+    if scaled is None:
+        return ""
+    if isinstance(scaled, str):
+        return scaled
+    try:
+        fval = float(scaled)
+    except (TypeError, ValueError):
+        return ""
+    if not math.isfinite(fval):
+        return ""
+    return f"{fval:.6g}"
+
+
+def _build_csv_snapshot(result: dict) -> str:
+    """Assemble the Overview-tab CSV snapshot as a single string.
+
+    Four columns: Label, Value, Unit, Flag. One row per metric in
+    ``_CSV_METRIC_KEYS`` that is present in the result dict, preceded
+    by a verdict row and followed by one row per entry in
+    ``assumptions_flagged``. Uses ``csv.writer`` so embedded commas /
+    quotes in flag strings are escaped correctly.
+    """
+    buf = io.StringIO()
+    writer = csv.writer(buf, lineterminator="\n")
+    writer.writerow(("Label", "Value", "Unit", "Flag"))
+
+    # Verdict summary row (reproduces the Overview chip).
+    by = result.get("by_module", {})
+    tau_bt = by.get("m8", {}).get("tau_BT")
+    dwell = by.get("m3", {}).get("available_dwell")
+    verdict_text: str
+    if tau_bt is None or (isinstance(tau_bt, (int, float)) and tau_bt <= 0.0):
+        verdict_text = "Engageable (instantaneous)"
+    elif dwell is None or (isinstance(dwell, (int, float)) and dwell <= 0.0):
+        verdict_text = "Not engageable (no dwell)"
+    else:
+        margin = (dwell - tau_bt) / tau_bt
+        if margin >= 0.30:
+            verdict_text = f"Engageable ({margin * 100:.0f}% margin)"
+        elif margin >= 0.0:
+            verdict_text = f"Marginal ({margin * 100:.0f}% margin)"
+        else:
+            verdict_text = f"Not engageable (exceeds dwell by {abs(margin) * 100:.0f}%)"
+    writer.writerow(("Engagement verdict", verdict_text, "", ""))
+
+    # Per-metric rows.
+    for module_key, output_key in _CSV_METRIC_KEYS:
+        module = by.get(module_key, {})
+        if output_key not in module:
+            continue
+        raw = module[output_key]
+        scaled = raw if isinstance(raw, str) else _scale(output_key, raw)
+        label = output_label(output_key)
+        unit = output_unit(output_key) if not isinstance(raw, str) else ""
+        writer.writerow((label, _csv_value_for(scaled), unit, ""))
+
+    # Assumption-flag rows.
+    flags = result.get("assumptions_flagged", [])
+    for flag in flags:
+        writer.writerow(("Assumption flag", "", "", str(flag)))
+
+    return buf.getvalue()
+
+
+# =============================================================================
 # Overview tab — verdict + six top-line KPIs + compute headroom
 # =============================================================================
 
@@ -246,6 +366,27 @@ def render_tab_overview(result: dict) -> None:
         plots.plot_overview_dwell_vs_burnthrough(dwell, tau_bt),
         use_container_width=True,
         config=PLOTLY_MODEBAR_CONFIG,
+    )
+
+    # --- CSV snapshot export ----------------------------------------------
+    # A small footer button that hands the user a four-column CSV of the
+    # on-screen numeric result set so it can drop straight into a report
+    # or spreadsheet. Kept at the bottom of the Overview tab so it is the
+    # last thing in the default reading order — the engineer has already
+    # seen the verdict and the KPIs by the time they reach it.
+    from ui.labels import BUTTON_LABELS  # local import — single use.
+
+    st.download_button(
+        label=BUTTON_LABELS["export_csv"],
+        data=_build_csv_snapshot(result),
+        file_name="hel-analysis-snapshot.csv",
+        mime="text/csv",
+        key="_overview_csv_download",
+        help=(
+            "Download the on-screen numeric result set as a CSV — one row "
+            "per metric (Label, Value, Unit, Flag), followed by any "
+            "active assumption flags. Pastes straight into a spreadsheet."
+        ),
     )
 
 

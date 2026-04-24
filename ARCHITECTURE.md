@@ -1,10 +1,13 @@
 # ARCHITECTURE.md — HEL Engineering Calculator
 
-**Version:** 1.9 (Phase 3 UI redesign PR 5: `ui/plots.py` gains six new figure constructors — `plot_overview_dwell_vs_burnthrough`, `plot_target_temperature_envelope`, `plot_target_material_comparison`, `plot_safety_nohd_zones`, `plot_atmosphere_extinction_breakdown`, `plot_atmosphere_transmission_vs_range` — so every tab finally has its plot surface; `ui/outputs.py` renders these plots inside the existing `render_tab_overview / _target_effects / _safety / _atmosphere` entry points and memoizes the M8 material-comparison fan-out with `@st.cache_data`; `ui/app.py` threads the existing `sweep` list into `render_tab_atmosphere`; `ui/labels.py` grows three new `ADVISORY` keys and a `MATERIAL_DISPLAY_NAMES` dict. No physics changes — every new plot consumes already-computed outputs from the existing orchestrator chain.)
+**Version:** 2.0 (Phase 3 UI redesign PR 6 of six: `ui/presets.py` materialized (three named scenarios + `apply_to_session_state` helper wired into the sidebar); `ui/components.py` gains `error_card` for calm validator-error surfaces; `ui/outputs.py` gains a CSV snapshot export button in the Overview tab; `ui/labels.py` gains `PRESET_PICKER_LABEL / PRESET_PICKER_HELP` plus new ADVISORY entries (`welcome_title`, `welcome_body`); `ui/theme.py` gains `.hel-welcome-card` + `.hel-error-card` CSS; `tests/test_copy_style.py` extends `SCANNED_FILES` to cover `ui/presets.py` and the scan-list guard is renamed `test_scan_list_covers_phase3_pr6_surface`. No physics, no module I/O, no validation-case expected values touched.)
+
+**Previous:** 1.9 (Phase 3 UI redesign PR 5: `ui/plots.py` gains six new figure constructors — `plot_overview_dwell_vs_burnthrough`, `plot_target_temperature_envelope`, `plot_target_material_comparison`, `plot_safety_nohd_zones`, `plot_atmosphere_extinction_breakdown`, `plot_atmosphere_transmission_vs_range` — so every tab finally has its plot surface; `ui/outputs.py` renders these plots inside the existing `render_tab_overview / _target_effects / _safety / _atmosphere` entry points and memoizes the M8 material-comparison fan-out with `@st.cache_data`; `ui/app.py` threads the existing `sweep` list into `render_tab_atmosphere`; `ui/labels.py` grows three new `ADVISORY` keys and a `MATERIAL_DISPLAY_NAMES` dict. No physics changes — every new plot consumes already-computed outputs from the existing orchestrator chain.)
 **Complements:** `SPEC.md` §6 (file layout) and project plan v0.8 §2.3 (three-layer separation)
 **Scope:** Concrete implementation map — file paths, function signatures, import rules, data flow.
 
 **Revision history:**
+- v2.0 (2026-04-24) — **Phase 3 UI redesign, PR 6 of six: presets materialized + CSV export + friendly error / welcome surfaces + accessibility polish.** Final PR of the Phase 3 rollout; no physics changes, no module I/O changes, no new layer-1 files. (a) `ui/presets.py` — previously a scaffold stub — is materialized with three defensible reference-scenario dicts (`_C_UAS_SHORT_RANGE`, `_COUNTER_ROCKET`, `_LONG_RANGE_SURVEILLANCE`) plus a fourth no-op `"custom"` key, keyed by the SI values the orchestrator's `user_inputs` contract expects. `PRESET_PARAMETERS: dict[str, dict]` is the public mapping; `apply_to_session_state(session_state, preset_key: str) -> bool` writes each preset's SI values through the `_SI_TO_WIDGET` conversion table (SI → display-unit keys that match the `key=` bindings in `ui/panels.py::section_*`) into `st.session_state`, returning `True` when the preset is one of the three pre-built scenarios and `False` when it is `"custom"` (leaves session-state alone). The helper also resets `_A_lambda_override = False` and drops any pinned `"A_lambda"` entry so presets surface the M8 material-table default. The module imports nothing from `streamlit` at top level (accepts `session_state` as a parameter) so `tests/` can exercise the helper with a plain dict stand-in without a Streamlit runtime. (b) `ui/app.py` renders the preset selectbox at the top of the sidebar BEFORE the six input sections, using `on_change=_on_preset_change` so session-state writes land in the same run the downstream widgets read from their `key=` bindings; the raw `st.error(f"Input validation failed: {exc}")` is replaced with a styled `error_card("Input out of range", f"The solver rejected the current input set: {exc}", suggestion=...)`; the plain `st.info(ADVISORY["first_run_skeleton"])` on the pre-first-run welcome screen is replaced with a centered `.hel-welcome-card` built from `ADVISORY["welcome_title"] / ADVISORY["welcome_body"]`. (c) `ui/components.py` grows `error_card(title, message, *, suggestion=None) -> None` — a calm single-surface error card (border-left + x-circle icon + body + optional suggestion on its own line) that replaces Streamlit's default full-width red `st.error` stripe. (d) `ui/outputs.py` grows three new module-private helpers (`_CSV_METRIC_KEYS`, `_csv_value_for`, `_build_csv_snapshot`) and renders an `st.download_button` at the foot of `render_tab_overview` that hands the user a four-column CSV (`Label, Value, Unit, Flag`) containing a verdict summary row, one row per curated metric in `_CSV_METRIC_KEYS`, and one row per active `assumptions_flagged` entry. Values are scaled through the existing `_scale(output_key, raw)` helper to match on-screen display units and formatted with `{:.6g}`. (e) `ui/labels.py` grows `PRESET_PICKER_LABEL`, `PRESET_PICKER_HELP`, and two new `ADVISORY` entries (`welcome_title`, `welcome_body`), plus a new `"export_csv"` entry in `BUTTON_LABELS`; `__all__` is extended accordingly. (f) `ui/theme.py` grows `.hel-welcome-card` and `.hel-error-card` CSS blocks (elevated surfaces with tokenized padding / border / type; the error card uses a 4 px `--status-error` left border and the x-circle icon + title share the error hue, but the body remains on the standard surface color — calm, not shouting). (g) `tests/test_copy_style.py` extends `SCANNED_FILES` to cover `ui/presets.py` and the scan-list guard is renamed `test_scan_list_covers_phase3_pr6_surface`. `prefers-reduced-motion` CSS (shipped in PR 4) is unchanged and verified to collapse welcome-card / error-card / progress-bar animations to the 50 ms floor. **No change** to `physics/`, no module I/O, no `assumptions_flagged` semantics, no validation-case expected value. UI layer file count 11 → 12 functional (plus 1 `__init__.py` = 13 total) — `ui/presets.py` was counted structurally in v1.6 but only now carries content. Companion SPEC edits land in `SPEC.md v1.11`.
 - v1.9 (2026-04-24) — **Phase 3 UI redesign, PR 5 of six: new plots land on every tab that was previously plotless.** No physics changes, no module I/O changes, no new files. (a) `ui/plots.py` gains six new figure constructors under the same template / modebar / advisory pattern set up in PR 4. `plot_overview_dwell_vs_burnthrough(dwell, tau_bt) -> Figure` renders a grouped vertical-bar comparison (dwell vs burn-through, log-y, margin annotation). `plot_target_temperature_envelope(*, t_amb_c, t_peak_c, t_fail_c, tau_bt, dwell) -> Figure` draws a two-point surface-temperature envelope from `(0, T_amb)` to `(τ_BT, T_surface_peak)` with a horizontal failure-threshold reference and a vertical dwell marker — explicitly labelled as the simplified two-point envelope the physics layer actually reports (M8 does not expose an intermediate `T(t)` trajectory, only scalar `τ_BT` and `T_surface_peak`; the caption cites `ADVISORY["temperature_schematic"]`). `plot_target_material_comparison(*, material_tau_bt, material_labels, current_material, dwell) -> Figure` draws one horizontal bar per tabulated v1 material, tints the currently selected material in `data.a` and the rest in `data.reference`, and renders "no failure before timeout" entries at `max(τ_BT)*1.2` with a flagged label. `plot_safety_nohd_zones(*, nohd_tophat, nohd_gausspeak) -> Figure` draws the three-zone hazard cross-section (inner hazard / caution band / safe) using shaded rectangles and vertical markers at each NOHD value, with the axis extending to `outer * 1.5`. `plot_atmosphere_extinction_breakdown(*, alpha_mol_abs_si, alpha_mol_scat_si, alpha_aer_abs_si, alpha_aer_scat_si) -> Figure` draws a horizontal stacked bar of the four extinction channels with the legend below the chart. `plot_atmosphere_transmission_vs_range(sweep) -> Figure` draws atmospheric transmission τ(L) across the sweep with a horizontal `1/e` reference. All six constructors honor the PR 4 contract: `hel_dark`/`hel_light` template, `PLOTLY_MODEBAR_CONFIG`, advisory-frame branch when inputs are missing / non-finite. (b) `ui/outputs.py` wires the new plots: `render_tab_overview` appends the dwell-vs-burnthrough hero chart under a new `"Engagement margin"` section header; `render_tab_target_effects` is rewritten to emit the temperature envelope and material-comparison plots after the existing metric cards, with a new helper `_material_t_fail(material)` (lazy-imports `MATERIAL_PROPERTIES` from `physics.m8_material_tables`) and a `@st.cache_data(max_entries=32, show_spinner=False)`-wrapped `_material_comparison_cached(key)` that iterates the seven v1 materials through `physics.m8_burnthrough.compute`, mapping `failure_mode == "no_failure_before_timeout"` or `ValueError` to `math.nan` so the plot's always-render-frame branch is never triggered by a per-material failure; `render_tab_safety` appends the NOHD-zones schematic after the existing metric cards and caption; `render_tab_atmosphere` is rewritten to keep the atmospheric-summary cards, drop the previous numeric `st.table` rows, and emit the extinction breakdown followed by transmission-vs-range — it now accepts `*, sweep: list[dict] | None = None` so the transmission curve can consume the same sweep the plot-layer panels already use. (c) `ui/app.py` threads `sweep=sweep` into the `outputs.render_tab_atmosphere(...)` call site; no other `render_tab_*` signature changes. (d) `ui/labels.py` adds three `ADVISORY` keys — `temperature_schematic`, `material_comparison_unavailable`, `no_hazard_data` — and a `MATERIAL_DISPLAY_NAMES` dict mapping the seven SPEC material keys to engineer-legible display names (`anodized_Al → "Anodized aluminium"`, `CFRP → "Carbon-fibre composite"`, etc.). The `__all__` export list grows accordingly. (e) §6.5 `ui/plots.py` entry is rewritten below to list all nine constructors (three from PR 4 + six from PR 5) with final signatures, and the v1.8 trailing "PR 5 adds five new figure constructors" sentence is removed now that PR 5 is the active state. No change to `physics/`, no change to `tests/` (the existing validation suite and `tests/test_copy_style.py` scan list cover the new strings already; the new `ADVISORY` copy and `MATERIAL_DISPLAY_NAMES` values were drafted to pass the forbidden-token lint unchanged). Companion SPEC edits land in `SPEC.md v1.11`.
 - v1.0 — initial draft
 - v1.1 — post-audit fixes: (a) M9 moved earlier in orchestrator pseudocode to reflect its true independence from the propagation chain; (b) timing estimates in §5.2 explicitly flagged as pre-implementation, to be replaced with Phase 1 benchmark; (c) §6 extended to cover all UI files (added §6.6 orchestrator, §6.7 style, §6.8 __init__); (d) M11 row in §4.2 aligned with SPEC.md v1.1 explicit signature.
@@ -531,9 +534,31 @@ def footer_strip(spec_version: str, arch_version: str, build_date: str) -> None:
     """One-line provenance strip rendered on every page. Reads the one-line
     template from `ui.labels.FOOTER_TEMPLATE` and wraps it in `.hel-footer`.
     """
+
+def progress_bar(*, visible: bool = True) -> None:
+    """Thin indeterminate progress bar (2 px line, full-width) used by
+    `ui/app.py` to signal 'the orchestrator is running' during the 1–4 s
+    compute path. Wired in PR 3 as part of the compute-time-feedback
+    sequence (button disable → progress bar → fade-in). Honors
+    prefers-reduced-motion via the global CSS media query.
+    """
+
+def error_card(
+    title: str,
+    message: str,
+    *,
+    suggestion: str | None = None,
+) -> None:
+    """Calm single-card error surface used by `ui/app.py` when a physics
+    validator raises `ValueError` on the user's current input set. Replaces
+    Streamlit's default full-width red `st.error` banner with a card whose
+    border-left + x-circle icon + title carry the error hue, while the body
+    stays on the standard surface color so the read is 'here is what went
+    wrong, here is what to change' rather than a shouting stripe.
+    """
 ```
 
-Imports: `streamlit`, `ui.icons`, `ui.labels` (inside `footer_strip` only, to keep the module boundary cheap). No physics imports. `progress_bar` (v1.6 draft) is deferred to PR 3 where the compute-time-feedback sequence actually wires it.
+Imports: `streamlit`, `ui.icons`, `ui.labels` (inside `footer_strip` / `error_card` only, to keep the module boundary cheap). No physics imports.
 
 ### 6.9 `ui/labels.py` — single source of truth for user-visible strings (v1.6)
 
@@ -554,18 +579,38 @@ Every label used in `ui/panels.py` and `ui/outputs.py` is looked up here — no 
 
 Tiny helper module that returns inline SVG markup for the ~12 Lucide icons actually used in the app (`check-circle`, `alert-triangle`, `x-circle`, `info`, `layout-dashboard`, `target`, `flame`, `shield`, `cloud`, `activity`, `chevron-down`, `sun-moon`). Each icon is a string constant containing the Lucide SVG path; `icon(name, size=16, stroke=1.5)` wraps it with the requested attributes and an `aria-hidden="true"` so screen readers skip decorative instances. For icon-only interactive controls the caller supplies an `aria-label` on the surrounding button. No network fetch, no npm, no runtime dependency on the Lucide package.
 
-### 6.11 `ui/presets.py` — named scenario dicts (v1.6)
+### 6.11 `ui/presets.py` — named scenario dicts (v2.0)
+
+Materialized in PR 6 with three defensible reference scenarios plus a no-op `"custom"` key. Preset values are stored in SI to keep the dict shape identical to the orchestrator's `user_inputs` contract; a `_SI_TO_WIDGET` table maps each SI key to the session-state key and conversion lambda that matches the corresponding widget in `ui/panels.py::section_*`.
 
 ```python
-PRESETS: dict[str, dict] = {
-    "C-UAS short range":         {...},   # defaults tuned for the SPEC canonical 3 kW / 1.5 km case
-    "Counter-rocket":            {...},
-    "Long-range surveillance":   {...},
-    "Custom":                    {...},   # equal to SPEC §5.1 defaults
+PRESET_PARAMETERS: dict[str, dict] = {
+    "c_uas_short_range":       _C_UAS_SHORT_RANGE,       # mirrors tests/conftest.py::canonical_inputs (3 kW / 1.5 km / CFRP)
+    "counter_rocket":          _COUNTER_ROCKET,          # 30 kW / 3 km / thicker CFRP casing / faster crossing target
+    "long_range_surveillance": _LONG_RANGE_SURVEILLANCE, # 10 kW / 10 km / polycarbonate sensor window
 }
+
+_SI_TO_WIDGET: dict[str, tuple[str, Callable[[float], Any]]] = {
+    "P0":            ("P0_kW",          lambda v: v / 1000.0),
+    "D":             ("D_cm",           lambda v: v * 100.0),
+    "wavelength":    ("wavelength_um",  lambda v: v * 1e6),
+    # … (one entry per `user_inputs` key that has a sidebar widget)
+}
+
+def apply_to_session_state(session_state, preset_key: str) -> bool:
+    """Write a preset's values into Streamlit session-state.
+
+    Accepts `session_state` as a parameter so this module does not import
+    `streamlit` at the top level — keeps it cheaply importable from tests.
+    Returns True when the preset is one of the three pre-built scenarios,
+    False when it is "custom" (widget values are left alone so the user
+    keeps whatever they last edited). Also resets `_A_lambda_override` to
+    False and drops any pinned `A_lambda` entry so presets always surface
+    the M8 material-table default (and any HIGH UNCERTAINTY flag on it).
+    """
 ```
 
-The sidebar preset dropdown writes the selected dict into `st.session_state` and reruns; each input widget reads its initial value from `st.session_state` if present. No physics, no computation — this is a shorthand for common input configurations.
+The sidebar `st.selectbox(PRESET_PICKER_LABEL, ..., on_change=_on_preset_change)` in `ui/app.py` invokes `presets.apply_to_session_state(st.session_state, choice)` BEFORE the six input sections render on each run, so the session-state writes are picked up by every widget's `key=` binding in the same rerun. Display names come from `ui.labels.PRESET_LABELS`; the module contains no user-visible copy of its own (and is covered by `tests/test_copy_style.py::SCANNED_FILES` as a forward guard against prose leaking in). No physics, no computation — this is a shorthand for common input configurations.
 
 **UI layer total: 12 files** (11 functional + 1 `__init__.py`).
 
