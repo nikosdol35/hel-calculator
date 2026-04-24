@@ -1,7 +1,7 @@
 """Streamlit entry point for the HEL Engineering Calculator.
 
 This is the single file Streamlit Cloud launches via ``streamlit run
-ui/app.py`` per ARCHITECTURE.md §6.1. Responsibilities (post-Phase 3 PR 1):
+ui/app.py`` per ARCHITECTURE.md §6.1. Responsibilities (post-Phase 3 PR 3):
 
 1. ``sys.path`` shim so ``from physics import ...`` resolves when the
    Cloud runner sets ``sys.path[0]`` to ``<repo>/ui/``.
@@ -15,15 +15,15 @@ ui/app.py`` per ARCHITECTURE.md §6.1. Responsibilities (post-Phase 3 PR 1):
 5. Render the six input sections in the sidebar (``ui/panels.collect_all``).
 6. "Run Analysis" click → ``run_chain_cached`` (``@st.cache_data``
    wrapper around ``physics.orchestrator.run_full_chain``) → merged
-   result → ``ui/outputs.render_all`` + the range-sweep plots.
-7. "Share this analysis" click → encode ``user_inputs`` into
+   result → six ``st.tabs`` panes driven by ``ui/outputs.render_tab_*``.
+7. Compute-time feedback: a thin indeterminate progress bar renders above
+   the tab strip while ``run_chain_cached`` is in flight, and the tab
+   container fades in when the compute completes (150 ms ease-out from
+   ``ui/theme.py``). "Last run" timestamp updates in the sidebar.
+8. "Share this analysis" click → encode ``user_inputs`` into
    ``st.query_params`` and render the URL in a copy-ready ``st.code``
    block.
-8. Footer strip with provenance (SPEC version, ARCH version, build date).
-
-The tabbed results layout arrives in PR 3. For PR 1 the single-scroll
-output sections from the pre-redesign app are preserved so that the
-theme + label changes land in isolation.
+9. Footer strip with provenance (SPEC version, ARCH version, build date).
 
 Three caching wrappers live here (not in ``physics/orchestrator.py``)
 so the orchestrator stays pure-Python and directly unit-testable from
@@ -35,6 +35,7 @@ References:
     SPEC.md §5 (section + plot contracts), §5.3 (UI behavior).
     ui/theme.py — palette + CSS; ``apply`` must run before widgets.
     ui/labels.py — all user-visible strings.
+    ui/outputs.py — render_tab_* per-tab renderers.
 """
 
 from __future__ import annotations
@@ -59,6 +60,7 @@ _REPO_ROOT = str(_Path(__file__).resolve().parent.parent)
 if _REPO_ROOT not in _sys.path:
     _sys.path.insert(0, _REPO_ROOT)
 
+import time
 from typing import Any
 from urllib.parse import urlencode
 
@@ -66,16 +68,22 @@ import streamlit as st
 
 from physics import m11_validation
 from physics.orchestrator import run_full_chain
-from ui import outputs, panels, plots, theme
+from ui import outputs, panels, theme
 from ui.auth import require_login
-from ui.labels import ADVISORY, BUTTON_LABELS, FOOTER_TEMPLATE
+from ui.components import progress_bar
+from ui.labels import (
+    ADVISORY,
+    BUTTON_LABELS,
+    FOOTER_TEMPLATE,
+    TAB_LABELS,
+)
 
 # ---------------------------------------------------------------------------
 # Provenance — surfaced in the footer strip only (never in the header).
 # Keep in sync with the latest contract-document revisions.
 # ---------------------------------------------------------------------------
-_SPEC_VERSION = "v1.9"
-_ARCH_VERSION = "v1.6"
+_SPEC_VERSION = "v1.10"
+_ARCH_VERSION = "v1.7"
 _BUILD_DATE = "2026-04-24"
 
 
@@ -200,6 +208,45 @@ def _render_footer() -> None:
 
 
 # ---------------------------------------------------------------------------
+# "Last run" indicator — relative timestamp ("just now" / "12 s ago" / …)
+# ---------------------------------------------------------------------------
+
+_LAST_RUN_AT = "_last_run_at"
+
+
+def _format_last_run(ts: float | None) -> str:
+    """Return a short human-readable "time since" label for the last run.
+
+    Buckets: <5 s → "just now", <60 s → "{n} s ago", <60 min → "{n} min ago",
+    otherwise → "{n} h ago". Deliberately coarse: the indicator is a
+    staleness hint, not a stopwatch.
+    """
+    if ts is None:
+        return "not yet run"
+    elapsed = max(0.0, time.time() - ts)
+    if elapsed < 5:
+        return "just now"
+    if elapsed < 60:
+        return f"{int(elapsed)} s ago"
+    if elapsed < 3600:
+        return f"{int(elapsed // 60)} min ago"
+    return f"{int(elapsed // 3600)} h ago"
+
+
+def _render_last_run_indicator() -> None:
+    """Render the "Last run …" caption in the sidebar footer."""
+    ts = st.session_state.get(_LAST_RUN_AT)
+    # ``fresh`` modifier brightens the text for the first ~5 s after a run
+    # so the user sees the tool confirm the compute finished.
+    fresh = ts is not None and (time.time() - ts) < 5
+    cls = "hel-last-run hel-last-run--fresh" if fresh else "hel-last-run"
+    st.sidebar.markdown(
+        f"<div class='{cls}'>Last run: {_format_last_run(ts)}</div>",
+        unsafe_allow_html=True,
+    )
+
+
+# ---------------------------------------------------------------------------
 # Main body.
 # ---------------------------------------------------------------------------
 _decode_url_params_once()
@@ -288,13 +335,22 @@ if share_clicked:
 _RUN_LATCH = "_run_requested"
 if run_clicked:
     st.session_state[_RUN_LATCH] = True
+
+_render_last_run_indicator()
+
 if not st.session_state.get(_RUN_LATCH):
-    st.info(
-        "Adjust the input sections in the sidebar, then click "
-        "**Run Analysis** to compute the engagement chain."
-    )
+    st.info(ADVISORY["first_run_skeleton"])
     _render_footer()
     st.stop()
+
+# --- Compute-time feedback: thin progress bar above the tabs ---------------
+# The bar is rendered into an ``st.empty()`` placeholder so we can clear it
+# once the compute finishes. On cold runs the compute takes ~1–4 s and the
+# bar's sliding animation is visible; on cached reruns the placeholder is
+# cleared within a few tens of ms and the bar is essentially invisible.
+progress_slot = st.empty()
+with progress_slot.container():
+    progress_bar(visible=True)
 
 # Run the chain (cached). Surface ValueError from any module's input
 # validator next to the user's panels rather than a traceback.
@@ -302,9 +358,27 @@ try:
     frozen = _freeze(user_inputs)
     result = run_chain_cached(frozen)
 except ValueError as exc:
+    progress_slot.empty()
     st.error(f"Input validation failed: {exc}")
     _render_footer()
     st.stop()
+
+# --- Range-sweep samples for the Engagement tab ---------------------------
+R_selected = float(user_inputs.get("R", 1500.0))
+R_min = max(100.0, R_selected * 0.1)
+R_max = min(50_000.0, R_selected * 2.0)
+N_samples = 30
+step = (R_max - R_min) / (N_samples - 1)
+ranges = tuple(R_min + i * step for i in range(N_samples))
+
+sweep: list[dict] | None
+try:
+    sweep = run_sweep_cached(frozen, ranges)
+except ValueError:
+    # A sweep point may violate a slant-range validator even if the
+    # single-point run did not — the Engagement tab renders the rest of
+    # its content and shows an inline advisory where the plots would go.
+    sweep = None
 
 # Merge user_inputs into the result so the output sections can read
 # ``result['M2']`` and ``result['sigma_jit']`` without changing the
@@ -319,44 +393,43 @@ if url_flags:
         merged.get("assumptions_flagged", [])
     )
 
-# ---------------------------------------------------------------------------
-# Numeric output sections.
-# ---------------------------------------------------------------------------
-outputs.render_all(merged, reference_range=R_ref_km * 1000.0)
+# Clear the progress bar — the tabs below are about to fade in.
+progress_slot.empty()
+
+# Stamp the "Last run" indicator so the next rerun picks up a fresh age.
+st.session_state[_LAST_RUN_AT] = time.time()
 
 # ---------------------------------------------------------------------------
-# Range-sweep plots.
+# Tabbed results — six panes in reading order. Each tab's content lives
+# in a dedicated ``render_tab_<name>`` function in ``ui/outputs.py``. The
+# tab container fades in via a CSS animation on ``.stTabs`` from
+# ``ui/theme.py`` (150 ms ease-out; clamped to 50 ms under
+# prefers-reduced-motion).
 # ---------------------------------------------------------------------------
-R_selected = float(user_inputs.get("R", 1500.0))
-R_min = max(100.0, R_selected * 0.1)
-R_max = min(50_000.0, R_selected * 2.0)
-N_samples = 30
-step = (R_max - R_min) / (N_samples - 1)
-ranges = tuple(R_min + i * step for i in range(N_samples))
-
-try:
-    sweep = run_sweep_cached(frozen, ranges)
-    st.subheader("Range sweep plots")
-    st.plotly_chart(plots.plot_a_on_target_performance(sweep),
-                    use_container_width=True)
-    st.plotly_chart(plots.plot_b_time_to_burnthrough(sweep),
-                    use_container_width=True)
-    st.plotly_chart(plots.plot_c_beam_diameter_breakdown(sweep),
-                    use_container_width=True)
-except ValueError as exc:
-    # A sweep point may violate a slant-range validator even if the
-    # single-point run did not — report and continue rendering the rest.
-    st.warning(f"Range-sweep skipped ({exc}); numeric sections above are valid.")
-
-# ---------------------------------------------------------------------------
-# Convergence diagnostic (visible but unobtrusive) + footer strip.
-# ---------------------------------------------------------------------------
-iter_count = merged["m67_iteration_count"]
-converged = merged["m67_converged"]
-conv_note = (
-    f"Blooming–focusing loop: {iter_count} iterations, "
-    f"{'converged' if converged else 'did NOT converge'}."
+tab_overview, tab_engagement, tab_target, tab_safety, tab_atmos, tab_diag = (
+    st.tabs(list(TAB_LABELS.values()))
 )
-st.caption(conv_note)
+
+with tab_overview:
+    outputs.render_tab_overview(merged)
+
+with tab_engagement:
+    outputs.render_tab_engagement(
+        merged,
+        reference_range=R_ref_km * 1000.0,
+        sweep=sweep,
+    )
+
+with tab_target:
+    outputs.render_tab_target_effects(merged)
+
+with tab_safety:
+    outputs.render_tab_safety(merged)
+
+with tab_atmos:
+    outputs.render_tab_atmosphere(merged)
+
+with tab_diag:
+    outputs.render_tab_diagnostics(merged)
 
 _render_footer()

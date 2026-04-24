@@ -53,12 +53,17 @@ Public API
 ``footer_strip(spec_version, arch_version, build_date)``
     Render the single-line provenance strip described in SPEC §5.3 item 12.
 
+``progress_bar(*, visible=True)``
+    Render a thin, full-width indeterminate progress bar. Called once
+    above the tab strip when the compute path is running so the user
+    sees motion during the 1–4 s orchestrator run.
+
 References:
     ARCHITECTURE.md §6.9 — file contract.
     SPEC.md §5.2, §5.3 items 8–12 — numeric-display, status-chip verdict,
         always-render frames, provenance strip.
     docs/phase3_ui_redesign_plan_2026-04-23.md §"Numerical display
-        conventions" and §"Component inventory".
+        conventions", §"Compute-time feedback", §"Component inventory".
 """
 
 from __future__ import annotations
@@ -468,6 +473,42 @@ def footer_strip(
     )
 
 
+# =============================================================================
+# progress_bar — thin indeterminate bar for compute-time feedback
+# =============================================================================
+
+def progress_bar(*, visible: bool = True) -> None:
+    """Render a thin indeterminate progress bar (full-width).
+
+    Used by ``ui/app.py`` to signal "the orchestrator is running" during
+    the 1–4 s compute path. The bar is pure CSS — a 2 px line with a
+    ``::after`` pseudo-element that slides across the width on an
+    infinite loop (``@keyframes hel-progress-indeterminate`` in
+    ``ui/theme.py``). ``prefers-reduced-motion`` users see a static bar
+    instead of the sliding one (the theme-level media query clamps the
+    animation duration to 50 ms so the motion is barely perceptible).
+
+    Args:
+        visible: When ``False``, emits an invisible placeholder so the
+            tab strip does not jump as the bar appears and disappears
+            between reruns. Keeping the layout stable matters more than
+            hiding the DOM node.
+    """
+    if visible:
+        st.markdown(
+            '<div class="hel-progress-bar" role="progressbar" '
+            'aria-label="Running analysis" aria-busy="true"></div>',
+            unsafe_allow_html=True,
+        )
+    else:
+        # Same height, zero opacity — preserves vertical rhythm.
+        st.markdown(
+            '<div class="hel-progress-bar hel-progress-bar--placeholder" '
+            'aria-hidden="true"></div>',
+            unsafe_allow_html=True,
+        )
+
+
 __all__ = [
     "format_value",
     "metric_card",
@@ -475,5 +516,6 @@ __all__ = [
     "section_header",
     "skeleton_card",
     "footer_strip",
+    "progress_bar",
     "Severity",
 ]

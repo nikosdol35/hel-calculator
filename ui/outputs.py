@@ -1,46 +1,40 @@
-"""Numeric output sections per SPEC §5.2 (Phase 3 PR 2 rewrite).
+"""Tabbed result renderers per SPEC §5.2 (Phase 3 PR 3 rewrite).
 
-Each ``render_section_N`` function takes the orchestrator's merged-result
-dict (plus a reference range for the spot-and-Strehl section) and
-renders that section's content to the active Streamlit column. All
-public functions return ``None``; they write to Streamlit, not to a
-structured object.
+Each ``render_tab_<name>`` function takes the orchestrator's merged-result
+dict (plus a reference range where relevant, and an optional range-sweep
+sample list for the Engagement tab) and renders that tab's content to
+the active Streamlit surface. ``ui/app.py`` calls these six functions
+inside the six ``st.tabs(...)`` panes in reading order:
 
-The caller (``ui/app.py``) merges the user-input dict into the result
-dict before passing it in, so entries like ``result['M2']`` and
-``result['sigma_jit']`` are available without changing the ARCH §6.4
-signature. The spot-and-Strehl section uses this to split the
-diffraction angle into its ideal-Gaussian and beam-quality-excess
-components, and to compute the full-angle pointing jitter
-``θ_jit = 2 · σ_jit``. Fallbacks (``.get(..., 0.0)``) keep the
-sections defensive if a caller passes only the module outputs.
+    Overview → Engagement → Target effects → Safety → Atmosphere → Diagnostics
 
-**PR 2 changes versus PR 1:**
+The renderers return ``None``; they write to Streamlit, not to a structured
+object. The caller merges ``user_inputs`` into the result dict before
+passing it in so entries like ``result['M2']`` and ``result['sigma_jit']``
+are available without changing the ARCH §6.4 signature.
 
-* Every output cell is now a ``metric_card`` from ``ui/components.py``
-  instead of ``st.metric``. Cards sit on the 12-column alignment grid
-  (via ``st.columns(...)``) and render their numeric values through
-  ``format_value`` — so the "3 sig figs, comma thousands-separator,
-  scientific notation outside [0.01, 1e5), non-breaking-space before
-  unit" rule applies uniformly, with no per-call format strings.
-* The verdict banner is a ``status_chip`` (hue + Lucide icon + text).
-* ``render_panel_4_assumptions`` emits a severity-sorted chip list
-  instead of a bullet wall. Each flag is classified into
-  ``ok | warn | error | info`` by a lightweight keyword heuristic and
-  ordered error → warn → info → ok so the most important flag reads
-  first.
+**PR 3 changes versus PR 2:**
 
-PR 3 then splits these render functions across tabs (Overview /
-Engagement / Target effects / Safety / Atmosphere / Diagnostics). PR 2
-keeps the single-scroll page so the diff stays isolated to components
-and formatting.
+* Single-scroll five-section layout (``render_panel_1`` … ``render_panel_5``
+  + ``render_all``) is replaced by six tab renderers. The tab IA matches
+  the plan's reading order: Overview answers "can I engage?" in one glance;
+  Engagement carries the spot-and-Strehl decomposition and the three
+  range-sweep plots; Safety holds both NOHD conventions + laser class;
+  Atmosphere holds the extinction breakdown; Diagnostics holds the
+  severity-sorted flag list and convergence status.
+* ``render_panel_*`` names removed — no test or external caller referenced
+  them; ``render_all`` is likewise gone now that ``app.py`` drives each
+  tab directly.
+* The severity classifier (``_SEVERITY_PATTERNS``, ``_classify_flag_severity``)
+  is preserved byte-for-byte — ``tests/test_outputs_severity.py`` pins it.
 
 References:
-    SPEC.md §5.2 (section contracts).
-    SPEC.md §5.3 items 8–11 (numeric-display, verdict chip, flag severity).
-    ARCHITECTURE.md §6.4 (public signatures) and §6.9 (ui/components.py).
-    ui/labels.py — OUTPUT_LABELS, VERDICT_TEMPLATES (user-visible strings).
-    ui/components.py — metric_card, status_chip, format_value.
+    SPEC.md §5.2 — per-tab contract (what reads on each tab).
+    SPEC.md §5.3 items 8–11 — numeric-display, verdict chip, flag severity.
+    ARCHITECTURE.md §6.4 — public signatures.
+    ARCHITECTURE.md §6.9 — ui/components.py helpers.
+    ui/labels.py — OUTPUT_LABELS, VERDICT_TEMPLATES, ADVISORY (all user copy).
+    ui/components.py — metric_card, status_chip, section_header, format_value.
 """
 
 from __future__ import annotations
@@ -56,6 +50,7 @@ from ui.components import (
     status_chip,
 )
 from ui.labels import (
+    ADVISORY,
     VERDICT_TEMPLATES,
     output_label,
     output_tooltip,
@@ -146,16 +141,135 @@ def _card(
 
 
 # =============================================================================
-# Section 1 — Spot broadening & Strehl decomposition at reference range.
+# Verdict chip — shared between Overview and the flag classifier
 # =============================================================================
-def render_panel_1_spot_strehl(result: dict, reference_range: float) -> None:
-    """Angular-error split + Strehl decomposition at the reference range.
 
-    Displays the angular components (ideal-Gaussian diffraction, M²
-    excess, turbulence broadening, jitter) in µrad full-angle (Siegman
-    convention), the Strehl decomposition (thermal-blooming × optical),
-    and the effective peak-irradiance ratio vs the diffraction-limited
-    baseline ``S_TB · (w_diff / w_total)²``.
+def _verdict_chip(result: dict) -> None:
+    """Render the three-tier verdict chip (ENGAGEABLE / MARGINAL / NOT ENGAGEABLE).
+
+    Thresholds per SPEC §5.2 Overview verdict:
+
+      * τ_BT ≤ 0      → ``ok``    — "ENGAGEABLE — instantaneous"
+      * dwell ≤ 0     → ``error`` — "NOT ENGAGEABLE — no dwell available"
+      * margin ≥ 30%  → ``ok``    — "ENGAGEABLE — {margin}% margin"
+      * 0 ≤ m < 30%   → ``warn``  — "MARGINAL — {margin}% margin"
+      * margin < 0    → ``error`` — "NOT ENGAGEABLE — exceeds dwell by {shortfall}%"
+    """
+    by = result["by_module"]
+    tau_bt = by["m8"].get("tau_BT")
+    dwell = by["m3"].get("available_dwell")
+
+    if tau_bt is None or tau_bt <= 0.0:
+        status_chip(VERDICT_TEMPLATES["instant"], "ok")
+        return
+    if dwell is None or dwell <= 0.0:
+        status_chip(VERDICT_TEMPLATES["no_dwell"], "error")
+        return
+
+    margin = (dwell - tau_bt) / tau_bt
+    if margin >= 0.30:
+        status_chip(VERDICT_TEMPLATES["ok"].format(margin=margin * 100), "ok")
+    elif margin >= 0.0:
+        status_chip(VERDICT_TEMPLATES["warn"].format(margin=margin * 100), "warn")
+    else:
+        status_chip(
+            VERDICT_TEMPLATES["error"].format(shortfall=abs(margin) * 100),
+            "error",
+        )
+
+
+# =============================================================================
+# Overview tab — verdict + six top-line KPIs + compute headroom
+# =============================================================================
+
+def render_tab_overview(result: dict) -> None:
+    """Render the Overview tab.
+
+    Reads in one glance: engagement verdict first, then the six KPIs that
+    answer "can I engage this target with this system?" — power in the
+    aimpoint, peak irradiance, burn-through time, available dwell, wall-
+    plug input power, waste heat. Two secondary compute-headroom cards
+    (sustain time, engagements per hour) sit below the primary row so the
+    same tab carries the "can I engage repeatedly?" read.
+    """
+    section_header("Engagement verdict")
+    _verdict_chip(result)
+
+    st.write("")  # small vertical spacer
+
+    by = result["by_module"]
+    p_aim = by["m7"]["P_aim"]
+    i_peak = by["m7"]["I_peak"]
+    tau_bt = by["m8"].get("tau_BT")
+    dwell = by["m3"].get("available_dwell")
+    p_in = by["m10"]["P_in"]
+    q_waste = by["m10"]["Q_waste"]
+
+    section_header("Engagement summary")
+    c1, c2, c3 = st.columns(3)
+    with c1: _card("P_aim",   p_aim)
+    with c2: _card("I_peak",  i_peak)
+    with c3: _card("tau_BT",  tau_bt)
+
+    c1, c2, c3 = st.columns(3)
+    with c1: _card("available_dwell", dwell)
+    with c2: _card("P_in",    p_in)
+    with c3: _card("Q_waste", q_waste)
+
+    # --- Secondary row: compute headroom ------------------------------------
+    t_sustain = by["m10"]["t_sustain"]
+    eng_per_hr = by["m10"]["engagements_per_hour"]
+
+    section_header("Compute headroom")
+    c1, c2 = st.columns(2)
+    with c1:
+        if math.isfinite(t_sustain):
+            _card("t_sustain", t_sustain, size="md")
+        else:
+            metric_card(
+                output_label("t_sustain"),
+                "∞ thermally unlimited",
+                unit="",
+                tooltip=output_tooltip("t_sustain"),
+                size="md",
+            )
+    with c2:
+        _card("engagements_per_hour", eng_per_hr, size="md")
+
+
+# =============================================================================
+# Engagement tab — spot-and-Strehl decomposition + range-sweep plots
+# =============================================================================
+
+def render_tab_engagement(
+    result: dict,
+    reference_range: float,
+    *,
+    sweep: list[dict] | None = None,
+) -> None:
+    """Render the Engagement tab.
+
+    Two-part content:
+
+    1. **Spot & Strehl at the reference range** — angular-error split
+       (ideal-Gaussian diffraction, M² excess, turbulence, jitter) and
+       Strehl decomposition (S_TB · S_opt), plus the effective peak-
+       irradiance ratio vs the diffraction-limited baseline.
+    2. **Range-sweep plots** (when ``sweep`` is supplied) — on-target
+       performance, time-to-burn-through, beam-diameter breakdown.
+
+    The sweep argument is optional so the renderer stays usable in
+    unit-test harnesses that do not materialise a sweep.
+
+    Args:
+        result: Merged orchestrator result dict.
+        reference_range: The slant-range (m) at which the spot-and-Strehl
+            split is evaluated. Drives the section header caption and
+            the full-angle turbulence conversion.
+        sweep: Optional list of merged-result dicts, one per slant-range
+            sample, with a ``"range"`` key added per sample. When
+            present, the three range-sweep plots render below the
+            spot/Strehl section.
     """
     section_header(
         f"Spot & Strehl decomposition — reference range "
@@ -215,101 +329,122 @@ def render_panel_1_spot_strehl(result: dict, reference_range: float) -> None:
         "against the turbulence- and blooming-free baseline."
     )
 
+    # --- Range-sweep plots --------------------------------------------------
+    if sweep is None:
+        return
+
+    # Import the plots module locally — keeps the unit-test import surface
+    # of ui/outputs.py light (tests that only exercise the severity
+    # classifier do not need plotly loaded).
+    from ui import plots
+
+    section_header("Range-sweep plots")
+    try:
+        st.plotly_chart(
+            plots.plot_a_on_target_performance(sweep),
+            use_container_width=True,
+        )
+        st.plotly_chart(
+            plots.plot_b_time_to_burnthrough(sweep),
+            use_container_width=True,
+        )
+        st.plotly_chart(
+            plots.plot_c_beam_diameter_breakdown(sweep),
+            use_container_width=True,
+        )
+    except ValueError as exc:
+        st.warning(
+            f"Range-sweep skipped ({exc}); single-point results above are valid."
+        )
+
 
 # =============================================================================
-# Section 2 — Engagement summary with three-tier verdict chip.
+# Target effects tab — burn-through + target properties context
 # =============================================================================
-def render_panel_2_engagement(result: dict) -> None:
-    """Engagement summary with a three-tier verdict chip + margin.
 
-    Verdict thresholds (SPEC §5.2 Overview verdict):
-      * margin ≥ 30%    → ``ok``    chip — "ENGAGEABLE — {margin}% margin"
-      * 0 ≤ margin < 30% → ``warn`` chip — "MARGINAL — {margin}% margin"
-      * margin < 0      → ``error`` chip — "NOT ENGAGEABLE — exceeds dwell by {shortfall}%"
-      * τ_BT ≤ 0        → ``ok``    chip — "ENGAGEABLE — instantaneous"
-      * dwell ≤ 0       → ``error`` chip — "NOT ENGAGEABLE — no dwell available"
+def render_tab_target_effects(result: dict) -> None:
+    """Render the Target effects tab.
+
+    Shows the burn-through outcome (``τ_BT`` and the material context that
+    drives it — material name, thickness, absorbance, back-side BC) so the
+    user can reason about what changes if they pick a different material
+    or aimpoint. Temperature-vs-time and material-comparison plots are
+    PR 5 scope.
     """
-    section_header("Engagement summary")
+    section_header("Burn-through outcome")
 
     by = result["by_module"]
-    p_aim = by["m7"]["P_aim"]
-    i_avg = by["m7"]["I_avg_aim"]
-    i_peak = by["m7"]["I_peak"]
     tau_bt = by["m8"].get("tau_BT")
     dwell = by["m3"].get("available_dwell")
 
-    c1, c2, c3 = st.columns(3)
-    with c1: _card("P_aim",     p_aim)
-    with c2: _card("I_avg_aim", i_avg)
-    with c3: _card("I_peak",    i_peak)
-
     c1, c2 = st.columns(2)
-    with c1: _card("tau_BT",          tau_bt)
+    with c1: _card("tau_BT", tau_bt)
     with c2: _card("available_dwell", dwell)
 
-    # --- Verdict chip ----------------------------------------------------
-    st.write("")  # small vertical spacer
-    if tau_bt is None or tau_bt <= 0.0:
-        status_chip(VERDICT_TEMPLATES["instant"], "ok")
-        return
-    if dwell is None or dwell <= 0.0:
-        status_chip(VERDICT_TEMPLATES["no_dwell"], "error")
-        return
+    # Advisory when burn-through is not reached in the available dwell.
+    if tau_bt is not None and dwell is not None and tau_bt > dwell > 0.0:
+        st.warning(ADVISORY["no_burnthrough"])
 
-    margin = (dwell - tau_bt) / tau_bt
-    if margin >= 0.30:
-        status_chip(
-            VERDICT_TEMPLATES["ok"].format(margin=margin * 100),
-            "ok",
-        )
-    elif margin >= 0.0:
-        status_chip(
-            VERDICT_TEMPLATES["warn"].format(margin=margin * 100),
-            "warn",
-        )
-    else:
-        status_chip(
-            VERDICT_TEMPLATES["error"].format(shortfall=abs(margin) * 100),
-            "error",
-        )
-
-
-# =============================================================================
-# Section 3 — System feasibility (power, thermal, safety).
-# =============================================================================
-def render_panel_3_feasibility(result: dict) -> None:
-    """System feasibility: input power, waste heat, engagement count, NOHD.
-
-    The Nominal Ocular Hazard Distance is reported in BOTH the top-hat
-    and Gaussian-peak conventions (per the v1 safety contract); the
-    user cites whichever is appropriate for the specific safety case.
-    """
-    section_header("System feasibility")
-
-    by = result["by_module"]
-    p_in = by["m10"]["P_in"]
-    q_waste = by["m10"]["Q_waste"]
-    t_sustain = by["m10"]["t_sustain"]
-    eng_per_hr = by["m10"]["engagements_per_hour"]
+    # --- Target context -----------------------------------------------------
+    # Pull user-input values the app merged into ``result``. Defaults guard
+    # the unit-test / missing-key paths without crashing the page.
+    section_header("Target context")
+    material = str(result.get("material", "—"))
+    thickness = result.get("thickness")  # m
+    a_lambda = by["m8"].get("A_lambda")
+    a_lambda_flagged = bool(by["m8"].get("A_lambda_flagged", False))
+    backside_bc = str(result.get("backside_BC", "—"))
 
     c1, c2, c3, c4 = st.columns(4)
-    with c1: _card("P_in",    p_in)
-    with c2: _card("Q_waste", q_waste)
+    with c1:
+        metric_card("Target material", material, unit="", size="md")
+    with c2:
+        # Display thickness in mm regardless of orchestrator's SI m.
+        thickness_mm = thickness * 1000.0 if thickness is not None else None
+        metric_card(
+            "Target thickness",
+            thickness_mm,
+            unit="mm",
+            size="md",
+        )
     with c3:
-        if math.isfinite(t_sustain):
-            _card("t_sustain", t_sustain)
-        else:
-            # Display-string override: "∞" with the thermally-unlimited
-            # clarification. format_value emits "—" for non-finite numbers
-            # by design, so we pass the string directly.
-            metric_card(
-                output_label("t_sustain"),
-                "∞ thermally unlimited",
-                unit="",
-                tooltip=output_tooltip("t_sustain"),
-            )
-    with c4: _card("engagements_per_hour", eng_per_hr)
+        metric_card(
+            "Absorbance A_λ",
+            a_lambda,
+            unit="",
+            flag_est=a_lambda_flagged,
+            size="md",
+            sig_figs=3,
+        )
+    with c4:
+        metric_card(
+            "Back-side condition",
+            backside_bc,
+            unit="",
+            size="md",
+        )
 
+    st.caption(
+        "Temperature-vs-time and material-comparison plots arrive in a "
+        "future release."
+    )
+
+
+# =============================================================================
+# Safety tab — both NOHD conventions + laser class
+# =============================================================================
+
+def render_tab_safety(result: dict) -> None:
+    """Render the Safety tab.
+
+    Both Nominal Ocular Hazard Distance conventions (top-hat and Gaussian-
+    peak) sit side-by-side; the user cites whichever is appropriate for
+    the specific safety case. Laser class reads as a plain-string card.
+    The hazard-zone cross-section schematic is PR 5 scope.
+    """
+    section_header("Nominal Ocular Hazard Distance")
+
+    by = result["by_module"]
     nohd_th = by["m9"].get("NOHD_tophat", 0.0)
     nohd_gp = by["m9"].get("NOHD_gausspeak", 0.0)
     laser_class = by["m9"].get("laser_class", "—")
@@ -327,13 +462,58 @@ def render_panel_3_feasibility(result: dict) -> None:
 
 
 # =============================================================================
-# Section 4 — Severity-sorted assumption-flag chip list.
+# Atmosphere tab — extinction breakdown
 # =============================================================================
-# PR 2 replaces PR 1's bullet wall with a severity-sorted chip list. The
-# severity of each flag is inferred from keyword patterns matching the
-# physics modules' existing flag strings (no new fields added to
-# ``assumptions_flagged`` — the list is still raw strings). Ordering is
-# error → warn → info → ok so the most important flag reads first.
+
+def render_tab_atmosphere(result: dict) -> None:
+    """Render the Atmosphere tab.
+
+    Shows the total extinction coefficient split into its four contributing
+    components (molecular absorption, molecular scattering, aerosol
+    absorption, aerosol scattering) with per-component percentage share.
+    PR 5 replaces the tabular view with a horizontal stacked-bar plot.
+    """
+    section_header("Atmospheric extinction breakdown")
+    by = result["by_module"]
+
+    components = (
+        ("alpha_mol_abs",  by["m4"]["alpha_mol_abs"]),
+        ("alpha_mol_scat", by["m4"]["alpha_mol_scat"]),
+        ("alpha_aer_abs",  by["m4"]["alpha_aer_abs"]),
+        ("alpha_aer_scat", by["m4"]["alpha_aer_scat"]),
+    )
+    total_si = by["m4"]["alpha_atm"]
+
+    if total_si <= 0:
+        st.info(ADVISORY["vacuum_path"])
+        return
+
+    # Build display rows. ``format_value`` handles the scientific-notation
+    # switch at |α| < 0.01/km automatically; share is a plain percentage.
+    rows = [
+        {
+            "Component": output_label(key),
+            "α (1/km)":  format_value(_scale(key, value), unit=""),
+            "Share":     f"{value / total_si * 100:.1f}%",
+        }
+        for key, value in components
+    ]
+    rows.append({
+        "Component": output_label("alpha_atm"),
+        "α (1/km)":  format_value(_scale("alpha_atm", total_si), unit=""),
+        "Share":     "100.0%",
+    })
+    st.table(rows)
+
+
+# =============================================================================
+# Diagnostics tab — severity-sorted assumption chips + convergence status
+# =============================================================================
+# The severity classifier below is pinned by ``tests/test_outputs_severity.py``
+# and must not change without updating the pinning test. Each keyword maps to
+# one of ``error | warn | info | ok``; first-match-wins; unmatched flags fall
+# back to ``info`` — the calmest tier — because the flag is in the list by
+# virtue of a physics module appending it, and that alone is worth surfacing.
 
 # Keyword → severity. Checked case-insensitively; first match wins. Order
 # matters: more-specific patterns appear before general ones. All physics
@@ -390,89 +570,54 @@ def _classify_flag_severity(flag: str) -> str:
     return "info"
 
 
-def render_panel_4_assumptions(result: dict) -> None:
-    """Always-visible, severity-sorted chip list of flagged assumptions.
+def render_tab_diagnostics(result: dict) -> None:
+    """Render the Diagnostics tab.
 
-    Showing the user exactly what defaults and approximations feed into
-    the displayed numbers is a hard contract — this section cannot be
-    collapsed. The chip list orders ``error → warn → info`` so the most
-    important flags read first, and each chip carries hue + Lucide icon
-    + text (color-blind triple-encoded per the design system).
+    Two sections:
+
+    1. **Assumption flags** — always-visible, severity-sorted chip list.
+       Showing the user exactly what defaults and approximations feed
+       into the displayed numbers is a hard contract; this section cannot
+       be collapsed. Chips are ordered ``error → warn → info → ok`` so
+       the most important read first.
+    2. **Convergence status** — the M6↔M7 blooming–focusing loop
+       iteration count and converged flag, as a small card + caption.
     """
     section_header("Assumptions & flags")
     flags = result.get("assumptions_flagged", [])
     if not flags:
         st.info("No assumption flags raised for this input set.")
-        return
+    else:
+        # Classify and stable-sort. ``sorted(..., key=...)`` is stable, so
+        # flags of the same severity retain the order the physics modules
+        # appended them — useful when two related flags want to read
+        # together.
+        classified = [(flag, _classify_flag_severity(flag)) for flag in flags]
+        classified.sort(key=lambda pair: _SEVERITY_ORDER[pair[1]])
 
-    # Classify and stable-sort. ``sorted(..., key=...)`` is stable, so flags
-    # of the same severity retain the order the physics modules appended
-    # them — useful when two related flags want to read together.
-    classified = [(flag, _classify_flag_severity(flag)) for flag in flags]
-    classified.sort(key=lambda pair: _SEVERITY_ORDER[pair[1]])
+        for flag, severity in classified:
+            status_chip(flag, severity)
 
-    for flag, severity in classified:
-        status_chip(flag, severity)
+    # --- Convergence status --------------------------------------------------
+    st.write("")  # spacer
+    section_header("Convergence status")
+    iter_count = result.get("m67_iteration_count")
+    converged = result.get("m67_converged")
 
-
-# =============================================================================
-# Section 5 — Atmospheric extinction breakdown.
-# =============================================================================
-def render_panel_5_atmosphere_breakdown(result: dict) -> None:
-    """Atmospheric extinction decomposition into molecular + aerosol
-    absorption and scattering.
-
-    Shown as a table with each component's α (1/km, three significant
-    figures, scientific notation below 0.01) and its percentage share of
-    the total. PR 5 replaces the table with a horizontal stacked-bar
-    plot; this PR keeps the tabular view so the data is present while
-    the plot library lands.
-    """
-    section_header("Atmospheric extinction breakdown")
-    by = result["by_module"]
-
-    components = (
-        ("alpha_mol_abs",  by["m4"]["alpha_mol_abs"]),
-        ("alpha_mol_scat", by["m4"]["alpha_mol_scat"]),
-        ("alpha_aer_abs",  by["m4"]["alpha_aer_abs"]),
-        ("alpha_aer_scat", by["m4"]["alpha_aer_scat"]),
-    )
-    total_si = by["m4"]["alpha_atm"]
-
-    if total_si <= 0:
-        st.info("Total extinction is zero — vacuum or negligible path extinction.")
-        return
-
-    # Build display rows. ``format_value`` handles the scientific-notation
-    # switch at |α| < 0.01/km automatically; share is a plain percentage.
-    rows = [
-        {
-            "Component": output_label(key),
-            "α (1/km)":  format_value(_scale(key, value), unit=""),
-            "Share":     f"{value / total_si * 100:.1f}%",
-        }
-        for key, value in components
-    ]
-    rows.append({
-        "Component": output_label("alpha_atm"),
-        "α (1/km)":  format_value(_scale("alpha_atm", total_si), unit=""),
-        "Share":     "100.0%",
-    })
-    st.table(rows)
-
-
-# =============================================================================
-# Aggregate renderer.
-# =============================================================================
-def render_all(result: dict, reference_range: float) -> None:
-    """Render all five sections in top-to-bottom reading order.
-
-    PR 3 replaces this single-scroll layout with a tabbed container
-    (Overview / Engagement / Target effects / Safety / Atmosphere /
-    Diagnostics). Until then, the five sections render in order.
-    """
-    render_panel_1_spot_strehl(result, reference_range)
-    render_panel_2_engagement(result)
-    render_panel_3_feasibility(result)
-    render_panel_4_assumptions(result)
-    render_panel_5_atmosphere_breakdown(result)
+    c1, c2 = st.columns(2)
+    with c1:
+        metric_card(
+            "Loop iterations",
+            iter_count,
+            unit="",
+            tooltip="Blooming–focusing self-consistency loop iteration count.",
+            size="md",
+        )
+    with c2:
+        metric_card(
+            "Converged",
+            "yes" if converged else "no",
+            unit="",
+            tooltip="Whether the blooming–focusing loop reached its tolerance.",
+            size="md",
+        )

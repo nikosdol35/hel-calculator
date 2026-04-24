@@ -496,6 +496,67 @@ select:focus-visible,
   margin: var(--space-2) 0;
 }}
 
+/* ---- Progress bar (compute-time feedback) ------------------------------ */
+/* Thin 2 px bar with a sliding ::after pseudo-element. The parent track is
+   a muted border color; the child "glow" slides edge-to-edge on an infinite
+   loop via @keyframes hel-progress-indeterminate. Appears below the tab
+   strip while the orchestrator is running (1–4 s typical) and disappears
+   when the rerun that produced the result repaints the page. */
+.hel-progress-bar {{
+  position: relative;
+  width: 100%;
+  height: 2px;
+  overflow: hidden;
+  background: var(--border-subtle);
+  margin: var(--space-2) 0 var(--space-4) 0;
+  border-radius: 1px;
+}}
+.hel-progress-bar::after {{
+  content: "";
+  position: absolute;
+  top: 0; left: 0;
+  height: 100%;
+  width: 40%;
+  background: var(--accent-primary);
+  border-radius: 1px;
+  animation: hel-progress-indeterminate 1.2s ease-in-out infinite;
+}}
+.hel-progress-bar--placeholder {{
+  background: transparent;
+}}
+.hel-progress-bar--placeholder::after {{
+  display: none;
+}}
+@keyframes hel-progress-indeterminate {{
+  0%   {{ transform: translateX(-100%); }}
+  50%  {{ transform: translateX(100%); }}
+  100% {{ transform: translateX(250%); }}
+}}
+
+/* Fade-in for the tab container once the compute completes. A 150 ms ease-out
+   fade matches the plan's "output cards render with a single fade-in
+   transition". The animation runs once on each rerun; prefers-reduced-motion
+   users get the 50 ms floor from the @media rule below. */
+.stTabs {{
+  animation: hel-fade-in 150ms ease-out;
+}}
+@keyframes hel-fade-in {{
+  from {{ opacity: 0; transform: translateY(2px); }}
+  to   {{ opacity: 1; transform: translateY(0); }}
+}}
+
+/* ---- "Last run" indicator (sidebar) ------------------------------------ */
+.hel-last-run {{
+  font-size: 12px;
+  color: var(--fg-tertiary);
+  letter-spacing: 0.01em;
+  margin: var(--space-2) 0 0 0;
+  text-align: right;
+}}
+.hel-last-run--fresh {{
+  color: var(--fg-secondary);
+}}
+
 /* ---- Footer provenance strip ------------------------------------------- */
 .hel-footer {{
   margin-top: var(--space-12); padding: var(--space-4) 0;
