@@ -22,8 +22,6 @@ Coverage goals per validation/README.md Layer 2.6:
 
 from __future__ import annotations
 
-import math
-
 import pytest
 
 from physics.common import (

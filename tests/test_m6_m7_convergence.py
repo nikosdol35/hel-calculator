@@ -157,88 +157,104 @@ def test_m67_convergence_sweep_aggregate() -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_m67_catastrophic_blooming_flags_non_convergence() -> None:
-    """Sweep a ladder of increasingly pathological operating points and
-    verify that at least one of them exercises the SPEC §3 M6 "N_D > 30"
-    catastrophic-blooming branch (or the orchestrator's non-convergence
-    branch), AND that every point in the ladder satisfies the universal
-    contracts:
+def test_m67_non_convergence_flag_on_tight_tolerance() -> None:
+    """Force the M6↔M7 loop to hit its iteration cap by calling
+    ``_iterate_m6_m7`` directly with a ridiculously tight tolerance
+    (1e-15). The canonical C-UAS case converges to ~1 % in 3–5 passes;
+    at 1e-15 it cannot converge inside 10 passes because float64
+    arithmetic itself has ~2e-16 relative noise.
 
-      1. the loop terminates within max_iter (no infinite loop);
-      2. every reported numeric output is finite (no NaN leakage);
-      3. when the case IS flagged, the flag text contains either
-         "catastrophic-blooming" or "did not converge" — so the UI has
-         a user-readable diagnostic.
+    The contract under test:
+      1. the loop returns cleanly — no infinite loop, no NaN, no raise;
+      2. ``converged = False``;
+      3. ``iterations == max_iter`` — the loop used every pass rather
+         than short-circuiting on a spurious zero-delta;
+      4. ``out6['assumptions_flagged']`` gains the "did not converge"
+         string so the UI Panel-4 diagnostic is populated.
 
-    The SPEC §10.4 broadening-scaling constant is HIGH UNCERTAINTY, so
-    pinning a single N_D value would be brittle. The ladder approach
-    probes a wider corner of the input envelope and succeeds as long
-    as at least one combination trips the catastrophic branch.
+    This test isolates the non-convergence *branch* of the orchestrator.
+    A companion test (``test_m67_catastrophic_blooming_direct_m6``)
+    isolates the N_D>30 branch by calling M6 directly with pathological
+    inputs; the two together cover both SPEC §3 M6 exception paths.
     """
-    # Each entry: the single override that makes the canonical case
-    # more stressful. The ladder moves from "high power, short range,
-    # clear atmosphere" (likely fine) to "high power, moderate range,
-    # hazy atmosphere, near-zero crosswind" (likely catastrophic).
-    ladder = [
-        {"P0": 100_000.0},
-        {"P0": 100_000.0, "R": 3000.0, "v_perp": 1.0},
-        {"P0": 100_000.0, "R": 3000.0, "v_perp": 0.5, "V": 5.0},
-        {"P0": 100_000.0, "R": 3000.0, "v_perp": 0.5, "V": 3.0, "D": 0.05},
-        {"P0": 100_000.0, "R": 2000.0, "v_perp": 0.5, "V": 3.0, "D": 0.05},
-    ]
+    inputs = _canonical()
+    out1 = orchestrator.m1_laser_source.compute(
+        orchestrator._inputs_for_m1(inputs))
+    out2 = orchestrator.m2_beam_director.compute(
+        orchestrator._inputs_for_m2(inputs))
+    out3 = orchestrator.m3_geometry.compute(
+        orchestrator._inputs_for_m3(inputs))
+    out4 = orchestrator.m4_atmosphere.compute(
+        orchestrator._inputs_for_m4(inputs, out3))
+    out5 = orchestrator.m5_turbulence.compute(
+        orchestrator._inputs_for_m5(inputs, out3))
 
-    any_flagged = False
-    ran_any = False
-    for overrides in ladder:
-        inputs = _canonical()
-        inputs.update(overrides)
-        try:
-            result = orchestrator.run_full_chain(inputs)
-        except ValueError:
-            # Upstream validator rejected a pathological combination —
-            # that's an acceptable response (no NaN, no silent failure).
-            continue
-        ran_any = True
-
-        # Contract 1: bounded iteration count.
-        assert result["m67_iteration_count"] <= 10, (
-            f"iteration count {result['m67_iteration_count']} > 10 on "
-            f"overrides={overrides}"
-        )
-
-        # Contract 2: the reported w_total must at least be a number —
-        # inf/NaN leakage would mean the downstream M8 / UI layer gets a
-        # bogus value. We check `isfinite` only on w_total (the chain's
-        # headline number); some intermediate keys (N_D, w_bloom) can
-        # legitimately be inf in a catastrophic regime and are flagged
-        # separately via `assumptions_flagged`.
-        w_total = result.get("w_total")
-        assert w_total is not None and math.isfinite(w_total), (
-            f"w_total={w_total} is not finite on overrides={overrides} — "
-            f"a hard-crash path is the wrong behaviour for a safety tool"
-        )
-
-        # Contract 3: if this rung tripped the catastrophic-blooming or
-        # non-convergence branch, record the fact for the aggregate
-        # assertion below. We don't require every rung to trip — only
-        # that at least one does, across the whole ladder.
-        flags_joined = " | ".join(result["assumptions_flagged"])
-        if ("catastrophic-blooming" in flags_joined
-                or (not result["m67_converged"]
-                    and "did not converge" in flags_joined)):
-            any_flagged = True
-
-    assert ran_any, (
-        "Every rung of the catastrophic-blooming ladder was rejected "
-        "upstream by _validate_inputs — the test is not exercising the "
-        "M6↔M7 loop at all."
+    out7, out6, iterations, converged = orchestrator._iterate_m6_m7(
+        inputs, out1, out2, out3, out4, out5,
+        max_iter=10, tol=1.0e-15,
     )
-    assert any_flagged, (
-        "None of the pathological operating points on the catastrophic-"
-        "blooming ladder tripped the SPEC §3 M6 N_D>30 flag or the "
-        "orchestrator's non-convergence flag. Either the ladder needs "
-        "a more aggressive rung or the broadening scaling / N_D formula "
-        "has regressed."
+
+    # Contract 1: finite numeric outputs — no NaN leakage.
+    for key in ("w_total",):
+        assert key in out7 and math.isfinite(out7[key]), (
+            f"out7['{key}']={out7.get(key)} is not finite"
+        )
+    for key in ("N_D", "S_TB"):
+        assert key in out6 and math.isfinite(out6[key]), (
+            f"out6['{key}']={out6.get(key)} is not finite"
+        )
+
+    # Contract 2–3: the loop used every pass and reports non-convergence.
+    assert converged is False, (
+        "tol=1e-15 should be unreachable; the loop reported convergence"
+    )
+    assert iterations == 10, (
+        f"expected iterations=10 (max_iter), got {iterations}"
+    )
+
+    # Contract 4: flag text present.
+    flags = out6["assumptions_flagged"]
+    assert any("did not converge" in f for f in flags), (
+        f"expected 'did not converge' flag in out6 assumptions_flagged, "
+        f"got {flags}"
+    )
+
+
+def test_m67_catastrophic_blooming_direct_m6() -> None:
+    """Call ``m6_blooming.compute`` directly with hand-picked inputs that
+    force N_D > 30, and verify the SPEC §3 M6 catastrophic-blooming flag
+    fires. This isolates the N_D>30 branch from the iteration dynamics
+    in ``_iterate_m6_m7`` (which otherwise adapts w_total to reduce N_D
+    and may produce a converged fixed point with N_D < 30).
+
+    N_D scales as P·R² / (v_perp · w³). Chosen values:
+      - P_propagating = 100 kW  (top of SPEC Panel A)
+      - R_slant = 5 km
+      - v_perp = 0.3 m/s (near-calm wind, SPEC §10.6 boundary)
+      - w_at_target = 0.02 m  (tight spot)
+      - alpha_atm = 2e-4 /m  (moderate haze)
+
+    These produce N_D in the 10³ range, comfortably past the 30 cutoff.
+    """
+    out6 = m6_blooming.compute({
+        "P_propagating": 100_000.0,
+        "w_at_target":   0.02,
+        "alpha_atm":     2.0e-4,
+        "v_perp":        0.3,
+        "R_slant":       5000.0,
+        "T_ambient":     300.0,
+        "P_atm":         101325.0,
+    })
+
+    assert out6["N_D"] > 30.0, (
+        f"test set-up bug — chosen inputs produced N_D={out6['N_D']:.2f} "
+        f"≤ 30; adjust inputs to exceed the catastrophic threshold"
+    )
+    flags_joined = " | ".join(out6["assumptions_flagged"])
+    assert "catastrophic-blooming" in flags_joined, (
+        f"N_D={out6['N_D']:.2f} > 30 should trip the SPEC §3 M6 "
+        f"catastrophic-blooming flag, got flags: "
+        f"{out6['assumptions_flagged']}"
     )
 
 
