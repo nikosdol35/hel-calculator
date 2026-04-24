@@ -1,8 +1,26 @@
 [server]
 headless = true
 
+# -----------------------------------------------------------------------------
+# HEL Calculator theme (SPEC v1.9 / ARCH v1.6, dark-mode primary).
+#
+# Streamlit's built-in [theme] block accepts only a narrow set of keys
+# (primaryColor / backgroundColor / secondaryBackgroundColor / textColor /
+# base / font). The full token palette (surface tints, gridlines, spike
+# colors, data-series triad, status chips, focus ring, etc.) lives in
+# ui/theme.py and is injected via st.markdown custom CSS after
+# st.set_page_config, so one edit re-themes every surface the framework
+# exposes without fighting it. Light-mode is the alternate palette the
+# sidebar-footer toggle swaps to at runtime; this file pins dark as the
+# boot-time default.
+#
+# Contrast audit for the dark palette values below is in
+# scripts/check_contrast.py (one-shot verifier, not in CI).
+# -----------------------------------------------------------------------------
 [theme]
-primaryColor = "#1f4e79"
-backgroundColor = "#ffffff"
-secondaryBackgroundColor = "#f5f5f5"
-textColor = "#1a1a1a"
+base                      = "dark"
+primaryColor              = "#4FC3F7"   # accent.primary  — active tab, focus ring, primary buttons
+backgroundColor           = "#0F1419"   # bg.base         — app canvas
+secondaryBackgroundColor  = "#1A1F26"   # bg.surface      — sidebar, cards, expanders
+textColor                 = "#E8EAED"   # fg.primary      — body, headings, big numerics
+font                      = "sans serif"
