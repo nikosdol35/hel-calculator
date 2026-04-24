@@ -15,6 +15,9 @@ def test_m3_geometry(canonical_inputs):
         "H_e": 2, "R": 5000, "H_t": 200, "v_tgt": 20, "v_perp": 3,
     }
     result = m3_geometry.compute(inputs)
+    # SPEC §3 M3 tolerance = 0.1 %: R_h and elevation_angle come from
+    # exact Pythagoras + arctan2. Tighter than 1e-3 would start tripping
+    # on the 4-sig-fig rounding of the SPEC reference values themselves.
     assert result["R_h"] == pytest.approx(4996.1, rel=1e-3)
     assert result["elevation_angle"] == pytest.approx(0.0396, rel=1e-3)
 

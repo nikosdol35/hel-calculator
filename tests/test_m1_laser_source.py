@@ -15,6 +15,10 @@ def test_m1_divergence(canonical_inputs):
         "P0": 1000, "M2": 1.0, "D": 0.10, "wavelength": 1.064e-6,
     }
     result = m1_laser_source.compute(inputs)
+    # SPEC §3 M1 tolerance = 0.1 %: θ_diff is pure closed-form arithmetic
+    # (M² · 4 λ / π D). No iteration, no table lookup — the only error
+    # source is float64 rounding, which sits ≈ 1e-15. The 1e-3 budget
+    # absorbs any textbook constant rounding in the SPEC target value.
     assert result["theta_diff"] == pytest.approx(13.547e-6, rel=1e-3)
 
 
@@ -25,6 +29,10 @@ def test_m1_rayleigh_range(canonical_inputs):
         "P0": 3000, "M2": 1.2, "D": 0.10, "wavelength": 1.07e-6,
     }
     result = m1_laser_source.compute(inputs)
+    # SPEC §3 M1 tolerance = 1 % for zR: the 7340 m reference rounds
+    # wavelength (1.07 µm ≈ 1.07e-6) and uses w0 = D/2 by convention;
+    # tightening below 1 % would start catching the textbook rounding,
+    # not a code bug. w0 is exact (D/2) so 1 % is comfortable for it.
     assert result["w0"] == pytest.approx(0.05, rel=0.01)
     assert result["zR"] == pytest.approx(7340.0, rel=0.01)
 

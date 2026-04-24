@@ -34,12 +34,19 @@ def test_m10_steady_state():
         7000 ≤ 15_000 → t_sustain = ∞, duty_cycle_limit = 1.0.
     Tolerance 0.1% (exact arithmetic)."""
     result = m10.compute(_inputs())
+    # SPEC §3 M10 tolerance = 0.1 %: P_in = P0/η is one float divide.
+    # Any drift is float64 noise. 1e-3 is defensive; tighter would only
+    # catch the SPEC-stated expected value's rounding.
     assert result["P_in"] == pytest.approx(10_000.0, rel=1e-3)
     assert result["Q_waste"] == pytest.approx(7000.0, rel=1e-3)
     assert math.isinf(result["t_sustain"])
     assert result["engagement_viable"] is True
+    # rel = 1e-12: duty_cycle_limit = 1.0 is a literal constant in the
+    # steady-state branch; machine precision catches any accidental
+    # multiplication or clamp change.
     assert result["duty_cycle_limit"] == pytest.approx(1.0, rel=1e-12)
-    # 3600 / 5 = 720 engagements/hr in pure steady-state.
+    # rel = 1e-12: engagements_per_hour = 3600/t_eng when duty=1 is
+    # one exact float divide — machine precision is correct.
     assert result["engagements_per_hour"] == pytest.approx(720.0, rel=1e-12)
 
 
@@ -51,6 +58,9 @@ def test_m10_transient():
     Tolerance 1%. Verifies the tool correctly flags ~1 min of sustained
     fire for the SPEC-default cooling configuration."""
     result = m10.compute(_inputs(P0=50_000.0))
+    # SPEC §3 M10 tolerance = 1 %: transient arithmetic (P_in, Q_waste
+    # and t_sustain = C·dT/(Q_waste-Q_cool)) is closed form; 1 % budgets
+    # the 5-sig-fig rounding of the SPEC reference numbers.
     assert result["P_in"] == pytest.approx(166_667.0, rel=0.01)
     assert result["Q_waste"] == pytest.approx(116_667.0, rel=0.01)
     assert result["t_sustain"] == pytest.approx(59.0, rel=0.01)
@@ -58,8 +68,10 @@ def test_m10_transient():
     # Hand-check duty cycle:
     #   recovery = 200_000·30 / 15_000 = 400 s
     #   duty = 59.02 / (59.02 + 400) = 0.1286
+    # rel = 2 %: duty is a ratio of two quantities each at 1 %, so the
+    # propagated worst-case budget is ~2 %.
     assert result["duty_cycle_limit"] == pytest.approx(0.1286, rel=0.02)
-    # 3600 · 0.1286 / 5 ≈ 92.6 engagements/hr
+    # 3600 · 0.1286 / 5 ≈ 92.6 engagements/hr — same 2 % budget.
     assert result["engagements_per_hour"] == pytest.approx(92.6, rel=0.02)
 
 
@@ -74,6 +86,8 @@ def test_m10_insufficient_cooling():
         P0=100_000.0, Q_cool=5000.0,
         C_thermal=100_000.0, dT_max=20.0, t_engagement=30.0,
     ))
+    # SPEC §3 M10 tolerance = 1 %: pure closed-form arithmetic at an
+    # edge-case cooling shortfall; 1 % absorbs SPEC rounding only.
     assert result["t_sustain"] == pytest.approx(8.76, rel=0.01)
     assert result["t_sustain"] < 30.0
     assert result["engagement_viable"] is False
@@ -164,5 +178,8 @@ def test_m10_p_in_scales_with_p0_inverse_eta():
     r1 = m10.compute(_inputs(P0=3000.0, eta_wallplug=0.30))
     r2 = m10.compute(_inputs(P0=6000.0, eta_wallplug=0.30))
     r3 = m10.compute(_inputs(P0=3000.0, eta_wallplug=0.15))
+    # rel = 1e-12: structural identity (doubling P0 doubles P_in, halving
+    # η doubles P_in). One float divide; machine precision catches any
+    # sign-flip bug (η in numerator) or scaling regression.
     assert r2["P_in"] == pytest.approx(2.0 * r1["P_in"], rel=1e-12)
     assert r3["P_in"] == pytest.approx(2.0 * r1["P_in"], rel=1e-12)

@@ -47,9 +47,16 @@ def test_m8_aluminum_standard():
         A_lambda=0.5,
     ))
     assert result["failure_mode"] == "melt"
+    # SPEC §3 M8 tolerance = 25 %: tau_BT for a two-phase heat-plus-
+    # latent integration inherits the explicit-FD discretisation error
+    # (∼5 %), the lumped-capacitance reference-calc error (Biot≪1
+    # approximation, ∼10 %), and latent-heat distribution assumptions
+    # (±10 %). 25 % brackets the hand-check central value of 5.5 s.
     assert result["tau_BT"] == pytest.approx(6.0, rel=0.25)
     assert 4.0 <= result["tau_BT"] <= 8.0
-    # T_surface_peak is clamped at T_melt = 933 K during the melt phase.
+    # rel = 1 %: T_surface_peak is clamped to the tabulated T_melt = 933 K
+    # during the melt phase — this is a Dirichlet BC, not a free variable,
+    # so only float-rounding error is expected. 1 % is defensive but loose.
     assert result["T_surface_peak"] == pytest.approx(933.0, rel=0.01)
 
 

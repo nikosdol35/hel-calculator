@@ -43,6 +43,11 @@ def test_m9_retinal_band_baseline():
         NOHD_gausspeak = 1000·√(8/(π·25.46)) − 1 = 315.2 m  (~315)
     """
     result = m9_nohd.compute(_inputs())
+    # SPEC §3 M9 tolerance = 2 %: MPE is a closed-form piecewise ANSI
+    # formula; hand-check lands at 25.46 W/m² exactly. 2 % budgets the
+    # 0.25 s^(-1/4) rounding in the SPEC expected value only. NOHD is
+    # derived from sqrt(1/MPE), so its budget is half of MPE's — but
+    # SPEC pins all three outputs at the same 2 % envelope.
     assert result["MPE"] == pytest.approx(25.46, rel=0.02)
     assert result["NOHD_tophat"] == pytest.approx(222.6, rel=0.02)
     assert result["NOHD_gausspeak"] == pytest.approx(315.2, rel=0.02)
@@ -64,7 +69,13 @@ def test_m9_eyesafer_band():
     formula is correct; '~9' is a rounded shorthand for the raw
     sqrt term (8.97 m). Test pins the formula value."""
     result = m9_nohd.compute(_inputs(wavelength=1.55e-6))
+    # rel = 1 %: MPE in Band B = 0.56 · t^(-3/4) · 1e4. The closed-form
+    # lands at 15839 W/m² precisely; 1 % accommodates only the 0.25^(-3/4)
+    # constant rounding. Tighter would flag the ANSI coefficient itself.
     assert result["MPE"] == pytest.approx(15839.0, rel=0.01)
+    # rel = 5 %: tophat NOHD at this setup is only 7.97 m after a 1 m
+    # aperture correction on an ~9 m raw range — the ratio is volatile.
+    # SPEC §3 M9 tolerance for eye-safer band is 5 % to absorb that.
     assert result["NOHD_tophat"] == pytest.approx(7.97, rel=0.05)
     # SPEC-stated qualitative relationship: Band B NOHD is much smaller
     # than Band A — by two orders of magnitude in MPE, ~one in NOHD.
@@ -88,6 +99,9 @@ def test_m9_ratio_sqrt2():
     d_over_theta = 0.10 / 1.3e-5
     raw_tophat = result["NOHD_tophat"] + d_over_theta
     raw_gausspeak = result["NOHD_gausspeak"] + d_over_theta
+    # rel = 1e-12: structural algebraic identity — sqrt(8)/sqrt(4) = √2
+    # is the CLAUDE §7.1 invariant the test defends. Machine precision
+    # is the ONLY defensible tolerance; any looser hides a factor slip.
     assert raw_gausspeak / raw_tophat == pytest.approx(math.sqrt(2.0), rel=1e-12)
 
     # And the actual-NOHD ratio approaches √2 from above; the deviation
@@ -95,6 +109,10 @@ def test_m9_ratio_sqrt2():
     # conventions. For these inputs D/θ = 7.7 km on a ~940 km raw range
     # → ~0.24% deviation. Assert "close to √2, within 1%" to keep this
     # as a sanity check rather than a structural redundancy.
+    # rel = 1 %: end-to-end NOHD ratio only approaches √2 because the
+    # aperture term D/θ is identical under both conventions and doesn't
+    # scale. At HEL geometry this leaves ~0.24 % deviation; 1 % gives
+    # safe headroom while still trapping a factor-of-2 regression.
     assert result["NOHD_gausspeak"] / result["NOHD_tophat"] == pytest.approx(
         math.sqrt(2.0), rel=1e-2
     )
@@ -104,6 +122,9 @@ def test_m9_chronic_viewing():
     """SPEC §3 M9 'test_m9_chronic_viewing'. Band A MPE saturates at
     the chronic limit 1.0e-3 W/cm² = 10 W/m² for t_exp > 10 s."""
     result = m9_nohd.compute(_inputs(t_exp=100.0))
+    # SPEC §3 M9 tolerance = 2 %: chronic Band A MPE is pinned at
+    # 1.0e-3 W/cm² = 10 W/m² exactly by ANSI. 2 % is defensive; this
+    # is effectively a constant-value check.
     assert result["MPE"] == pytest.approx(10.0, rel=0.02)
 
 
@@ -160,6 +181,8 @@ def test_m9_band_b_chronic_limit():
     """Band B (eye-safer) also has a chronic plateau at 0.1 W/cm²
     = 1000 W/m² for t_exp > 10 s."""
     result = m9_nohd.compute(_inputs(wavelength=1.55e-6, t_exp=100.0))
+    # rel = 2 %: chronic Band B MPE = 0.1 W/cm² = 1000 W/m² exactly
+    # per ANSI. Defensive 2 %; effectively a constant check.
     assert result["MPE"] == pytest.approx(1000.0, rel=0.02)
 
 

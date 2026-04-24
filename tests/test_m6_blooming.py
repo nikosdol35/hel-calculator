@@ -55,6 +55,11 @@ def test_m6_moderate_blooming(canonical_inputs):
     0.0521). ±30% tolerance is the SPEC-stated engineering-model
     tolerance."""
     result = m6_blooming.compute(_with(canonical_inputs))
+    # SPEC §3 M6 tolerance = ±30 %: Gebhardt's N_D engineering form
+    # and Smith's Strehl approximation are both semi-empirical fits
+    # with quoted accuracy of ±30 % in the 5 ≤ N_D ≤ 30 band. Tightening
+    # would fight the model's own uncertainty; we rely on the moderate
+    # regime being the one where the engineering formulas actually hold.
     assert result["N_D"] == pytest.approx(20.0, rel=0.30)
     assert result["S_TB"] == pytest.approx(0.05, rel=0.30)
     # In this regime (5 ≤ N_D ≤ 30) w_bloom is nonzero and the SPEC §10.4

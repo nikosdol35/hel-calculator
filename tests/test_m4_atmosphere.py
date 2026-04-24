@@ -36,6 +36,10 @@ def test_m4_aerosol_kruse(
     alpha_aer_total_per_km = (
         (result["alpha_aer_abs"] + result["alpha_aer_scat"]) * 1000.0
     )
+    # SPEC §3 M4 tolerance = 5 %: Kruse's piecewise q(V) is an
+    # engineering fit (1962), not a bit-exact formula. 5 % is Kruse's
+    # own quoted accuracy envelope. Tightening would fight the empirical
+    # fit; relaxing would let an implementation error slip through.
     assert alpha_aer_total_per_km == pytest.approx(
         expected_alpha_aer_per_km, rel=0.05
     )
@@ -51,6 +55,9 @@ def test_m4_aerosol_clear_atm_and_tau(canonical_inputs):
     }
     result = m4_atmosphere.compute(inputs)
     alpha_atm_per_km = result["alpha_atm"] * 1000.0
+    # SPEC §3 M4 tolerance = 5 %: α_atm inherits Kruse's 5 % envelope
+    # through the aerosol component. τ_atm = exp(−α·R) keeps the same
+    # budget because the exponent is the uncertain quantity.
     assert alpha_atm_per_km == pytest.approx(0.137, rel=0.05)
     assert result["tau_atm"] == pytest.approx(math.exp(-0.685), rel=0.05)
 
@@ -76,6 +83,10 @@ def test_m4_wavelength_interpolation(canonical_inputs):
     expected_per_km = math.exp(log_y1 + t * (log_y2 - log_y1))
 
     actual_per_km = result["alpha_mol_abs"] * 1000.0
+    # rel = 1e-9: comparing the helper's output against the closed-form
+    # log-space linear interpolation we just computed above — this is
+    # effectively a self-consistency check, so machine precision is the
+    # right target (anything looser would hide a real arithmetic bug).
     assert actual_per_km == pytest.approx(expected_per_km, rel=1e-9)
 
 
