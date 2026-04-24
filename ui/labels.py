@@ -449,6 +449,92 @@ OUTPUT_LABELS: dict[str, LabelEntry] = {
         "tooltip": "Gebhardt's dimensionless blooming distortion number. N_D ≳ 30 indicates the model is being pushed outside its validity range.",
         "unit":    "",
     },
+
+    # -- M1 source-plane diagnostics (Diagnostics tab) -----------------------
+    "w0": {
+        "label":   "Exit waist radius",
+        "tooltip": "1/e² radius of the Gaussian beam at the exit aperture (D/2 at full fill).",
+        "unit":    "m",
+    },
+    "zR": {
+        "label":   "Rayleigh range",
+        "tooltip": "Rayleigh range z_R = π·w0²/(M²·λ). Beam radius √2·w0 at z_R.",
+        "unit":    "m",
+    },
+    "I_exit": {
+        "label":   "Exit irradiance",
+        "tooltip": "On-axis irradiance at the exit aperture, 2·P0/(π·w0²).",
+        "unit":    "W/m²",
+    },
+
+    # -- M2 power-link output (Diagnostics tab) ------------------------------
+    "P_exit": {
+        "label":   "Exit power",
+        "tooltip": "Laser power leaving the beam-director aperture after optical-train efficiency.",
+        "unit":    "W",
+    },
+
+    # -- M3 geometry outputs (Diagnostics tab) -------------------------------
+    "R_slant": {
+        "label":   "Slant range",
+        "tooltip": "Line-of-sight distance from the emitter to the target, accounting for altitude difference.",
+        "unit":    "m",
+    },
+    "R_h": {
+        "label":   "Horizontal range",
+        "tooltip": "Ground-plane distance from the emitter to the target foot-print.",
+        "unit":    "m",
+    },
+    "elevation_angle": {
+        "label":   "Elevation angle",
+        "tooltip": "Look-up angle from horizontal to the target along the slant path.",
+        "unit":    "rad",
+    },
+
+    # -- M5 turbulence diagnostics (Diagnostics tab) -------------------------
+    "Cn2_integrated": {
+        "label":   "Integrated Cn²",
+        "tooltip": "Path-integrated Cn² along the slant range. Drives r0 and the turbulence spot broadening.",
+        "unit":    "m⁻²ᐟ³·m",
+    },
+    "r0_sph": {
+        "label":   "Fried parameter (spherical)",
+        "tooltip": "Spherical-wave Fried coherence diameter r0. Beam diameter ≪ r0 → turbulence-limited.",
+        "unit":    "m",
+    },
+
+    # -- M7 derived outputs (Diagnostics tab) --------------------------------
+    "d_spot": {
+        "label":   "Spot diameter",
+        "tooltip": "2·w_total, the 1/e² spot diameter at the target plane.",
+        "unit":    "cm",
+    },
+    "PIB_fraction": {
+        "label":   "Power in the bucket",
+        "tooltip": "Fraction of total power that falls inside the aimpoint radius.",
+        "unit":    "",
+    },
+
+    # -- M8 target-effects diagnostics (Target-effects tab) ------------------
+    "E_delivered": {
+        "label":   "Energy delivered",
+        "tooltip": "Cumulative absorbed energy at the target surface up to burn-through or the end of the integration window.",
+        "unit":    "J",
+    },
+
+    # -- M9 safety diagnostics (Safety tab) ----------------------------------
+    "MPE": {
+        "label":   "Maximum Permissible Exposure",
+        "tooltip": "ANSI Z136.1 maximum permissible ocular exposure irradiance for the configured wavelength and exposure time.",
+        "unit":    "W/m²",
+    },
+
+    # -- M10 power-thermal diagnostics (Diagnostics tab) ---------------------
+    "duty_cycle_limit": {
+        "label":   "Duty-cycle limit",
+        "tooltip": "Fraction of time the system can fire continuously given Q_cool / Q_waste.",
+        "unit":    "",
+    },
 }
 
 

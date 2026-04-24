@@ -63,8 +63,10 @@ def test_m8_numerics_analytic_semi_infinite_surface(monkeypatch):
     Setup: CFRP-like properties, thick slab (5 mm ≫ thermal penetration
     depth at t ≤ 0.3 s), low flux (100 kW/m²) so T_s stays well below
     decomposition and convection/radiation losses remain small (<5 %
-    of absorbed). A_lambda forced to 1.0 so the "effective" surface
-    flux is exactly I_aim.
+    of absorbed). A_lambda set to the validator's upper bound of 0.99
+    so the "effective" surface flux is ~I_aim; the analytic formula
+    below uses the same effective flux (A_lambda·I_aim) so the
+    comparison is exact in the limit.
 
     Tolerance: 5 % on ΔT, i.e. (T_s − T_amb). Accounts for the unavoidable
     conv+rad losses the M8 solver applies internally (no way to disable)
@@ -79,7 +81,11 @@ def test_m8_numerics_analytic_semi_infinite_surface(monkeypatch):
 
     I_aim = 1.0e5  # 100 kW/m² — well below CFRP decomposition flux
     T_amb = 293.0
-    A_lambda = 1.0
+    # A_lambda = 0.99 (validator upper bound). The analytic formula
+    # below receives A_lambda·I_aim as the effective surface flux, so
+    # the comparison is apples-to-apples regardless of the absolute
+    # value chosen here.
+    A_lambda = 0.99
 
     inputs = {
         "I_aim": I_aim,
@@ -104,8 +110,8 @@ def test_m8_numerics_analytic_semi_infinite_surface(monkeypatch):
     dT_analytic = _semi_infinite_T_rise(
         q=A_lambda * I_aim, alpha=alpha, k=k, x=0.0, t=t_ref,
     )
-    # Hand-check:  2·1e5·√(4.375e-6·0.3/π)/7 = 2·1e5·6.459e-4/7 ≈ 18.45 K.
-    assert dT_analytic == pytest.approx(18.45, rel=0.01)
+    # Hand-check:  2·(0.99·1e5)·√(4.375e-6·0.3/π)/7 = 0.99·18.45 ≈ 18.27 K.
+    assert dT_analytic == pytest.approx(18.27, rel=0.01)
 
     # T_surface_peak is a running max across the sim; at t_ref=0.3s the
     # analytic surface rise is ~18 K → peak temp ≈ 311 K. M8 runs to 0.4 s
@@ -225,37 +231,35 @@ def test_m8_numerics_cfl_stability_factor(material: str):
 
 
 def test_m8_numerics_energy_conservation_pre_failure(monkeypatch):
-    """On a sub-failure heating-only run, the energy balance must close:
+    """On a sub-failure heating-only run, the total energy balance must
+    close to within truncation error:
 
-        E_absorbed = A_λ · I_aim · τ
-                    ≈ ρ·c_p·(T_avg − T_amb)·L  +  conv+rad losses
+        E_absorbed  ≈  E_internal_rise  +  E_losses_integrated
 
-    The M8 solver reports E_delivered = A_λ·I_aim·tau_BT (absorbed
-    energy per unit area at failure). Before failure, at t = τ_final
-    (when the sim hits the timeout), the same accounting must hold —
-    the surface has absorbed A_λ·I·τ J/m² and either raised internal
-    energy or emitted back through convection/radiation at the surface.
+    where, in SI per-unit-area units,
+        E_absorbed          = A_λ · I_aim · τ                  (J/m²)
+        E_internal_rise     ≈ ρ · c_p · L · (T_bulk − T_amb)    (J/m²)
+        E_losses_integrated ≈ (conv_loss_avg + rad_loss_avg) · τ
 
-    The test runs a low-flux CFRP case to sim-timeout (which acts as
-    the truncation time here). We check the magnitudes:
-      - absorbed_per_m2 = A_λ · I_aim · τ_final   [exact, by construction]
-      - E_delivered reported by M8 = A_λ · I_aim · tau_BT
-      - the ratio must equal 1 at machine precision (tau_BT === sim end).
+    Setup rationale. To make the internal-energy integral tractable
+    without reading M8's hidden T(x,t) array, pick a material with a
+    very short thermal-diffusion time across its thickness so the slab
+    is essentially isothermal at τ ≫ L²/α. Anodized Al 2 mm has
+    τ_therm = L²/α ≈ 0.05 s, so a 2 s run leaves T_bulk ≈ T_surface.
+    The absorbed flux is small (A_λ·I = 10 kW/m²) so the peak T only
+    rises ~4 K above ambient, conv/rad losses stay tiny, and virtually
+    all absorbed energy is internal.
 
-    That identity is the easy half. The harder half — comparing
-    absorbed energy to the physical internal-energy integral — requires
-    reading the final temperature array, which M8 doesn't expose. We
-    bound the balance indirectly: at steady-state (dT/dt → 0 at the
-    surface) absorbed ≈ conv_loss + rad_loss — a 1D energy sink balance
-    at the surface. We verify that the final surface temperature
-    satisfies this balance to within 10 %.
+    Tolerance 5 %. The explicit scheme is 1st-order in time; the
+    bulk-average approximation uses T_s in place of the true T_avg
+    (introducing <1 % error since the slab is isothermal at τ ≫ τ_therm).
+    5 % covers both the truncation and the approximation.
     """
     monkeypatch.setattr(m8_burnthrough, "_SIM_TIMEOUT_S", 2.0)
 
-    # Pick inputs where the surface reaches a steady-state well below
-    # T_fail in under 2 s. EPP foam with A=0.5, thin: reaches ~450 K
-    # and plateaus quickly because of the low mass per unit area.
-    # Actually easier: anodized Al with A_lambda=0.1 and low flux.
+    # Anodized Al, 2 mm, low absorbed flux → slab stays near ambient,
+    # losses stay negligible, and internal energy rise accounts for
+    # ~all of the absorbed energy.
     inputs = {
         "I_aim": 1.0e5,
         "material": "anodized_Al",
@@ -275,27 +279,38 @@ def test_m8_numerics_energy_conservation_pre_failure(monkeypatch):
     absorbed_per_m2 = 0.1 * 1.0e5 * result["tau_BT"]
     assert result["E_delivered"] == pytest.approx(absorbed_per_m2, rel=1e-12)
 
-    # Surface-energy-balance sanity at the (approximately) steady state.
-    # Absorbed surface flux = conv + rad losses at the peak surface T.
+    # Total-energy balance.
     T_s = result["T_surface_peak"]
     T_amb = 293.0
+    tau = result["tau_BT"]
+
+    # Anodized Al material properties per SPEC §3 M8 material table.
+    rho = 2700.0
+    c_p = 900.0
+    L_slab = inputs["thickness"]
     h_conv = 10.0 + 6.2 * math.sqrt(inputs["v_tgt"])
     eps = 0.85
     sigma = 5.670374419e-8
-    absorbed_flux = 0.1 * 1.0e5     # 10 kW/m²
-    conv_loss = h_conv * (T_s - T_amb)
-    rad_loss = eps * sigma * (T_s ** 4 - T_amb ** 4)
 
-    # For a 2 mm Al slab at t=2 s (α=8.2e-5, τ_therm = L²/α ≈ 0.05 s)
-    # the slab is fully equilibrated; dT/dt is small; absorbed ≈ losses
-    # to within 10 %. Larger gap would mean the solver is still far from
-    # quasi-steady or energy is leaking.
-    total_loss = conv_loss + rad_loss
-    assert total_loss == pytest.approx(absorbed_flux, rel=0.10), (
-        f"Surface energy balance: absorbed={absorbed_flux:.1f} W/m², "
-        f"losses={total_loss:.1f} W/m² at T_peak={T_s:.1f} K — "
-        f"imbalance >10 %; solver may not have reached steady state "
-        f"or the ghost-cell stencil is leaking energy"
+    # τ_therm = L²/α ≈ 0.05 s ≪ 2 s → slab is isothermal; T_bulk ≈ T_s.
+    E_internal = rho * c_p * L_slab * (T_s - T_amb)
+
+    # Average losses over the run. T rises ~linearly from T_amb to T_s
+    # (low Biot, nearly-linear heating); average loss uses (T_s + T_amb)/2.
+    T_avg = 0.5 * (T_s + T_amb)
+    conv_loss_avg = h_conv * (T_avg - T_amb)
+    rad_loss_avg = eps * sigma * (T_avg ** 4 - T_amb ** 4)
+    E_losses = (conv_loss_avg + rad_loss_avg) * tau
+
+    E_accounted = E_internal + E_losses
+    rel_err = abs(E_accounted - absorbed_per_m2) / absorbed_per_m2
+    assert rel_err < 0.05, (
+        f"Energy balance unclosed: absorbed={absorbed_per_m2:.1f} J/m², "
+        f"accounted={E_accounted:.1f} J/m² "
+        f"(internal={E_internal:.1f}, losses={E_losses:.1f}) at "
+        f"T_peak={T_s:.1f} K — rel error {rel_err:.2%} > 5 %, "
+        f"solver may be leaking energy (stencil bug) or the isothermal-"
+        f"slab approximation has broken down"
     )
 
 

@@ -39,7 +39,15 @@ from physics import (
 DERANDOMIZED = settings(
     max_examples=50,
     derandomize=True,
-    suppress_health_check=[HealthCheck.filter_too_much, HealthCheck.too_slow],
+    suppress_health_check=[
+        HealthCheck.filter_too_much,
+        HealthCheck.too_slow,
+        # The three orchestrator fuzz tests pull the canonical_inputs fixture
+        # and overlay the hypothesis-drawn parameters. The fixture is a
+        # read-only dict snapshot, not reset state — reusing it across
+        # examples is safe and intentional.
+        HealthCheck.function_scoped_fixture,
+    ],
     deadline=None,  # some properties run the full orchestrator — be patient
 )
 

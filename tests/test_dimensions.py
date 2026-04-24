@@ -357,20 +357,28 @@ def test_m7_w_turb_inverse_in_r0(canonical_inputs):
 def test_m7_w_diff_linear_in_range_far_field(canonical_inputs):
     """Exact: w_diff = w₀·√(1+(M²L/zR)²). In the far field (L ≫ zR) the
     '1+' correction is small and 2·L doubles w_diff to within a small
-    residual determined by (zR/(M²L))². At canonical w₀=0.05 m, λ=1.07 µm,
-    zR ≈ 7340 m; L=50 km gives M²L/zR ≈ 8.17, residual ~1%."""
+    residual determined by the '1+' term at each endpoint. At canonical
+    w₀=0.05 m, λ=1.07 µm, zR ≈ 7340 m; L=50 km gives M²L/zR ≈ 8.17 so
+    the 25 km → 50 km ratio is √((1+66.75)/(1+16.69)) = 1.957, a 2.15%
+    departure from the exact-linear asymptote 2.0. That is the *physical*
+    residual at the maximum slant range the M7 validator allows — closer
+    to 2.0 is unreachable without exceeding the SPEC §5.1 Panel C range."""
     m7_inputs = _m7_inputs(canonical_inputs, R_slant=25000.0)
     base = m7_spot_pib.compute(m7_inputs)
     scaled = m7_spot_pib.compute({**m7_inputs, "R_slant": 50000.0})
-    # Expected ratio closed form:
+    # Expected ratio closed form — the exact Gaussian formula, rel=1e-9
+    # catches any drift in the sqrt(1+a²) evaluation:
     zR = m7_inputs["zR"]
     M2 = m7_inputs["M2"]
     ratio_theory = math.sqrt(
         (1.0 + (M2 * 50000.0 / zR) ** 2) / (1.0 + (M2 * 25000.0 / zR) ** 2)
     )
     assert scaled["w_diff"] / base["w_diff"] == pytest.approx(ratio_theory, rel=1e-9)
-    # And that theoretical ratio is close to 2.0 in the far field:
-    assert ratio_theory == pytest.approx(2.0, rel=0.02)
+    # And that theoretical ratio is approximately 2.0 in the far field
+    # (rel=0.03 captures the 2.15% physical residual at the validator's
+    # max slant range; tighter would mean doubling L to 100 km, which the
+    # validator rejects):
+    assert ratio_theory == pytest.approx(2.0, rel=0.03)
 
 
 def test_m7_pib_exponent_uses_radius(canonical_inputs):
