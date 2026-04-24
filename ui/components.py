@@ -474,6 +474,51 @@ def footer_strip(
 
 
 # =============================================================================
+# error_card — friendly error surface for input-validation failures
+# =============================================================================
+
+def error_card(
+    title: str,
+    message: str,
+    *,
+    suggestion: str | None = None,
+) -> None:
+    """Render a calm, single-card error surface matching the design system.
+
+    Used by ``ui/app.py`` when a physics validator raises ``ValueError``
+    on the user's current input set. Replaces the previous ``st.error``
+    Streamlit default (which is a full-width red banner with no
+    typographic hierarchy) with a card that reads as "here is what
+    went wrong and here is what to change", in the same visual idiom
+    as the rest of the app.
+
+    Args:
+        title: Short headline (under 60 chars). Present tense, active
+            voice. Example: ``"Input out of range"``.
+        message: One or two sentences describing what the solver
+            rejected. Quote the offending value with its unit where
+            possible. Example: ``"Slant range 50 km exceeds the upper
+            sanity limit for the current aperture."``.
+        suggestion: Optional action the user can take. Kept on its own
+            line so it is visually separate from the diagnosis.
+    """
+    from ui.icons import icon as _icon_svg
+
+    glyph = _icon_svg("x-circle", size=20)
+    lines = [
+        '<div class="hel-error-card" role="alert">',
+        f'  <div class="hel-error-card__header">{glyph}<span>{title}</span></div>',
+        f'  <div class="hel-error-card__body">{message}</div>',
+    ]
+    if suggestion:
+        lines.append(
+            f'  <div class="hel-error-card__suggestion">{suggestion}</div>'
+        )
+    lines.append("</div>")
+    st.markdown("\n".join(lines), unsafe_allow_html=True)
+
+
+# =============================================================================
 # progress_bar — thin indeterminate bar for compute-time feedback
 # =============================================================================
 
@@ -515,6 +560,7 @@ __all__ = [
     "status_chip",
     "section_header",
     "skeleton_card",
+    "error_card",
     "footer_strip",
     "progress_bar",
     "Severity",

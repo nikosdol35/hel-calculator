@@ -476,6 +476,14 @@ PRESET_LABELS: dict[str, str] = {
     "custom":                 "Custom",
 }
 
+# Sidebar preset-dropdown chrome.
+PRESET_PICKER_LABEL: str = "Engagement scenario"
+PRESET_PICKER_HELP: str = (
+    "Load a defensible reference input set. Selecting any named scenario "
+    "overwrites every sidebar field; selecting Custom leaves your current "
+    "edits in place."
+)
+
 
 # =============================================================================
 # Button / control labels
@@ -528,6 +536,13 @@ ADVISORY: dict[str, str] = {
     ),
     "first_run_skeleton": (
         "Click Run Analysis in the sidebar to populate the tabs."
+    ),
+    "welcome_title": "Ready to run",
+    "welcome_body": (
+        "Pick an Engagement scenario in the sidebar to load a reference "
+        "input set, or adjust the six sections directly. Click Run "
+        "Analysis when the configuration is ready — every tab populates "
+        "together."
     ),
     "temperature_schematic": (
         "Temperature-vs-time view is a simplified two-point envelope — the "
@@ -609,6 +624,8 @@ __all__ = [
     "OUTPUT_LABELS",
     "MATERIAL_DISPLAY_NAMES",
     "PRESET_LABELS",
+    "PRESET_PICKER_LABEL",
+    "PRESET_PICKER_HELP",
     "BUTTON_LABELS",
     "VERDICT_TEMPLATES",
     "ADVISORY",

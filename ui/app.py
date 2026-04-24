@@ -68,13 +68,16 @@ import streamlit as st
 
 from physics import m11_validation
 from physics.orchestrator import run_full_chain
-from ui import outputs, panels, theme
+from ui import outputs, panels, presets, theme
 from ui.auth import require_login
-from ui.components import progress_bar
+from ui.components import error_card, progress_bar
 from ui.labels import (
     ADVISORY,
     BUTTON_LABELS,
     FOOTER_TEMPLATE,
+    PRESET_LABELS,
+    PRESET_PICKER_HELP,
+    PRESET_PICKER_LABEL,
     TAB_LABELS,
 )
 
@@ -82,8 +85,8 @@ from ui.labels import (
 # Provenance — surfaced in the footer strip only (never in the header).
 # Keep in sync with the latest contract-document revisions.
 # ---------------------------------------------------------------------------
-_SPEC_VERSION = "v1.10"
-_ARCH_VERSION = "v1.7"
+_SPEC_VERSION = "v1.11"
+_ARCH_VERSION = "v2.0"
 _BUILD_DATE = "2026-04-24"
 
 
@@ -264,8 +267,40 @@ url_flags = list(st.session_state.get(_URL_FLAGS_KEY, []))
 st.title("HEL Engineering Calculator")
 
 # ---------------------------------------------------------------------------
-# Sidebar — input sections + action buttons.
+# Sidebar — preset picker, then input sections, then action buttons.
 # ---------------------------------------------------------------------------
+# Preset dropdown: rendered BEFORE the six input sections so its
+# ``on_change`` callback can write through to the underlying widget
+# session-state keys before those widgets render this run. The "Custom"
+# default preserves backwards-compatible behavior — a fresh visitor
+# with no preset selection still sees the canonical SPEC §5.1 defaults
+# via each panel's fallback.
+_PRESET_KEY = "_preset_choice"
+_PRESET_OPTIONS = tuple(PRESET_LABELS.keys())
+
+
+def _on_preset_change() -> None:
+    """Write the selected preset's values into session-state.
+
+    Runs as the ``on_change`` callback for the preset selectbox, which
+    fires before the six input sections render on this rerun — so the
+    session-state writes land in time to be picked up by each widget's
+    ``key=`` binding.
+    """
+    choice = st.session_state.get(_PRESET_KEY, "custom")
+    presets.apply_to_session_state(st.session_state, choice)
+
+
+with st.sidebar:
+    st.selectbox(
+        PRESET_PICKER_LABEL,
+        options=_PRESET_OPTIONS,
+        format_func=lambda k: PRESET_LABELS[k],
+        key=_PRESET_KEY,
+        on_change=_on_preset_change,
+        help=PRESET_PICKER_HELP,
+    )
+
 user_inputs = panels.collect_all(initial=prefill or None)
 
 with st.sidebar:
@@ -364,7 +399,13 @@ if run_clicked:
 _render_last_run_indicator()
 
 if not st.session_state.get(_RUN_LATCH):
-    st.info(ADVISORY["first_run_skeleton"])
+    st.markdown(
+        '<div class="hel-welcome-card">'
+        f'<div class="hel-welcome-card__title">{ADVISORY["welcome_title"]}</div>'
+        f'<div class="hel-welcome-card__body">{ADVISORY["welcome_body"]}</div>'
+        "</div>",
+        unsafe_allow_html=True,
+    )
     _render_footer()
     st.stop()
 
@@ -384,7 +425,14 @@ try:
     result = run_chain_cached(frozen)
 except ValueError as exc:
     progress_slot.empty()
-    st.error(f"Input validation failed: {exc}")
+    error_card(
+        "Input out of range",
+        f"The solver rejected the current input set: {exc}",
+        suggestion=(
+            "Adjust the sidebar values until every input sits inside its "
+            "sanity range, then click Run Analysis again."
+        ),
+    )
     _render_footer()
     st.stop()
 

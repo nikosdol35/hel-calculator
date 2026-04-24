@@ -545,6 +545,65 @@ select:focus-visible,
   to   {{ opacity: 1; transform: translateY(0); }}
 }}
 
+/* ---- Welcome card (pre-first-run state) -------------------------------- */
+/* A calm centered card that replaces the default Streamlit st.info banner
+   when the user has not yet clicked Run Analysis. Explains the first two
+   steps — pick a scenario, then run — without shouting. */
+.hel-welcome-card {{
+  background: var(--bg-surface);
+  border: 1px solid var(--border-subtle);
+  border-radius: 8px;
+  padding: var(--space-12) var(--space-12);
+  margin: var(--space-8) 0;
+  text-align: center;
+  box-shadow: 0 1px 2px rgba(0,0,0,0.4);
+}}
+.hel-welcome-card__title {{
+  font-family: 'Inter', system-ui, -apple-system, sans-serif;
+  font-size: 18px; font-weight: 600; letter-spacing: 0;
+  color: var(--fg-primary);
+  margin-bottom: var(--space-3);
+}}
+.hel-welcome-card__body {{
+  font-size: 14px; font-weight: 400; line-height: 1.5;
+  color: var(--fg-secondary);
+  max-width: 520px; margin: 0 auto;
+}}
+
+/* ---- Error card (physics validator rejects the input set) -------------- */
+/* Calm, single-surface error card that replaces Streamlit's default st.error
+   banner. Uses the status-error token for the icon + title, but the card
+   body is the standard surface color — "here is what went wrong, here is
+   what to change" reads more calmly than a full-width red stripe. */
+.hel-error-card {{
+  background: var(--bg-surface);
+  border: 1px solid var(--status-error);
+  border-left: 4px solid var(--status-error);
+  border-radius: 8px;
+  padding: var(--space-6);
+  margin: var(--space-4) 0;
+  box-shadow: 0 1px 2px rgba(0,0,0,0.4);
+}}
+.hel-error-card__header {{
+  display: flex; align-items: center; gap: var(--space-3);
+  color: var(--status-error);
+  font-family: 'Inter', system-ui, -apple-system, sans-serif;
+  font-size: 14px; font-weight: 600; letter-spacing: 0;
+  margin-bottom: var(--space-3);
+}}
+.hel-error-card__header svg {{ flex: 0 0 auto; }}
+.hel-error-card__body {{
+  color: var(--fg-primary);
+  font-size: 14px; font-weight: 400; line-height: 1.5;
+}}
+.hel-error-card__suggestion {{
+  margin-top: var(--space-3);
+  color: var(--fg-secondary);
+  font-size: 13px; line-height: 1.5;
+  padding-top: var(--space-3);
+  border-top: 1px solid var(--border-subtle);
+}}
+
 /* ---- "Last run" indicator (sidebar) ------------------------------------ */
 .hel-last-run {{
   font-size: 12px;
