@@ -343,7 +343,7 @@ _SEVERITY_PATTERNS: tuple[tuple[str, str], ...] = (
     # --- error: the calculation failed, the engagement is not viable ------
     ("not viable",               "error"),
     ("not engageable",           "error"),
-    ("simulation reached timeout", "error"),
+    ("reached timeout",          "error"),  # M8: "simulation reached 60 s timeout…"
     ("infeasible",               "error"),
     ("no feasible",              "error"),
     # --- warn: a model is outside its strict validity range, or a high-
@@ -353,7 +353,10 @@ _SEVERITY_PATTERNS: tuple[tuple[str, str], ...] = (
     ("outside tabulated",        "warn"),
     ("outside validated",        "warn"),
     ("outside the validity",     "warn"),
-    ("n_d > 30",                 "warn"),
+    ("outside stated validity",  "warn"),  # M6: "N_D = … > 30: … outside stated validity range"
+    ("did not converge",         "warn"),  # orchestrator: M6↔M7 loop non-convergence
+    ("deferred to v2",           "warn"),  # M9: "MPE for λ > 4 µm deferred to v2…"
+    ("best-effort",              "warn"),  # M9: "t_exp < 18 µs … best-effort limit"
     ("extrapolated",             "warn"),
     ("extrapolation",            "warn"),
     ("clamped",                  "warn"),
