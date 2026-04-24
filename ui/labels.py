@@ -448,6 +448,22 @@ OUTPUT_LABELS: dict[str, LabelEntry] = {
 
 
 # =============================================================================
+# Material display names (SPEC v1 material set; raw enum values are
+# technical identifiers — these are their English-prose chart labels).
+# =============================================================================
+
+MATERIAL_DISPLAY_NAMES: dict[str, str] = {
+    "anodized_Al":   "Anodized aluminium",
+    "CFRP":          "Carbon-fibre composite",
+    "GFRP":          "Glass-fibre composite",
+    "polycarbonate": "Polycarbonate",
+    "ABS":           "ABS plastic",
+    "EPP_foam":      "Expanded polypropylene foam",
+    "LiPo":          "Lithium-polymer cell",
+}
+
+
+# =============================================================================
 # Preset names (sidebar dropdown — populated from ui/presets.py)
 # =============================================================================
 
@@ -512,6 +528,19 @@ ADVISORY: dict[str, str] = {
     ),
     "first_run_skeleton": (
         "Click Run Analysis in the sidebar to populate the tabs."
+    ),
+    "temperature_schematic": (
+        "Temperature-vs-time view is a simplified two-point envelope — the "
+        "physics solver reports only the ambient baseline and the peak "
+        "surface temperature at burn-through, not the intermediate trajectory."
+    ),
+    "material_comparison_unavailable": (
+        "Material comparison could not be computed — the reference-range "
+        "flux is below the threshold for every tabulated v1 material."
+    ),
+    "no_hazard_data": (
+        "Hazard-zone schematic unavailable — Nominal Ocular Hazard Distance "
+        "values were not produced for this input set."
     ),
 }
 
@@ -578,6 +607,7 @@ __all__ = [
     "TAB_LABELS",
     "INPUT_LABELS",
     "OUTPUT_LABELS",
+    "MATERIAL_DISPLAY_NAMES",
     "PRESET_LABELS",
     "BUTTON_LABELS",
     "VERDICT_TEMPLATES",
