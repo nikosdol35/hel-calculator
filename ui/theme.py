@@ -352,15 +352,48 @@ h3 {{ font-size: 18px; line-height: 1.35; }}
   padding: var(--space-6);
   box-shadow: var(--shadow-1);
   transition: box-shadow 150ms ease-out, transform 150ms ease-out;
+  /* Bottom margin gives stacked rows of cards a 16 px vertical rhythm.
+     Because every card carries the same margin, two sequential
+     ``st.columns(...)`` calls render with clear separation between
+     rows without any per-row spacer in the Python layer. */
+  margin-bottom: var(--space-4);
 }}
 .hel-card:hover {{ box-shadow: var(--shadow-2); }}
 
 .hel-section-header {{
   font-size: 18px; font-weight: 600; color: var(--fg-primary);
-  margin: var(--space-6) 0 var(--space-3) 0;
+  margin: var(--space-8) 0 var(--space-4) 0;
   display: flex; align-items: center; gap: var(--space-2);
 }}
 .hel-section-header svg {{ color: var(--accent-primary); }}
+
+/* ---- Inline explanation prose (caption-sized, calm) -------------------- */
+/* Short plain-language sentences sitting under a section header or a plot
+   to explain what the viewer is looking at. Readable-first paragraph-width,
+   fg.secondary color so the prose reads as guidance rather than data. */
+.hel-explanation {{
+  color: var(--fg-secondary);
+  font-size: 13px;
+  line-height: 1.55;
+  max-width: 820px;
+  margin: var(--space-2) 0 var(--space-6) 0;
+}}
+.hel-explanation--plot {{
+  /* Plot captions sit between the chart and the next header — the top
+     margin ties them visually to the chart above. */
+  margin-top: var(--space-3);
+  margin-bottom: var(--space-8);
+}}
+
+/* ---- Column gutters ---------------------------------------------------- */
+/* Streamlit's default ``st.columns`` gap packs cards tightly against each
+   other at narrow viewports. The design tokens call for 16 px horizontal
+   gutters on card rows so the border/shadow of each card has breathing
+   room from its neighbours. Rule targets the flex container Streamlit
+   emits for every ``st.columns(...)`` call. */
+[data-testid="stHorizontalBlock"] {{
+  gap: var(--space-4) !important;
+}}
 
 /* ---- Status chips (hue + icon + text — color-blind dual-encoded) ------- */
 .hel-chip {{

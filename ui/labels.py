@@ -607,6 +607,176 @@ def input_unit(key: str) -> str:
     return INPUT_LABELS[key].get("unit", "")
 
 
+# =============================================================================
+# Plain-language explanation copy
+# =============================================================================
+# Short prose passages that sit under section headers and plots to tell a
+# non-specialist viewer what they are looking at, in a few sentences.
+# Engineer voice per the Phase 3 UI-redesign plan §"Voice and tone":
+# specific, active, unit every quantity, no hype. These strings are
+# user-visible copy; the copy-style lint in tests/test_copy_style.py will
+# reject any SPEC / ARCH / module-tag citations or emoji found here.
+#
+# VERDICT_EXPLANATIONS carries the five verdict-tier explanations. Keys
+# match VERDICT_TEMPLATES above; the ``ok``/``warn``/``error`` entries
+# accept ``dwell_s``, ``tau_s``, and either ``margin_pct`` or
+# ``shortfall_pct`` for a context-aware sentence.
+#
+# EXPLANATIONS carries static passages (no substitutions) for the section
+# headers and plots.
+
+VERDICT_EXPLANATIONS: dict[str, str] = {
+    "instant": (
+        "The target meets its failure criterion essentially the moment the "
+        "beam lands — any available dwell is more than enough."
+    ),
+    "no_dwell": (
+        "No dwell window is available for this geometry. The target "
+        "kinematics leave no interval in which the beam can hold its aim. "
+        "Reduce target velocity, widen the aimpoint, or adjust the "
+        "emplacement and target altitudes so the line-of-sight rate "
+        "stays within trackable limits."
+    ),
+    "ok": (
+        "The beam can hold the target for {dwell_s:.1f} s before the "
+        "geometry changes (available dwell), and the target needs only "
+        "{tau_s:.1f} s of that flux to be defeated (time to burn-through). "
+        "The {margin_pct:.0f}% margin leaves comfortable headroom — "
+        "realistic pointing errors or mid-engagement re-aims are unlikely "
+        "to compromise the kill."
+    ),
+    "warn": (
+        "The beam can hold the target for {dwell_s:.1f} s (available "
+        "dwell), and the target needs {tau_s:.1f} s to be defeated (time "
+        "to burn-through). The {margin_pct:.0f}% margin is positive but "
+        "thin — extra jitter, worse weather, or a tougher material lot "
+        "could push the engagement below zero margin."
+    ),
+    "error": (
+        "The beam can only hold the target for {dwell_s:.1f} s before the "
+        "geometry changes (available dwell), but the target needs "
+        "{tau_s:.1f} s to be defeated (time to burn-through). The dwell "
+        "falls short by {shortfall_pct:.0f}%. To close the gap: increase "
+        "output power, shorten the engagement range, improve beam "
+        "quality, or pick a thinner or lower-threshold target material."
+    ),
+}
+
+
+EXPLANATIONS: dict[str, str] = {
+    # --- Overview tab -----------------------------------------------------
+    "overview_summary": (
+        "These six numbers summarise the whole engagement. Power at the "
+        "aimpoint is what actually lands on the target after atmospheric "
+        "losses and beam spreading; peak irradiance is the brightest point "
+        "in that spot. Time to burn-through is how long that flux must be "
+        "held to defeat the target; available dwell is how long the "
+        "geometry lets you hold the aim. Wall-plug input power and waste "
+        "heat size the generator and cooling plant."
+    ),
+    "overview_headroom": (
+        "Sustain time is how long the laser can keep shooting before "
+        "battery or thermal limits force a stand-down. Engagements per "
+        "hour is the repeat rate the energy budget supports — a system "
+        "that can defeat one drone but needs ten minutes to cool between "
+        "shots is a very different capability from one that can "
+        "volley-engage."
+    ),
+    "overview_margin_plot": (
+        "The two bars compare the same quantity (time, seconds) side by "
+        "side: available dwell on the left, time to burn-through on the "
+        "right. When the right bar is shorter, the beam defeats the "
+        "target before the geometry runs out and the engagement is "
+        "feasible; when it is taller, the dwell runs out first and the "
+        "engagement is not."
+    ),
+    # --- Engagement tab ---------------------------------------------------
+    "engagement_spot_strehl": (
+        "This section splits the delivered spot at the reference range "
+        "into its four angular-error sources and compares the achieved "
+        "peak intensity against a perfect beam. Diffraction is the "
+        "floor every beam has; the other three — beam-quality excess "
+        "(imperfect optics), turbulence (atmosphere), and jitter (mount "
+        "shake) — add on top of it. The final card shows how close the "
+        "system gets to a diffraction-limited, turbulence-free, "
+        "blooming-free baseline: a ratio of 1.0 is perfect; the value "
+        "shown is this system's share of theoretical best."
+    ),
+    "plot_a_intro": (
+        "This chart shows the brightest point in the beam spot at every "
+        "range along the engagement. The gray reference line is what a "
+        "perfect diffraction-limited beam would deliver; the solid curve "
+        "is what this system actually delivers after atmosphere and "
+        "broadening. The three right-axis curves (dimensionless, 0 to 1) "
+        "are the fraction of power that lands inside the aimpoint, the "
+        "thermal-blooming Strehl (how much blooming dims the peak), and "
+        "atmospheric transmission."
+    ),
+    "plot_b_intro": (
+        "This chart shows how long the beam must hold the target to "
+        "defeat it at every range along the engagement. The horizontal "
+        "reference is the available dwell — wherever the burn-through "
+        "curve sits below that line, the engagement is feasible; where "
+        "it rises above, the dwell runs out first."
+    ),
+    "plot_c_intro": (
+        "This chart decomposes the beam spot at the target into its four "
+        "physical contributors: diffraction (an ideal beam spreads too), "
+        "beam-quality excess (imperfect optics), turbulence (atmosphere), "
+        "and jitter (mount shake). At short range the diffraction floor "
+        "dominates; at long range turbulence and jitter grow fastest and "
+        "usually decide the total."
+    ),
+}
+
+
+def verdict_explanation(
+    result: dict,
+) -> str:
+    """Return the plain-language explanation sentence for the current verdict.
+
+    Reads ``by_module.m8.tau_BT`` and ``by_module.m3.available_dwell`` from
+    ``result`` and picks the matching entry in ``VERDICT_EXPLANATIONS``,
+    substituting the concrete dwell, burn-through, and margin values so
+    the explanation quotes specific numbers, not generic ranges.
+
+    Mirrors the branching in ``_verdict_chip`` in ``ui/outputs.py`` so the
+    chip and the prose always agree on which tier applies.
+
+    Args:
+        result: merged orchestrator-result dict (same shape rendered by
+            the tabs).
+
+    Returns:
+        A single formatted sentence, ready to pass to
+        ``st.markdown(...)``. Never raises; missing inputs fall back to
+        the ``no_dwell`` branch.
+    """
+    by = result.get("by_module", {})
+    tau_bt = by.get("m8", {}).get("tau_BT")
+    dwell = by.get("m3", {}).get("available_dwell")
+
+    if tau_bt is None or (isinstance(tau_bt, (int, float)) and tau_bt <= 0.0):
+        return VERDICT_EXPLANATIONS["instant"]
+    if dwell is None or (isinstance(dwell, (int, float)) and dwell <= 0.0):
+        return VERDICT_EXPLANATIONS["no_dwell"]
+
+    margin_frac = (dwell - tau_bt) / tau_bt
+    tau_s = float(tau_bt)
+    dwell_s = float(dwell)
+    if margin_frac >= 0.30:
+        return VERDICT_EXPLANATIONS["ok"].format(
+            dwell_s=dwell_s, tau_s=tau_s, margin_pct=margin_frac * 100.0,
+        )
+    if margin_frac >= 0.0:
+        return VERDICT_EXPLANATIONS["warn"].format(
+            dwell_s=dwell_s, tau_s=tau_s, margin_pct=margin_frac * 100.0,
+        )
+    return VERDICT_EXPLANATIONS["error"].format(
+        dwell_s=dwell_s, tau_s=tau_s, shortfall_pct=abs(margin_frac) * 100.0,
+    )
+
+
 def output_label(key: str) -> str:
     """Return the user-visible label for an output (result-dict) key."""
     return OUTPUT_LABELS[key]["label"]
@@ -633,6 +803,8 @@ __all__ = [
     "PRESET_PICKER_HELP",
     "BUTTON_LABELS",
     "VERDICT_TEMPLATES",
+    "VERDICT_EXPLANATIONS",
+    "EXPLANATIONS",
     "ADVISORY",
     "LOGIN_COPY",
     "FOOTER_TEMPLATE",
@@ -642,4 +814,5 @@ __all__ = [
     "output_label",
     "output_tooltip",
     "output_unit",
+    "verdict_explanation",
 ]
