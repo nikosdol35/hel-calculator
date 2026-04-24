@@ -1,42 +1,33 @@
-"""Shared visual constants for the HEL calculator UI.
+"""Compatibility shim — re-exports color and sizing constants from ``ui.theme``.
 
-Pure constants, no logic. Imported by ``ui/plots.py`` (curve colors,
-figure height) and ``ui/outputs.py`` (verdict traffic-light colors per
-SPEC §5.2 Panel 2).
+As of ARCHITECTURE.md v1.6 the canonical source of every visual token is
+``ui/theme.py``. This file is retained during Phase 3 PR 1 only, so that
+``ui/outputs.py`` and ``ui/plots.py`` — which still import from
+``ui.style`` — keep working while the theme layer lands without touching
+every import site. PR 2 migrates both consumers to import directly from
+``ui.theme`` and this shim is deleted.
 
-The palette is chosen to be color-blind safe (Okabe–Ito distinguishable
-pairs) and high-contrast against Streamlit's default white background.
+Do NOT add new constants here. Anything new goes in ``ui.theme`` directly.
 
 References:
-    ARCHITECTURE.md §6.7 — file contract and color-constant names.
-    SPEC.md §5.2 Panel 2 — three-tier verdict uses SUCCESS/WARNING/CAUTION.
+    ARCHITECTURE.md §6.6 (v1.6) — shim contract.
+    ARCHITECTURE.md §6.8 (v1.6) — ``ui.theme`` public API.
 """
 
-# ---------------------------------------------------------------------------
-# Palette.
-# ---------------------------------------------------------------------------
-#: Primary brand color — used for the "actual" curve on every plot and
-#: the Streamlit theme primary color (also pinned in .streamlit/config.toml).
-COLOR_PRIMARY = "#1f4e79"
+from ui.theme import (  # noqa: F401 — re-export for backward compatibility
+    COLOR_CAUTION,
+    COLOR_PRIMARY,
+    COLOR_REFERENCE,
+    COLOR_SUCCESS,
+    COLOR_WARNING,
+    PLOT_HEIGHT_PX,
+)
 
-#: Neutral gray for diffraction-limited reference curves (always shown
-#: dashed alongside the solid "actual" curve so the user sees how much
-#: of the budget is spent on physics vs. engineering losses).
-COLOR_REFERENCE = "#808080"
-
-#: Traffic-light green: ENGAGEABLE verdict (margin ≥ 30%).
-COLOR_SUCCESS = "#2e7d32"
-
-#: Traffic-light amber: MARGINAL verdict (0% ≤ margin < 30%).
-COLOR_WARNING = "#e65100"
-
-#: Traffic-light red: NOT ENGAGEABLE verdict (margin < 0%).
-COLOR_CAUTION = "#bf360c"
-
-# ---------------------------------------------------------------------------
-# Plot sizing.
-# ---------------------------------------------------------------------------
-#: Default Plotly figure height (px). Chosen to fit three plots stacked
-#: in the main Streamlit column without scrolling at typical laptop
-#: resolutions (1440×900).
-PLOT_HEIGHT_PX = 420
+__all__ = [
+    "COLOR_PRIMARY",
+    "COLOR_REFERENCE",
+    "COLOR_SUCCESS",
+    "COLOR_WARNING",
+    "COLOR_CAUTION",
+    "PLOT_HEIGHT_PX",
+]

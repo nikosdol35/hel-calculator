@@ -1,31 +1,40 @@
 """Streamlit entry point for the HEL Engineering Calculator.
 
 This is the single file Streamlit Cloud launches via ``streamlit run
-ui/app.py`` per ARCHITECTURE.md §6.1. Responsibilities (post-slice-4):
+ui/app.py`` per ARCHITECTURE.md §6.1. Responsibilities (post-Phase 3 PR 1):
 
-1. Auth gate (``ui/auth.py`` — shared-credentials login).
-2. URL-parameter decode, **exactly once per session**, guarded by
-   ``st.session_state['_url_decoded']`` (SPEC §5.3 item 7 / improvement
-   #1). Prevents Streamlit's rerun-on-widget-change loop from
-   re-applying stale URL values on top of the user's edits.
-3. Render 6 input panels in the sidebar (``ui/panels.collect_all``).
-4. "Run Analysis" click → ``run_chain_cached`` (``@st.cache_data``
+1. ``sys.path`` shim so ``from physics import ...`` resolves when the
+   Cloud runner sets ``sys.path[0]`` to ``<repo>/ui/``.
+2. Theme bootstrap via ``ui.theme.apply`` — applies the dark palette,
+   typography, and CSS overrides before any widget renders.
+3. Auth gate (``ui/auth.py`` — centered login card, shared access code).
+4. URL-parameter decode, exactly once per session, guarded by
+   ``st.session_state['_url_decoded']``. Prevents Streamlit's
+   rerun-on-widget-change loop from re-applying stale URL values over
+   the user's edits.
+5. Render the six input sections in the sidebar (``ui/panels.collect_all``).
+6. "Run Analysis" click → ``run_chain_cached`` (``@st.cache_data``
    wrapper around ``physics.orchestrator.run_full_chain``) → merged
-   result → ``ui/outputs.render_all`` + ``ui/plots.plot_a/b/c``.
-5. "Share this analysis" click → encode ``user_inputs`` into
+   result → ``ui/outputs.render_all`` + the range-sweep plots.
+7. "Share this analysis" click → encode ``user_inputs`` into
    ``st.query_params`` and render the URL in a copy-ready ``st.code``
-   block per SPEC §5.3 item 7 v1.7 / improvement #3.
+   block.
+8. Footer strip with provenance (SPEC version, ARCH version, build date).
+
+The tabbed results layout arrives in PR 3. For PR 1 the single-scroll
+output sections from the pre-redesign app are preserved so that the
+theme + label changes land in isolation.
 
 Three caching wrappers live here (not in ``physics/orchestrator.py``)
 so the orchestrator stays pure-Python and directly unit-testable from
-``tests/`` under ARCH §2 import rules. The ``_freeze`` helper
-(improvement #6) converts the dict ``user_inputs`` to a tuple so
-``@st.cache_data`` can hash it.
+``tests/`` under ARCH §2 import rules. ``_freeze`` converts the
+``user_inputs`` dict to a sorted tuple so ``@st.cache_data`` can hash it.
 
 References:
-    ARCHITECTURE.md §5.1 (data flow), §5.3 (caching strategy),
-    §6.1 (this file's contract — 70-110 lines target).
-    SPEC.md §5 (panel + plot contracts), §5.3 (UI behavior).
+    ARCHITECTURE.md §5.1 (data flow), §5.3 (caching), §6.1 (file contract).
+    SPEC.md §5 (section + plot contracts), §5.3 (UI behavior).
+    ui/theme.py — palette + CSS; ``apply`` must run before widgets.
+    ui/labels.py — all user-visible strings.
 """
 
 from __future__ import annotations
@@ -34,14 +43,14 @@ from __future__ import annotations
 # sys.path shim — MUST run before any ``physics`` or ``ui`` import.
 #
 # ``streamlit run ui/app.py`` (Streamlit Cloud's invocation per ARCH §6.1)
-# sets ``sys.path[0]`` to this file's directory, i.e. ``<repo>/ui/`` — NOT
-# the repo root. From that vantage ``from physics import ...`` resolves to
-# ``<repo>/ui/physics/`` and raises ``ModuleNotFoundError``.
+# sets ``sys.path[0]`` to this file's directory, i.e. ``<repo>/ui/`` —
+# NOT the repo root. From that vantage ``from physics import ...``
+# resolves to ``<repo>/ui/physics/`` and raises ``ModuleNotFoundError``.
 #
 # Prepending the repo root here makes every sibling package (``physics``,
-# ``ui``) importable without touching Cloud's "Main file path" setting or
-# requiring a top-level shim file. Local pytest is unaffected because
-# pytest already discovers the repo root from ``tests/conftest.py``.
+# ``ui``) importable without touching Cloud's "Main file path" setting
+# or requiring a top-level shim file. Local pytest is unaffected
+# because pytest discovers the repo root from ``tests/conftest.py``.
 # ---------------------------------------------------------------------------
 import sys as _sys
 from pathlib import Path as _Path
@@ -57,29 +66,39 @@ import streamlit as st
 
 from physics import m11_validation
 from physics.orchestrator import run_full_chain
-from ui import outputs, panels, plots
+from ui import outputs, panels, plots, theme
 from ui.auth import require_login
+from ui.labels import ADVISORY, BUTTON_LABELS, FOOTER_TEMPLATE
 
 # ---------------------------------------------------------------------------
-# Page config + auth gate (must run before any other widget).
+# Provenance — surfaced in the footer strip only (never in the header).
+# Keep in sync with the latest contract-document revisions.
+# ---------------------------------------------------------------------------
+_SPEC_VERSION = "v1.9"
+_ARCH_VERSION = "v1.6"
+_BUILD_DATE = "2026-04-24"
+
+
+# ---------------------------------------------------------------------------
+# Page config + theme bootstrap + auth gate (must run before any widget).
 # ---------------------------------------------------------------------------
 st.set_page_config(
     page_title="HEL Engineering Calculator",
-    page_icon="🔦",
     layout="wide",
 )
+theme.apply("dark")
 require_login()
 
 
 # ---------------------------------------------------------------------------
-# Caching wrappers (improvement #6: _freeze → hashable key).
+# Caching wrappers.
 # ---------------------------------------------------------------------------
 def _freeze(user_inputs: dict) -> tuple:
     """Convert the user-inputs dict to a sorted tuple of (key, value) pairs.
 
     ``@st.cache_data`` requires a hashable key. Dicts are unhashable, so
-    we sort by key and tuple-ify. All stored values are primitives (float,
-    int, str, bool) — sort order is deterministic.
+    we sort by key and tuple-ify. All stored values are primitives
+    (float, int, str, bool) — sort order is deterministic.
     """
     return tuple(sorted(user_inputs.items()))
 
@@ -107,7 +126,8 @@ def run_sweep_cached(frozen_inputs: tuple, ranges_m: tuple) -> list[dict]:
 
 
 # ---------------------------------------------------------------------------
-# URL-parameter handling (improvement #1: session-state decode latch).
+# URL-parameter handling (session-state latch prevents re-application on
+# subsequent reruns).
 # ---------------------------------------------------------------------------
 _URL_DECODE_LATCH = "_url_decoded"
 _URL_PREFILL_KEY = "_url_prefill"
@@ -144,10 +164,11 @@ def _decode_url_params_once() -> None:
 
 
 def _build_share_url(user_inputs: dict) -> str:
-    """Encode ``user_inputs`` into a shareable URL (SPEC §5.3 item 7)."""
+    """Encode ``user_inputs`` into a shareable URL."""
     params = {k: _stringify(v) for k, v in user_inputs.items()}
-    # Streamlit does not expose the host URL; the user copies the path
-    # + query-string. Document that limitation inline near the code block.
+    # Streamlit does not expose the host URL; the user copies the
+    # path + query string. Document that limitation inline near the
+    # code block.
     return "?" + urlencode(params)
 
 
@@ -160,6 +181,24 @@ def _stringify(value: Any) -> str:
     return str(value)
 
 
+def _render_footer() -> None:
+    """Render the provenance strip at the bottom of the main area.
+
+    Styled via the ``hel-footer`` class defined in ``ui/theme.py``. The
+    caller places this at the end of the main-area render so it's the
+    last thing in the document flow.
+    """
+    text = FOOTER_TEMPLATE.format(
+        spec_version=_SPEC_VERSION,
+        arch_version=_ARCH_VERSION,
+        build_date=_BUILD_DATE,
+    )
+    st.markdown(
+        f"<div class='hel-footer'>{text}</div>",
+        unsafe_allow_html=True,
+    )
+
+
 # ---------------------------------------------------------------------------
 # Main body.
 # ---------------------------------------------------------------------------
@@ -167,30 +206,32 @@ _decode_url_params_once()
 prefill = st.session_state.get(_URL_PREFILL_KEY, {})
 url_flags = list(st.session_state.get(_URL_FLAGS_KEY, []))
 
-st.title("🔦 HEL Engineering Calculator")
-st.caption(
-    "Engagement-chain simulator for continuous-wave high-energy laser "
-    "systems (SPEC v1.7 / ARCH v1.5)."
-)
+st.title("HEL Engineering Calculator")
 
 # ---------------------------------------------------------------------------
-# Sidebar — input panels + action buttons.
+# Sidebar — input sections + action buttons.
 # ---------------------------------------------------------------------------
 user_inputs = panels.collect_all(initial=prefill or None)
 
 with st.sidebar:
     st.markdown("---")
-    run_clicked = st.button("▶ Run Analysis", type="primary",
-                            use_container_width=True)
-    share_clicked = st.button("🔗 Share this analysis",
-                              use_container_width=True)
-    validate_clicked = st.button("✓ Run Validation Suite",
-                                 use_container_width=True,
-                                 help="Invoke M11 (pytest) over SPEC §3 "
-                                      "validation cases; does not affect "
-                                      "the main analysis.")
-    # Reference-range slider — drives Panel 1's "at reference range"
-    # display and highlights the same range on Plots A, B, C.
+    run_clicked = st.button(
+        BUTTON_LABELS["run_analysis"], type="primary",
+        use_container_width=True,
+    )
+    share_clicked = st.button(
+        BUTTON_LABELS["share"],
+        use_container_width=True,
+    )
+    validate_clicked = st.button(
+        BUTTON_LABELS["validate"],
+        use_container_width=True,
+        help="Runs the full validation test suite against the physics "
+             "modules; does not affect the main analysis.",
+    )
+    # Reference-range slider — drives the spot-and-Strehl section's
+    # "at reference range" display and highlights the same range on
+    # the performance, burn-through, and beam-breakdown plots.
     R_ref_km = st.slider(
         "Reference range (km)",
         min_value=0.1,
@@ -201,13 +242,13 @@ with st.sidebar:
     )
 
 # ---------------------------------------------------------------------------
-# Validation suite (M11) — always available, does not block analysis.
+# Validation suite — always available, does not block analysis.
 # ---------------------------------------------------------------------------
 if validate_clicked:
     with st.sidebar:
-        with st.spinner("Running validation suite (M11)…"):
-            # Ignore M11's own tests to prevent infinite pytest recursion
-            # (per SPEC §3 M11 note and the function's docstring).
+        with st.spinner("Running validation suite…"):
+            # Ignore the validation-harness's own tests to prevent
+            # infinite pytest recursion.
             report = m11_validation.run_validation_suite(
                 extra_pytest_args=["--ignore=tests/test_m11_validation.py"],
             )
@@ -216,14 +257,14 @@ if validate_clicked:
         total = report.get("total_tests", 0)
         duration = report.get("duration_seconds", 0.0)
         if failed == 0 and total > 0:
-            st.success(f"M11: {passed}/{total} pass ({duration:.1f} s)")
+            st.success(f"Validation: {passed}/{total} pass ({duration:.1f} s)")
         elif total == 0:
-            st.warning("M11: no tests collected")
+            st.warning("Validation: no tests collected")
         else:
-            st.error(f"M11: {failed}/{total} failed ({duration:.1f} s)")
+            st.error(f"Validation: {failed}/{total} failed ({duration:.1f} s)")
 
 # ---------------------------------------------------------------------------
-# Share URL block (improvement #3: st.code, not clipboard).
+# Share URL block.
 # ---------------------------------------------------------------------------
 if share_clicked:
     share_url = _build_share_url(user_inputs)
@@ -232,58 +273,59 @@ if share_clicked:
     st.sidebar.caption(
         "Paste this as the query string of the calculator URL to "
         "restore the exact input state. (Automatic clipboard writes "
-        "require HTTPS + permission; the code block above works in "
-        "every deployment.)"
+        "require HTTPS and user permission; the code block above "
+        "works in every deployment.)"
     )
 
 # ---------------------------------------------------------------------------
-# Main area — only renders when the user clicks Run Analysis.
+# Main area — only renders after the user has clicked Run Analysis.
 # ---------------------------------------------------------------------------
 # Once the user has clicked Run Analysis even once, subsequent reruns
-# (reference-slider move, panel edit) should re-render the outputs
-# automatically — ``@st.cache_data`` on the orchestrator makes that cheap
-# when inputs haven't changed. Track the "ever-run" latch in session state.
+# (reference-slider move, section edit) should re-render the outputs
+# automatically — ``@st.cache_data`` on the orchestrator makes that
+# cheap when inputs haven't changed. Track the "ever-run" latch in
+# session state.
 _RUN_LATCH = "_run_requested"
 if run_clicked:
     st.session_state[_RUN_LATCH] = True
 if not st.session_state.get(_RUN_LATCH):
     st.info(
-        "Adjust the 6 input panels in the sidebar, then click "
-        "**▶ Run Analysis** to compute the engagement chain "
-        "(M1 → M10 per SPEC §4)."
+        "Adjust the input sections in the sidebar, then click "
+        "**Run Analysis** to compute the engagement chain."
     )
+    _render_footer()
     st.stop()
 
-# Run the chain (cached). Surface ValueError from any module's
-# ``_validate_inputs`` next to the user's panels rather than a
-# traceback — per CLAUDE §6.5 "When something is broken".
+# Run the chain (cached). Surface ValueError from any module's input
+# validator next to the user's panels rather than a traceback.
 try:
     frozen = _freeze(user_inputs)
     result = run_chain_cached(frozen)
 except ValueError as exc:
     st.error(f"Input validation failed: {exc}")
+    _render_footer()
     st.stop()
 
-# Merge user_inputs into the result so ``outputs.render_panel_1_spot_strehl``
-# can read ``result['M2']`` and ``result['sigma_jit']`` without changing
-# the ARCH §6.4 signature. User-input keys are disjoint from module-output
-# keys (spot checked: P0/M2/D/eta_opt/... vs w0/zR/I_peak/PIB/...) except
-# for ``wavelength`` which is idempotent.
+# Merge user_inputs into the result so the output sections can read
+# ``result['M2']`` and ``result['sigma_jit']`` without changing the
+# ARCH §6.4 signature. User-input keys are disjoint from module-output
+# keys (spot checked: P0 / M2 / D / eta_opt / ... vs w0 / zR / I_peak /
+# PIB / ...) except for ``wavelength`` which is idempotent.
 merged = {**user_inputs, **result}
 
-# Surface any URL-decode flags onto Panel 4.
+# Surface any URL-decode flags onto the assumptions roll-up.
 if url_flags:
     merged["assumptions_flagged"] = list(url_flags) + list(
         merged.get("assumptions_flagged", [])
     )
 
 # ---------------------------------------------------------------------------
-# Numeric output panels.
+# Numeric output sections.
 # ---------------------------------------------------------------------------
 outputs.render_all(merged, reference_range=R_ref_km * 1000.0)
 
 # ---------------------------------------------------------------------------
-# Range-sweep for Plots A/B/C.
+# Range-sweep plots.
 # ---------------------------------------------------------------------------
 R_selected = float(user_inputs.get("R", 1500.0))
 R_min = max(100.0, R_selected * 0.1)
@@ -302,16 +344,19 @@ try:
     st.plotly_chart(plots.plot_c_beam_diameter_breakdown(sweep),
                     use_container_width=True)
 except ValueError as exc:
-    # A sweep point may violate an M3 slant-range validator even if the
+    # A sweep point may violate a slant-range validator even if the
     # single-point run did not — report and continue rendering the rest.
-    st.warning(f"Range-sweep skipped ({exc}); numeric panels above are valid.")
+    st.warning(f"Range-sweep skipped ({exc}); numeric sections above are valid.")
 
 # ---------------------------------------------------------------------------
-# Convergence diagnostic footer (visible but unobtrusive).
+# Convergence diagnostic (visible but unobtrusive) + footer strip.
 # ---------------------------------------------------------------------------
+iter_count = merged["m67_iteration_count"]
+converged = merged["m67_converged"]
 conv_note = (
-    f"M6↔M7 loop: {merged['m67_iteration_count']} iterations, "
-    f"{'converged' if merged['m67_converged'] else 'did NOT converge'} "
-    f"(SPEC §3 M6 tolerance)."
+    f"Blooming–focusing loop: {iter_count} iterations, "
+    f"{'converged' if converged else 'did NOT converge'}."
 )
 st.caption(conv_note)
+
+_render_footer()
