@@ -1,6 +1,6 @@
 # SPEC.md — HEL Engineering Calculator
 
-**Version:** 1.11 (Phase 3 UI redesign PR 6 of six: preset dropdown materialized, CSV snapshot export added to Overview tab, calm `error_card` replaces the default `st.error` validator surface, centered `welcome_card` replaces the first-run `st.info` banner — **no physics, no module I/O, no validation-case expected values touched**)
+**Version:** 1.12 (Package 3 numerical-methods validation surfaced a latent 10⁴ typo in the §3 M9 Band A pulsed-regime MPE constant; SPEC and code paired-fixed per CLAUDE §4.3. No other change.)
 **Supersedes:** `HEL_Calculator_Project_Plan_v0p8.docx` §3–§6 (which remains the plan-of-record; this SPEC is the implementation contract derived from it)
 **Status:** Implementation contract. Any requested feature not described here requires a SPEC update before implementation.
 
@@ -728,7 +728,7 @@ NOHD_gausspeak = (1/θ_diff) · sqrt(8·P₀ / (π·MPE)) − D/θ_diff   [= sqr
 Band A: Retinal hazard (0.400 µm ≤ λ ≤ 1.400 µm):
 ```
 if t_exp < 18e-6:
-    MPE_energy = 5e-3 · C_A   [J/cm²]
+    MPE_energy = 5e-7 · C_A   [J/cm²]   # ANSI Z136.1-2014 Table 5a single-pulse retinal; chosen to meet the 18-µs join (see v1.12 note).
 elif t_exp ≤ 10:
     MPE_energy = 1.8e-3 · t_exp^(3/4) · C_A   [J/cm²]
     MPE_irradiance = MPE_energy / t_exp = 1.8e-3 · t_exp^(-1/4)   [W/cm²]
