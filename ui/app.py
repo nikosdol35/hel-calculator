@@ -61,7 +61,7 @@ if _REPO_ROOT not in _sys.path:
     _sys.path.insert(0, _REPO_ROOT)
 
 import time
-from typing import Any
+from typing import Any, Literal
 from urllib.parse import urlencode
 
 import streamlit as st
@@ -104,7 +104,10 @@ st.set_page_config(
 )
 
 _APP_MODE_KEY = "_app_mode"
-app_mode: str = st.session_state.get(_APP_MODE_KEY, "dark")
+_mode_raw = st.session_state.get(_APP_MODE_KEY, "dark")
+app_mode: Literal["dark", "light"] = (
+    "light" if _mode_raw == "light" else "dark"
+)
 theme.apply(app_mode)
 require_login()
 
