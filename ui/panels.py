@@ -202,7 +202,14 @@ def section_3_engagement_geometry(initial: dict | None = None) -> dict:
 # Section 4 — Atmosphere → M4, M5
 # ---------------------------------------------------------------------------
 
-_CN2_MODEL_OPTIONS = ("HV_5_7", "constant", "HV_day", "HV_night")
+# Only the two models that physics/m5_turbulence.py actually implements
+# are exposed in the UI. SPEC §3 M5 enumerates "HV_day", "HV_night", and
+# "custom" as valid ``cn2_model`` values, but their compute branches
+# raise NotImplementedError pending their own SPEC validation cases
+# (see tests/test_m5_turbulence.py::test_m5_hv_day_not_implemented).
+# Exposing them in the selectbox would route the user into a traceback;
+# surface only the implemented pair until the other branches land.
+_CN2_MODEL_OPTIONS = ("HV_5_7", "constant")
 
 
 def section_4_atmosphere(initial: dict | None = None) -> dict:

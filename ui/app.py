@@ -419,7 +419,12 @@ with progress_slot.container():
     progress_bar(visible=True)
 
 # Run the chain (cached). Surface ValueError from any module's input
-# validator next to the user's panels rather than a traceback.
+# validator — and NotImplementedError from any unimplemented physics
+# branch the UI has accidentally exposed — next to the user's panels
+# rather than a traceback. The UI should not expose options that route
+# to NotImplementedError; the panel selectboxes are filtered to the
+# implemented enum values, but this catch is defense-in-depth so a
+# future contract drift never lands as a stack trace on the user.
 try:
     frozen = _freeze(user_inputs)
     result = run_chain_cached(frozen)
@@ -431,6 +436,19 @@ except ValueError as exc:
         suggestion=(
             "Adjust the sidebar values until every input sits inside its "
             "sanity range, then click Run Analysis again."
+        ),
+    )
+    _render_footer()
+    st.stop()
+except NotImplementedError as exc:
+    progress_slot.empty()
+    error_card(
+        "Model branch not available",
+        f"That combination of inputs routes to a physics branch that is "
+        f"not yet implemented: {exc}",
+        suggestion=(
+            "Pick a different turbulence profile or reset the sidebar via "
+            "the Engagement scenario dropdown, then click Run Analysis."
         ),
     )
     _render_footer()
