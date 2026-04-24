@@ -330,32 +330,46 @@ def render_tab_engagement(
     )
 
     # --- Range-sweep plots --------------------------------------------------
-    if sweep is None:
-        return
-
-    # Import the plots module locally — keeps the unit-test import surface
-    # of ui/outputs.py light (tests that only exercise the severity
-    # classifier do not need plotly loaded).
+    # Import the plots module and the modebar config locally — keeps the
+    # unit-test import surface of ui/outputs.py light (tests that only
+    # exercise the severity classifier do not need plotly loaded).
     from ui import plots
+    from ui.theme import PLOTLY_MODEBAR_CONFIG
 
     section_header("Range-sweep plots")
-    try:
-        st.plotly_chart(
-            plots.plot_a_on_target_performance(sweep),
-            use_container_width=True,
-        )
-        st.plotly_chart(
-            plots.plot_b_time_to_burnthrough(sweep),
-            use_container_width=True,
-        )
-        st.plotly_chart(
-            plots.plot_c_beam_diameter_breakdown(sweep),
-            use_container_width=True,
-        )
-    except ValueError as exc:
-        st.warning(
-            f"Range-sweep skipped ({exc}); single-point results above are valid."
-        )
+
+    # Log / linear toggle for the wide-dynamic-range peak-irradiance panel.
+    # A visible radio is more engineer-legible than burying the choice in
+    # the Plotly modebar. When ``sweep`` is None the radio still renders
+    # (so the control stays put across feasible / infeasible states) but
+    # the plot below is the frame-with-advisory form.
+    scale_choice = st.radio(
+        "Peak-irradiance axis scale",
+        options=("linear", "log"),
+        horizontal=True,
+        index=0,
+        key="_plot_a_scale",
+    )
+    log_y = scale_choice == "log"
+
+    # Always render all three frames — when sweep is None/empty, each
+    # constructor returns a frame-only figure with a centered advisory
+    # (SPEC §5.3 item 10: no silent plot skip on infeasible geometry).
+    st.plotly_chart(
+        plots.plot_a_on_target_performance(sweep, log_y=log_y),
+        use_container_width=True,
+        config=PLOTLY_MODEBAR_CONFIG,
+    )
+    st.plotly_chart(
+        plots.plot_b_time_to_burnthrough(sweep),
+        use_container_width=True,
+        config=PLOTLY_MODEBAR_CONFIG,
+    )
+    st.plotly_chart(
+        plots.plot_c_beam_diameter_breakdown(sweep),
+        use_container_width=True,
+        config=PLOTLY_MODEBAR_CONFIG,
+    )
 
 
 # =============================================================================
