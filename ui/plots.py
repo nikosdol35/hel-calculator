@@ -138,7 +138,7 @@ def plot_a_on_target_performance(sweep: list[dict]) -> go.Figure:
     )
 
     fig.update_layout(
-        title="Plot A — On-Target Performance vs Slant Range",
+        title="On-target performance vs slant range",
         hovermode="x unified",
         height=PLOT_HEIGHT_PX,
         legend=dict(orientation="h", y=-0.2),
@@ -210,7 +210,7 @@ def plot_b_time_to_burnthrough(sweep: list[dict]) -> go.Figure:
     )
 
     fig.update_layout(
-        title="Plot B — Time-to-Burn-Through vs Slant Range",
+        title="Time-to-burn-through vs slant range",
         hovermode="x unified",
         height=PLOT_HEIGHT_PX,
         legend=dict(orientation="h", y=-0.2),
@@ -304,7 +304,7 @@ def plot_c_beam_diameter_breakdown(sweep: list[dict]) -> go.Figure:
     )
 
     fig.update_layout(
-        title="Plot C — Beam Diameter vs Slant Range",
+        title="Beam diameter vs slant range",
         hovermode="x unified",
         height=PLOT_HEIGHT_PX,
         legend=dict(orientation="h", y=-0.2),

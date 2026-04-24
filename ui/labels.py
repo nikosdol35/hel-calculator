@@ -1,0 +1,593 @@
+"""Single source of truth for every user-visible string (ARCH v1.6 §6.10).
+
+Every label, tooltip, unit symbol, section name, and tab name shown to
+the user in the HEL calculator UI lives in this file. ``ui/panels.py``,
+``ui/outputs.py``, ``ui/plots.py``, and ``ui/app.py`` read from here;
+none of them hard-code a user-visible string.
+
+``tests/test_copy_style.py`` enforces this by grepping those four files
+for forbidden tokens (``SPEC §``, ``ARCH §``, ``M[0-9]`` module tags,
+raw ``assumptions_flagged`` keys, emoji characters). ``ui/labels.py``
+itself is exempt from the lint.
+
+Redline discipline
+------------------
+This file is the surface the user redlines during PR 1 review. Entries
+are grouped by origin (input sections → output result keys → section /
+tab / button / status / advisory copy) and each entry is kept short:
+
+    label    : 3–5 word title suitable for a card header or widget label
+    tooltip  : one short sentence describing what the quantity means
+    unit     : the Unicode unit symbol shown inline with the value
+
+Anywhere a trade-off is made (concise vs. precise, engineering-jargon
+vs. plain-English), a ``# REDLINE:`` comment explains the alternative so
+the user can choose. Values without a REDLINE comment are defaults the
+drafter is confident in but the user is welcome to overwrite.
+
+References:
+    ARCHITECTURE.md §6.10 — file contract.
+    SPEC.md §5.1 — input dict key ↔ UI label mapping.
+    SPEC.md §5.2 — output dict key ↔ UI label mapping, tab names.
+    docs/phase3_ui_redesign_plan_2026-04-23.md §7 — original draft with
+        per-entry rationale.
+"""
+
+from __future__ import annotations
+
+from typing import TypedDict
+
+
+class LabelEntry(TypedDict, total=False):
+    label:   str   # 3–5 word UI title
+    tooltip: str   # one-sentence description
+    unit:    str   # Unicode unit symbol (inline, never bare)
+
+
+# =============================================================================
+# Sidebar section headers (SPEC §5.1, v1.9)
+# =============================================================================
+# The six collapsible sections in the sidebar, in top-to-bottom order.
+# Default-open state is section 1, 3, 5 (Laser source / Engagement geometry /
+# Target & aimpoint); sections 2, 4, 6 are collapsed by default.
+
+SECTION_LABELS: dict[str, str] = {
+    "laser_source":        "Laser source",
+    "beam_director":       "Beam director",
+    "engagement_geometry": "Engagement geometry",
+    "atmosphere":          "Atmosphere",
+    "target_aimpoint":     "Target & aimpoint",
+    "system_resources":    "System resources",
+}
+
+
+# =============================================================================
+# Main-area tab labels (SPEC §5.2, v1.9)
+# =============================================================================
+# Six tabs in reading order. **Text-only** per user decision on PR 1 open-items
+# (2026-04-24): the original draft paired each tab label with a Lucide icon;
+# the user chose text-only so the tab strip stays uncluttered. PR 3 renders
+# `st.tabs(list(TAB_LABELS.values()))` directly — no icon wrapper.
+
+TAB_LABELS: dict[str, str] = {
+    "overview":       "Overview",
+    "engagement":     "Engagement",
+    "target_effects": "Target effects",
+    "safety":         "Safety",
+    "atmosphere":     "Atmosphere",
+    "diagnostics":    "Diagnostics",
+}
+
+
+# =============================================================================
+# Input-field labels (SPEC §5.1 v1.9 — same `user_inputs` dict keys as v1.8)
+# =============================================================================
+
+INPUT_LABELS: dict[str, LabelEntry] = {
+
+    # -- Section 1 — Laser source → M1 ----------------------------------------
+    "P0": {
+        "label":   "Output power",
+        "tooltip": "Laser output power at the exit aperture, before the beam director.",
+        "unit":    "kW",
+    },
+    "M2": {
+        "label":   "Beam quality (M²)",
+        "tooltip": "Beam propagation factor. 1.0 is a diffraction-limited Gaussian; realistic HELs run 1.1–2.5.",
+        "unit":    "",
+    },
+    "D": {
+        "label":   "Exit aperture diameter",
+        "tooltip": "Clear aperture diameter at the beam director exit.",
+        "unit":    "cm",
+    },
+    "wavelength": {
+        "label":   "Wavelength",
+        "tooltip": "Operating wavelength. Four values contracted: 1.06, 1.07, 1.55, 2.05 µm.",
+        "unit":    "µm",
+    },
+
+    # -- Section 2 — Beam director → M2, partially M7 -------------------------
+    "eta_opt": {
+        "label":   "Optical transmission",
+        "tooltip": "Fraction of laser power transmitted through the director optics.",
+        "unit":    "",
+    },
+    "sigma_jit": {
+        "label":   "Pointing jitter (1-σ, per-axis)",
+        "tooltip": "Per-axis one-sigma RMS angular jitter at the director output — the standard PTU/EO datasheet convention.",
+        "unit":    "µrad",
+    },
+
+    # -- Section 3 — Engagement geometry → M3 ---------------------------------
+    "H_e": {
+        "label":   "Emplacement altitude",
+        "tooltip": "Height of the beam director above ground level (AGL).",
+        "unit":    "m",
+    },
+    "R": {
+        "label":   "Slant range to target",
+        "tooltip": "Line-of-sight distance from the beam director to the aimpoint.",
+        "unit":    "m",
+    },
+    "H_t": {
+        "label":   "Target altitude",
+        "tooltip": "Height of the target above ground level (AGL).",
+        "unit":    "m",
+    },
+    "v_tgt": {
+        "label":   "Target velocity",
+        "tooltip": "Target's along-track speed in the sensor frame.",
+        "unit":    "m/s",
+    },
+    "v_perp": {
+        "label":   "Crosswind (perpendicular)",
+        "tooltip": "Wind component perpendicular to the line of sight; the dominant driver of thermal blooming.",
+        "unit":    "m/s",
+    },
+
+    # -- Section 4 — Atmosphere → M4, M5 --------------------------------------
+    "V": {
+        "label":   "Visibility",
+        "tooltip": "Meteorological surface visibility; sets aerosol extinction via the Kruse formula.",
+        "unit":    "km",
+    },
+    "RH": {
+        "label":   "Relative humidity",
+        "tooltip": "Surface relative humidity; modulates molecular water-vapor absorption.",
+        "unit":    "%",
+    },
+    "T_ambient": {
+        "label":   "Ambient temperature",
+        "tooltip": "Surface air temperature; feeds both the blooming dn/dT path and the atmospheric model.",
+        "unit":    "°C",
+    },
+    "cn2_model": {
+        "label":   "Turbulence profile",
+        "tooltip": "Model for the refractive-index structure constant Cn² along the slant path.",
+        "unit":    "",
+    },
+    "Cn2_value": {
+        "label":   "Uniform Cn²",
+        "tooltip": "Used when the profile is 'constant'. Ignored for Hufnagel–Valley profiles.",
+        "unit":    "m⁻²ᐟ³",
+    },
+    "Cn2_ground": {
+        "label":   "Ground-level Cn²",
+        "tooltip": "Surface boundary value for the Hufnagel–Valley profile.",
+        "unit":    "m⁻²ᐟ³",
+    },
+    "v_HV": {
+        "label":   "Upper-level wind (HV)",
+        "tooltip": "High-altitude wind parameter for the Hufnagel–Valley profile.",
+        "unit":    "m/s",
+    },
+
+    # -- Section 5 — Target & aimpoint → M7, M8 -------------------------------
+    "d_aim": {
+        "label":   "Aimpoint diameter",
+        "tooltip": "Target-plane diameter of the aimpoint region (bucket for power-in-the-bucket).",
+        "unit":    "cm",
+    },
+    "material": {
+        "label":   "Target material",
+        "tooltip": "Front-face material — selects thermal, optical, and failure properties.",
+        "unit":    "",
+    },
+    "thickness": {
+        "label":   "Material thickness",
+        "tooltip": "Through-thickness of the target face.",
+        "unit":    "mm",
+    },
+    "A_lambda": {
+        "label":   "Absorptivity (override)",
+        "tooltip": "Wavelength-specific absorptivity; leave the tabulated value unless you have measured data.",
+        "unit":    "",
+    },
+    "backside_BC": {
+        "label":   "Backside boundary",
+        "tooltip": "Thermal boundary condition on the rear face — insulated or convective.",
+        "unit":    "",
+    },
+
+    # -- Section 6 — System resources → M9, M10 -------------------------------
+    "eta_wallplug": {
+        "label":   "Wall-plug efficiency",
+        "tooltip": "Electrical-to-optical efficiency of the laser system.",
+        "unit":    "",
+    },
+    "Q_cool": {
+        "label":   "Cooling capacity",
+        "tooltip": "Steady-state heat-rejection capability of the coolant loop.",
+        "unit":    "kW",
+    },
+    "C_thermal": {
+        "label":   "Coolant thermal mass",
+        "tooltip": "Effective heat capacity of the coolant loop — buffer for short bursts.",
+        "unit":    "kJ/K",
+    },
+    "dT_max": {
+        "label":   "Maximum ΔT",
+        "tooltip": "Allowable coolant temperature rise before the loop saturates.",
+        "unit":    "K",
+    },
+    "t_exp": {
+        "label":   "Exposure duration (MPE)",
+        "tooltip": "Worst-case continuous exposure used for the ANSI Z136.1 maximum permissible exposure calculation.",
+        "unit":    "s",
+    },
+}
+
+
+# =============================================================================
+# Output / result-dict-key labels (SPEC §5.2 v1.9)
+# =============================================================================
+
+OUTPUT_LABELS: dict[str, LabelEntry] = {
+
+    # -- Angular-error split (Engagement tab, header row) ---------------------
+    "theta_diff": {
+        "label":   "Diffraction angle (total)",
+        "tooltip": "Full-angle diffraction divergence including the M² excess. Siegman full-angle convention.",
+        "unit":    "µrad",
+    },
+    "theta_diff_pure": {
+        "label":   "Diffraction (M²=1)",
+        "tooltip": "Diffraction divergence in the M²=1 (ideal Gaussian) limit.",
+        "unit":    "µrad",
+    },
+    "theta_M2_excess": {
+        "label":   "M² excess broadening",
+        "tooltip": "Additional divergence beyond the ideal-Gaussian limit attributable to beam-quality M².",
+        "unit":    "µrad",
+    },
+    "theta_turb": {
+        "label":   "Turbulence broadening",
+        "tooltip": "Full-angle broadening from atmospheric turbulence along the slant path.",
+        "unit":    "µrad",
+    },
+    "theta_jit": {
+        "label":   "Jitter broadening",
+        "tooltip": "Full-angle broadening from pointing jitter (2·σ_jit).",
+        "unit":    "µrad",
+    },
+
+    # -- Strehl (Engagement tab) ---------------------------------------------
+    "S_TB": {
+        "label":   "Strehl — thermal blooming",
+        "tooltip": "Peak-on-axis irradiance ratio from thermal blooming alone. 1.0 means no blooming loss.",
+        "unit":    "",
+    },
+    "S_opt": {
+        "label":   "Strehl — optical",
+        "tooltip": "Peak-on-axis irradiance ratio from optical aberrations. Fixed at 1.0 in v1.",
+        "unit":    "",
+    },
+    "S_total": {
+        "label":   "Strehl — total",
+        "tooltip": "Combined Strehl factor applied to the on-axis irradiance.",
+        "unit":    "",
+    },
+
+    # -- Spot radii (Engagement tab) -----------------------------------------
+    "w_diff": {
+        "label":   "Spot radius — diffraction",
+        "tooltip": "1/e² beam radius from diffraction alone at the target plane.",
+        "unit":    "cm",
+    },
+    "w_turb": {
+        "label":   "Spot radius — turbulence",
+        "tooltip": "1/e² beam-radius contribution from atmospheric turbulence.",
+        "unit":    "cm",
+    },
+    "w_jit": {
+        "label":   "Spot radius — jitter",
+        "tooltip": "1/e² beam-radius contribution from pointing jitter.",
+        "unit":    "cm",
+    },
+    "w_bloom": {
+        "label":   "Spot radius — blooming",
+        "tooltip": "1/e² beam-radius contribution from thermal blooming.",
+        "unit":    "cm",
+    },
+    "w_total": {
+        "label":   "Spot radius — total",
+        "tooltip": "Quadrature sum of diffraction, turbulence, jitter, and blooming radii.",
+        "unit":    "cm",
+    },
+
+    # -- Engagement KPIs (Overview + Engagement tabs) ------------------------
+    "P_aim": {
+        "label":   "Power in aimpoint",
+        "tooltip": "Laser power delivered inside the aimpoint region at the target plane.",
+        "unit":    "kW",
+    },
+    "I_avg_aim": {
+        "label":   "Average irradiance (aimpoint)",
+        "tooltip": "P_aim divided by the aimpoint area.",
+        "unit":    "W/cm²",
+    },
+    "I_peak": {
+        "label":   "Peak irradiance",
+        "tooltip": "On-axis peak irradiance at the target plane, including Strehl reduction.",
+        "unit":    "W/cm²",
+    },
+    "PIB": {
+        "label":   "Power in the bucket",
+        "tooltip": "Fraction of total power that falls inside the aimpoint radius.",
+        "unit":    "",
+    },
+
+    # -- Target effects (Target-effects tab) ---------------------------------
+    "tau_BT": {
+        "label":   "Time to burn-through",
+        "tooltip": "Time for the target front face to reach its failure criterion under the delivered flux.",
+        "unit":    "s",
+    },
+    "T_surface_at_tau": {
+        "label":   "Surface temperature (at τ)",
+        "tooltip": "Front-face temperature at the moment of burn-through.",
+        "unit":    "K",
+    },
+    "failure_mode": {
+        "label":   "Failure mode",
+        "tooltip": "Failure criterion triggered at burn-through (melt, decomposition, thermal-runaway, etc.).",
+        "unit":    "",
+    },
+
+    # -- Dwell and verdict (Overview tab) ------------------------------------
+    "available_dwell": {
+        "label":   "Available dwell",
+        "tooltip": "Maximum time the beam can hold the aimpoint given the engagement kinematics.",
+        "unit":    "s",
+    },
+    "margin": {
+        "label":   "Engagement margin",
+        "tooltip": "(available_dwell − time-to-burn-through) / time-to-burn-through. Positive means dwell exceeds the lethality requirement.",
+        "unit":    "%",
+    },
+
+    # -- Safety (Safety tab) --------------------------------------------------
+    "NOHD_tophat": {
+        "label":   "NOHD (top-hat)",
+        "tooltip": "Nominal Ocular Hazard Distance under the top-hat convention. Cite this for safety cases that use the uniform-irradiance assumption.",
+        "unit":    "km",
+    },
+    "NOHD_gausspeak": {
+        "label":   "NOHD (Gaussian-peak)",
+        "tooltip": "Nominal Ocular Hazard Distance under the Gaussian on-axis peak convention. The more conservative of the two.",
+        "unit":    "km",
+    },
+    "laser_class": {
+        "label":   "Laser class",
+        "tooltip": "ANSI Z136.1 laser hazard classification for the configured wavelength, power, and exposure duration.",
+        "unit":    "",
+    },
+
+    # -- System feasibility (Overview + Diagnostics tabs) --------------------
+    "P_in": {
+        "label":   "Wall-plug input power",
+        "tooltip": "Electrical input power to the laser system.",
+        "unit":    "kW",
+    },
+    "Q_waste": {
+        "label":   "Waste heat",
+        "tooltip": "Heat dumped into the coolant loop during the engagement.",
+        "unit":    "kW",
+    },
+    "t_sustain": {
+        "label":   "Sustain time",
+        "tooltip": "How long the system can keep firing before coolant ΔT exceeds the allowable limit. Infinite if Q_cool ≥ Q_waste.",
+        "unit":    "s",
+    },
+    "engagements_per_hour": {
+        "label":   "Engagements per hour",
+        "tooltip": "How many back-to-back engagements the system can sustain in one hour, given cooling recovery.",
+        "unit":    "",
+    },
+
+    # -- Atmosphere (Atmosphere tab) ------------------------------------------
+    "alpha_atm": {
+        "label":   "Total extinction (α)",
+        "tooltip": "Sum of molecular + aerosol absorption and scattering along the slant path.",
+        "unit":    "1/km",
+    },
+    "alpha_mol_abs": {
+        "label":   "Molecular absorption",
+        "tooltip": "Extinction from molecular water-vapor and mixed-gas absorption.",
+        "unit":    "1/km",
+    },
+    "alpha_mol_scat": {
+        "label":   "Molecular scattering",
+        "tooltip": "Rayleigh scattering from air molecules.",
+        "unit":    "1/km",
+    },
+    "alpha_aer_abs": {
+        "label":   "Aerosol absorption",
+        "tooltip": "Absorption by atmospheric aerosols (dust, soot, water droplets).",
+        "unit":    "1/km",
+    },
+    "alpha_aer_scat": {
+        "label":   "Aerosol scattering",
+        "tooltip": "Scattering from atmospheric aerosols (Mie regime).",
+        "unit":    "1/km",
+    },
+    "tau_atm": {
+        "label":   "Atmospheric transmission",
+        "tooltip": "Beer–Lambert transmission over the slant range at the operating wavelength.",
+        "unit":    "",
+    },
+
+    # -- Blooming diagnostics (Engagement tab advanced) ----------------------
+    "N_D": {
+        "label":   "Blooming distortion number",
+        "tooltip": "Gebhardt's dimensionless blooming distortion number. N_D ≳ 30 indicates the model is being pushed outside its validity range.",
+        "unit":    "",
+    },
+}
+
+
+# =============================================================================
+# Preset names (sidebar dropdown — populated from ui/presets.py)
+# =============================================================================
+
+PRESET_LABELS: dict[str, str] = {
+    # Approved on PR 1 (2026-04-24). Underlying parameter sets land in
+    # ui/presets.py with PR 6 per the Phase 3 rollout plan.
+    "c_uas_short_range":      "C-UAS — short range",
+    "counter_rocket":         "Counter-rocket",
+    "long_range_surveillance": "Long-range surveillance",
+    "custom":                 "Custom",
+}
+
+
+# =============================================================================
+# Button / control labels
+# =============================================================================
+
+BUTTON_LABELS: dict[str, str] = {
+    "run_analysis":      "Run Analysis",
+    "validate":          "Run Validation Suite",
+    "share":             "Share this analysis",
+    "export_csv":        "Export results (CSV)",
+    "theme_toggle_dark": "Switch to light mode",
+    "theme_toggle_light": "Switch to dark mode",
+    "login_submit":      "Sign in",
+}
+
+
+# =============================================================================
+# Status-chip text templates (SPEC §5.2 Overview verdict)
+# =============================================================================
+
+VERDICT_TEMPLATES: dict[str, str] = {
+    "ok":       "ENGAGEABLE — {margin:.0f}% margin",
+    "warn":     "MARGINAL — {margin:.0f}% margin",
+    "error":    "NOT ENGAGEABLE — exceeds dwell by {shortfall:.0f}%",
+    "instant":  "ENGAGEABLE — instantaneous",
+    "no_dwell": "NOT ENGAGEABLE — no dwell available",
+}
+
+
+# =============================================================================
+# Advisory / infeasibility copy (SPEC §5.3 item 10 — always-render plot frames)
+# =============================================================================
+
+ADVISORY: dict[str, str] = {
+    "infeasible_geometry": (
+        "No feasible engagement at the current geometry. "
+        "Reduce slant range or adjust the target / emplacement altitudes."
+    ),
+    "no_dwell_available": (
+        "No dwell window available. The target kinematics leave no time to "
+        "engage — reduce target velocity or increase the aimpoint diameter."
+    ),
+    "no_burnthrough": (
+        "Burn-through not reached within the available dwell. Increase "
+        "output power, reduce range, or select a thinner / lower-threshold target."
+    ),
+    "vacuum_path": (
+        "Atmospheric extinction is effectively zero on this path — molecular "
+        "and aerosol components both negligible."
+    ),
+    "first_run_skeleton": (
+        "Click Run Analysis in the sidebar to populate the tabs."
+    ),
+}
+
+
+# =============================================================================
+# Login-screen copy (PR 1 ui/auth.py redesign)
+# =============================================================================
+
+LOGIN_COPY: dict[str, str] = {
+    "wordmark":         "HEL Engineering Calculator",
+    "password_label":   "Access code",
+    "password_help":    "Contact owner for access.",
+    # User decision on PR 1 open-items (2026-04-24): minimal help-line copy.
+    "submit":           "Sign in",
+    "auth_failure":     "Invalid access code. Try again.",
+}
+
+
+# =============================================================================
+# Footer provenance (SPEC §5.3 item 12)
+# =============================================================================
+
+FOOTER_TEMPLATE: str = (
+    "HEL Engineering Calculator · SPEC {spec_version} · ARCH {arch_version} · build {build_date}"
+)
+
+
+# =============================================================================
+# Helpers
+# =============================================================================
+
+def input_label(key: str) -> str:
+    """Return the user-visible label for an input key."""
+    return INPUT_LABELS[key]["label"]
+
+
+def input_tooltip(key: str) -> str:
+    """Return the tooltip text for an input key."""
+    return INPUT_LABELS[key].get("tooltip", "")
+
+
+def input_unit(key: str) -> str:
+    """Return the unit symbol for an input key."""
+    return INPUT_LABELS[key].get("unit", "")
+
+
+def output_label(key: str) -> str:
+    """Return the user-visible label for an output (result-dict) key."""
+    return OUTPUT_LABELS[key]["label"]
+
+
+def output_tooltip(key: str) -> str:
+    """Return the tooltip text for an output key."""
+    return OUTPUT_LABELS[key].get("tooltip", "")
+
+
+def output_unit(key: str) -> str:
+    """Return the unit symbol for an output key."""
+    return OUTPUT_LABELS[key].get("unit", "")
+
+
+__all__ = [
+    "SECTION_LABELS",
+    "TAB_LABELS",
+    "INPUT_LABELS",
+    "OUTPUT_LABELS",
+    "PRESET_LABELS",
+    "BUTTON_LABELS",
+    "VERDICT_TEMPLATES",
+    "ADVISORY",
+    "LOGIN_COPY",
+    "FOOTER_TEMPLATE",
+    "input_label",
+    "input_tooltip",
+    "input_unit",
+    "output_label",
+    "output_tooltip",
+    "output_unit",
+]

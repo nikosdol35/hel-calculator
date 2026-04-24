@@ -1,6 +1,6 @@
 # SPEC.md — HEL Engineering Calculator
 
-**Version:** 1.8 (Phase 2 closeout: §10 HIGH UNCERTAINTY dispositions applied per docs/spec_section10_review_2026-04-23.md)
+**Version:** 1.9 (Phase 3 UI redesign PR 1: §5.1 sidebar behavior restated, §5.2 re-mapped to six tabs, §5.3 extended with compute-time feedback + always-render plot frames + copy-style lint commitments — **no physics, no module I/O, no validation-case expected values touched**)
 **Supersedes:** `HEL_Calculator_Project_Plan_v0p8.docx` §3–§6 (which remains the plan-of-record; this SPEC is the implementation contract derived from it)
 **Status:** Implementation contract. Any requested feature not described here requires a SPEC update before implementation.
 
@@ -14,6 +14,7 @@
 - v1.6 (2026-04-23) — **UI-only: cross-plot hover sync descoped to per-plot unified hover.** Slice 3 of the UI layer chose to drop the bespoke Streamlit ↔ Plotly JS callback that would have propagated the hovered x-coordinate across Plots A/B/C, and instead rely on Plotly's built-in `hovermode='x unified'` within each figure. Rationale: the cross-plot callback is brittle (relies on Plotly event hooks Streamlit does not expose cleanly), saves only a mouse-move between plots (the user already scrolls between them), and adds a dependency on JavaScript injection that `st.plotly_chart` officially discourages. Within-plot unified hover — vertical crosshair + one tooltip per curve at the hovered x — still gives the same multi-curve read that the original intent needed; the user just moves the mouse to each plot separately to read across plots. §5.2 "Cross-plot hover synchronization" paragraph softened to "Per-plot unified hover"; Plot A/B/C tooltip content tables unchanged. No physics, module, or validation-case change.
 - v1.5 (2026-04-23) — **HV_5_7 Cn² model implemented.** SPEC v1.1–v1.4 enumerated `'HV_5_7'` as a valid `cn2_model` value (and §5.1 Panel D set it as the UI default), but `physics/m5_turbulence.py` shipped only the `'constant'` branch — the HV_5_7 branch raised `NotImplementedError`. Slice 2a of the UI layer surfaced this as a live contract gap (`tests/test_orchestrator.py` had to override `canonical_inputs['cn2_model']` to `'constant'` to exercise the chain). Resolved here per CLAUDE §4.3 by (a) adding a new §3 M5 validation case `test_m5_hv_5_7_ground_level` pinning the expected r₀_sph and w_turb for a ground-level slant path with the HV_5_7 profile at H_e=H_t=0, where the profile reduces analytically to a uniform Cn² = `Cn2_ground + 2.7e-16`; (b) implementing the Hufnagel-Valley 5/7 integral in `physics/m5_turbulence.py` via `scipy.integrate.quad` along the linear altitude path h(z) = H_e + (H_t−H_e)·z/L (Andrews & Phillips §12; Hufnagel 1974; Valley 1980); and (c) adding the new test case to `tests/test_m5_turbulence.py`. M5 test count 4→5; total test count 29→30. §3 M11 inventory table updated accordingly. No immutable CLAUDE §7.1 formula touched; this closes the `'HV_5_7'` enum entry against an implementation rather than a `NotImplementedError`.
 - v1.8 (2026-04-23) — **§10 HIGH UNCERTAINTY dispositions applied per `docs/spec_section10_review_2026-04-23.md`.** Six items reviewed at Phase 2 closeout; user accepted all memo recommendations. Edits: (a) §3 M4 α_mol HIGH UNCERTAINTY wording tightened and explicitly scoped "sea-level only"; (b) §3 M4 reference line adds Thomas & Stamnes 2002 band-edge cross-check citation; (c) §3 M8 A_λ table gains a per-row `Primary source` column (Steen & Mazumder, Bergstrom 2007, SABIC/Hexcel/Toray datasheets, Sandia reports); (d) §3 M8 convective-BC inline citation adds Incropera & DeWitt Ch. 7 cross-check; (e) §3 M9 `test_m9_retinal_band_baseline` NOTE wording corrected — previously implied "C_A appropriate for 1.07 µm" was applied, now explicitly documents the conservative **C_A = 1** convention and the strict-ANSI conversion factor for operator use; (f) §10 rewritten as an accepted-disposition summary with item 3 (MPE) marked CLOSED and item 5 (dwell) marked DEFERRED TO v2; (g) M9 code behavior, every formula in §3, and every expected-value in the 29 SPEC tests unchanged — `pytest tests/` passes unchanged. No immutable CLAUDE §7.1 formula touched.
+- v1.9 (2026-04-24) — **Phase 3 UI redesign, PR 1 of six: behaviorally-rewritten §5.1 / §5.2 / §5.3 for a premium engineering-instrument look.** Slice 1 of the Phase 3 rollout in `docs/phase3_ui_redesign_plan_2026-04-23.md`. Every edit is UI-only under CLAUDE §3 rule 1; no formula, no module I/O dict key, no `assumptions_flagged` entry, no validation-case expected value, and no `pytest tests/` outcome is touched. (a) **§5.1** — the six input panels (A–F) keep the same `user_inputs` dict contract exactly, but are renamed as sidebar **sections** with plain-English English headers ("Laser source" / "Beam director" / "Engagement geometry" / "Atmosphere" / "Target & aimpoint" / "System resources") and **no emoji iconography**. The sidebar gains a preset dropdown at the top (four named scenarios in `ui/presets.py`), keeps the Validate and Share buttons, and gains a light/dark theme toggle at the sidebar footer. Every input's visible label and tooltip is read from the `ui/labels.py` single-source-of-truth mapping. (b) **§5.2** — the five numeric panels and three plots are **re-mapped to six main-area tabs** (Overview / Engagement / Target effects / Safety / Atmosphere / Diagnostics). The same merged-result dict is passed to every tab; which tab renders which SPEC quantity is specified in the new §5.2 dispatch table. Three new plots are added (temperature vs time, τ_BT material comparison, NOHD cross-section / extinction breakdown horizontal stacked bar / transmission vs range — the last three replace the single Panel 5 stacked bar with a tab's worth of atmosphere insight). All new plots draw their data from existing M1–M10 outputs; **no new physics, no new material, no new wavelength, no new input dimension.** (c) **§5.2** visual conventions: every numeric value routes through a shared `format_value` helper (3 sig figs default, comma thousands separator, scientific-notation auto-switch for |value| < 0.01 or ≥ 1e5, non-breaking space before units, typographic `×`). Every multi-series plot uses hue + dash-pattern + marker-shape triple-encoding so deuteranopic / protanopic / tritanopic viewers can still distinguish series. Every status chip uses hue + Lucide icon + text label so color never carries meaning alone. (d) **§5.3** gains five behavioral commitments: (item 8) **light/dark toggle** — the sidebar-footer control flips both the Streamlit theme and the shared Plotly template in one action; all palette tokens come from `ui/theme.py` and have WCAG-AA contrast pairs verified by `scripts/check_contrast.py`; (item 9) **compute-time feedback** — clicking Run Analysis disables the button and renders a thin indeterminate progress bar below the tab strip; output cards fade in on completion; no modal, no whole-page spinner; (item 10) **always-render plot frames** — a plot with no feasible data (e.g., infeasible geometry, no dwell) renders its axis frame + an in-chart English advisory, never silently disappears; (item 11) **no internal references in user copy** — strings like `SPEC §…`, `M6↔M7 loop`, `_flagged`, and emoji ranges are forbidden in `ui/panels.py` / `ui/outputs.py` / `ui/plots.py` / `ui/app.py`, enforced by `tests/test_copy_style.py` in CI (internal references remain in physics docstrings and in `assumptions_flagged` strings, which are displayed to the user with their rendering cleaned up at render time in the Diagnostics tab); (item 12) **provenance footer** — every page renders a single-line strip at the bottom of the main area reading `HEL Engineering Calculator · SPEC v1.9 · ARCH v1.6 · build YYYY-MM-DD`; the version provenance that used to pollute the page subtitle now lives here. (e) **No change** to §1 conventions, §2 interface contract, §3 module specifications, §4 execution order, §6 file layout (covered by the companion ARCHITECTURE.md v1.6), §7 dependency pinning, §8 CI workflow, §9 implementation checklist, or §10 §10-disposition summary. **Test count unchanged at 30** for physics modules; the new `tests/test_copy_style.py` is an **infrastructure test** (grep-based static check over `ui/` source files, no physics input, zero dependency on physics module output).
 
 ---
 
@@ -56,7 +57,7 @@ All internal calculations use SI base units (W, m, s, K, radians, kg). Convenien
 
 ### 1.3 Jitter Convention
 
-Pointing jitter `σ_jit` is defined as **per-axis 1-σ angular RMS** (the standard PTU/EO datasheet convention). Users who enter a 2D radial RMS value would double-count — the UI label in Panel B makes the per-axis convention explicit.
+Pointing jitter `σ_jit` is defined as **per-axis 1-σ angular RMS** (the standard PTU/EO datasheet convention). Users who enter a 2D radial RMS value would double-count — the UI label in the Beam director section makes the per-axis convention explicit.
 
 ### 1.4 Angle Convention
 
@@ -997,9 +998,9 @@ The Streamlit interface aggregates user inputs into the dicts expected by each p
 
 ### 5.1 Input Panels → Module Inputs
 
-**Panel layout convention.** All six panels are `st.expander` widgets in the sidebar. Each panel's expander header carries a small leading icon (Streamlit emoji shortcode is acceptable) for fast visual scanning: A `🔦` (laser source), B `🎯` (beam director), C `📐` (engagement geometry), D `🌫️` (atmosphere), E `🛡️` (aimpoint and material), F `⚙️` (system resources and safety). Default expansion state on first load: **A, C, E expanded; B, D, F collapsed.** Rationale — panels A (laser source), C (engagement geometry), and E (aimpoint and material) are the most frequently changed inputs in trade-study workflows; B (beam director optical/jitter), D (atmosphere), and F (system resources) typically hold steadier values across a sweep. This default is a starting point only; Streamlit remembers user-driven expansion state within a session.
+**Sidebar layout convention (v1.9).** All input is in the **left sidebar**. From top to bottom the sidebar contains: (1) a **Preset dropdown** listing four named scenarios defined in `ui/presets.py` ("C-UAS short range", "Counter-rocket", "Long-range surveillance", "Custom"); selecting a preset writes that scenario's full input dict into `st.session_state` and reruns, repopulating the six input sections. (2) **Six input sections** (expander widgets) in the order below; each expander's header is a plain-English section name with **no emoji**: "Laser source" / "Beam director" / "Engagement geometry" / "Atmosphere" / "Target & aimpoint" / "System resources". Default expansion state on first load: **Laser source, Engagement geometry, Target & aimpoint expanded; Beam director, Atmosphere, System resources collapsed** — same first/third/fifth-open pattern as v1.2 keyed to the new section names. Streamlit remembers user-driven expansion state within a session. (3) **"Run Analysis"** primary-accent button spanning the sidebar width. (4) **"Validate"** secondary button (invokes M11). (5) **"Share this analysis"** secondary button (renders an `st.code(url)` block per §5.3 item 7). (6) **Light/dark theme toggle** at the sidebar footer (§5.3 item 8). Every input's visible label, tooltip text, and UI unit string is read from the single source of truth at `ui/labels.py` — no user-visible string is hard-coded inside `ui/panels.py`. The `user_inputs` dict keys, default values, and sanity ranges in the tables below are unchanged from v1.8; only the visible presentation is restated.
 
-**Panel A — Laser Source → M1**
+**Section 1 — Laser source → M1**
 | UI label | Input key | Unit | Default | Sanity range |
 |---|---|---|---|---|
 | Output power | `P0` | kW (→ W) | 3.0 | 0.1 – 100 |
@@ -1007,13 +1008,13 @@ The Streamlit interface aggregates user inputs into the dicts expected by each p
 | Exit aperture diameter | `D` | cm (→ m) | 10.0 | 1 – 50 |
 | Wavelength | `wavelength` | µm (→ m) | 1.07 | 0.5 – 5.0 |
 
-**Panel B — Beam Director → M2, partially M7**
+**Section 2 — Beam director → M2, partially M7**
 | UI label | Input key | Unit | Default | Sanity range |
 |---|---|---|---|---|
 | Optical transmission | `eta_opt` | — | 0.85 | 0.50 – 0.99 |
 | Pointing jitter (per-axis 1-σ RMS) | `sigma_jit` | µrad (→ rad) | 10 | 0.1 – 1000 |
 
-**Panel C — Engagement Geometry → M3**
+**Section 3 — Engagement geometry → M3**
 | UI label | Input key | Unit | Default | Sanity range |
 |---|---|---|---|---|
 | Emplacement altitude AGL | `H_e` | m | 2 | 0 – 3000 |
@@ -1022,7 +1023,7 @@ The Streamlit interface aggregates user inputs into the dicts expected by each p
 | Target velocity | `v_tgt` | m/s | 20 | 0 – 100 |
 | Crosswind (perpendicular) | `v_perp` | m/s | 3 | 0 – 30 |
 
-**Panel D — Atmosphere → M4, M5**
+**Section 4 — Atmosphere → M4, M5**
 | UI label | Input key | Unit | Default | Sanity range |
 |---|---|---|---|---|
 | Visibility | `V` | km | 23 | 0.5 – 50 |
@@ -1033,7 +1034,7 @@ The Streamlit interface aggregates user inputs into the dicts expected by each p
 | Ground Cn² (if HV) | `Cn2_ground` | m^(-2/3) | 1.7e-14 | 1e-16 – 1e-12 |
 | HV wind speed | `v_HV` | m/s | 21 | 0 – 60 |
 
-**Panel E — Aimpoint & Material → M7, M8**
+**Section 5 — Target & aimpoint → M7, M8**
 | UI label | Input key | Unit | Default | Sanity range |
 |---|---|---|---|---|
 | Aimpoint diameter | `d_aim` | cm (→ m) | 5 | 0.5 – 30 |
@@ -1042,7 +1043,7 @@ The Streamlit interface aggregates user inputs into the dicts expected by each p
 | Absorptivity A_λ (override) | `A_lambda` | — | from table | 0.05 – 0.99 |
 | Backside BC | `backside_BC` | enum | `insulated` | insulated / convective |
 
-**Panel F — System Resources & Safety → M9, M10**
+**Section 6 — System resources → M9, M10**
 | UI label | Input key | Unit | Default | Sanity range |
 |---|---|---|---|---|
 | Wall-plug efficiency | `eta_wallplug` | — | 0.30 | 0.05 – 0.50 |
@@ -1051,76 +1052,40 @@ The Streamlit interface aggregates user inputs into the dicts expected by each p
 | ΔT max | `dT_max` | K | 30 | 5 – 80 |
 | Exposure duration (for MPE) | `t_exp` | s | 0.25 | 0.25 – 100 |
 
-### 5.2 Module Outputs → Display Panels & Plots
+### 5.2 Module Outputs → Tabs, Panels, and Plots
 
-**Panel 1 — Spot Broadening & Strehl Decomposition** (at user-selected reference range):
-- Angular-error bar: θ_diff_pure (M1, split display), θ_M² (M1), θ_turb (M5), θ_jit (panel B)
-- Strehl bar: S_TB (M6), S_opt (=1)
-- Effective peak-irradiance ratio vs diff-limited baseline: `S_TB · (w_diff²/w_total²)`
+**Main-area layout convention (v1.9).** The main area is a Streamlit `st.tabs([...])` container with **six tabs in reading order**: Overview / Engagement / Target effects / Safety / Atmosphere / Diagnostics. Clicking a tab switches the view instantly (Streamlit does not re-run the physics chain on tab switch; only on Run Analysis or on changes to sidebar inputs). The same merged-result dict from `physics.orchestrator.run_full_chain` is passed to every tab renderer in `ui/outputs.py`; each renderer picks the SPEC keys it needs and delegates its visible labels / tooltips / units to `ui/labels.py`. A single-line footer provenance strip sits below the tab container on every page: `HEL Engineering Calculator · SPEC v1.9 · ARCH v1.6 · build YYYY-MM-DD`.
 
-**Panel 2 — Engagement Summary**:
-- P_aim (M7), I_avg_aim (M7), I_peak (M7)
-- tau_BT (M8), available_dwell (M3)
-- **Verdict with margin and traffic-light color:**
-  - Define `margin = (available_dwell − tau_BT) / tau_BT`. (`margin > 0` means dwell exceeds time-to-burn-through; the larger, the more comfortable the engagement.)
-  - **Verdict label and color:**
-    - `margin ≥ 0.30` → **"ENGAGEABLE"** with green indicator (`COLOR_SUCCESS` per `ui/style.py`); display margin as a percentage (e.g., "ENGAGEABLE — 47% margin").
-    - `0.00 ≤ margin < 0.30` → **"MARGINAL"** with orange/amber indicator (`COLOR_WARNING`); display margin (e.g., "MARGINAL — 8% margin").
-    - `margin < 0.00` → **"NOT ENGAGEABLE"** with red indicator (`COLOR_CAUTION`); display the shortfall as a positive percentage (e.g., "NOT ENGAGEABLE — exceeds dwell by 35%").
-  - The numeric values `tau_BT` and `available_dwell` are always displayed alongside the verdict (in seconds) so the user can see the underlying numbers, not just the label.
-  - **Edge case:** if `tau_BT` is zero or undefined (e.g., M8 reports immediate burn-through or material below ablation threshold), display "ENGAGEABLE — instantaneous" with green indicator and skip the margin calculation. If `available_dwell` is zero or undefined (target out of range or no line of sight), display "NOT ENGAGEABLE — no dwell available" with red indicator.
+**Tab dispatch table.**
 
-**Panel 3 — System Feasibility**:
-- P_in (M10), Q_waste (M10), t_sustain (M10)
-- engagements_per_hour (M10)
-- NOHD_tophat, NOHD_gausspeak (M9), laser_class (M9)
+| Tab | Numeric content | Plot content |
+|---|---|---|
+| **Overview** | Engagement verdict chip (per Panel 2 rules below); six KPI cards: `P_aim` (M7), `tau_BT` (M8), `available_dwell` (M3), `I_peak` (M7), `NOHD_tophat` (M9), `P_in` (M10) | **Dwell-vs-burnthrough comparison bar** — horizontal bar chart comparing `tau_BT` and `available_dwell` with the margin gap labeled (new in v1.9) |
+| **Engagement** | `P_aim`, `I_avg_aim`, `I_peak` (M7); `S_TB`, `S_opt` (M6/—); `w_diff`, `w_turb`, `w_jit`, `w_bloom`, `w_total` (M7/M5/M6); angular-error split (θ_diff_pure, θ_M²_excess, θ_turb, θ_jit); peak-irradiance ratio `S_TB · (w_diff²/w_total²)` | **Plot A — Peak intensity & PIB vs range** (carried forward from v1.8 Plot A; same X/Y curves); **Plot C — Spot-size contributions vs range** (carried forward from v1.8 Plot C); both plots gain the log-scale toggle and the curated modebar per §5.3 item 10 |
+| **Target effects** | `tau_BT`, `T_surface_at_tau`, `failure_mode` (M8); `available_dwell`, `margin` (M3/derived) | **Plot B — Time-to-burn-through vs range** (carried forward from v1.8 Plot B); **NEW Plot D — Surface temperature vs time** (material failure threshold annotated as a dashed reference line); **NEW Plot E — τ_BT comparison across all 7 materials at current inputs** (horizontal bar chart grouped by material) |
+| **Safety** | `NOHD_tophat`, `NOHD_gausspeak`, `laser_class` (M9); exposure duration `t_exp` echo | **NEW Plot F — NOHD hazard-zone cross-section schematic** (top-hat and Gauss-peak zones drawn as concentric half-planes extending from the emplacement; scale clearly labeled in km) |
+| **Atmosphere** | Total `alpha_atm` (M4) with its component split `alpha_mol_abs / alpha_mol_scat / alpha_aer_abs / alpha_aer_scat`; computed `tau_atm(R)` at current range | **NEW Plot G — Extinction breakdown horizontal stacked bar** (replaces the v1.8 Panel 5 static table — same four components, now a stacked bar in 1/km with percentage share labels); **NEW Plot H — Transmission vs range** (log-Y optional toggle, Beer-Lambert curve from 0 to the current slant range) |
+| **Diagnostics** | `assumptions_flagged` entries aggregated across M1–M10, **rendered as a severity-sorted chip list** (not a bullet wall); convergence status of the M6↔M7 loop (iterations used, converged yes/no) — rendered as a calm status card, no internal SPEC section references in user copy | — |
 
-**Panel 4 — Assumptions (aggregated)**:
-- Union of all `assumptions_flagged` lists from M1–M10 for the current calculation
-- Always-visible; updates as user changes inputs
+The **Engagement verdict chip** on the Overview tab uses the same three-tier logic as v1.8 Panel 2 (reproduced below, since this is the only Panel-2 logic that survives into v1.9 unchanged):
 
-**Panel 5 — Atmospheric Extinction Breakdown**:
-- Stacked bar: α_mol_abs, α_mol_scat, α_aer_abs, α_aer_scat from M4
-- Total α_atm = sum; displayed in both 1/km and percentage share
+- Define `margin = (available_dwell − tau_BT) / tau_BT`.
+- `margin ≥ 0.30` → status-chip kind **"ok"** (green + `check-circle` icon + text "ENGAGEABLE — 47% margin").
+- `0.00 ≤ margin < 0.30` → kind **"warn"** (amber + `alert-triangle` icon + text "MARGINAL — 8% margin").
+- `margin < 0.00` → kind **"error"** (red + `x-circle` icon + text "NOT ENGAGEABLE — exceeds dwell by 35%").
+- **Edge cases:** `tau_BT ≤ 0` or undefined → "ENGAGEABLE — instantaneous" (kind "ok"); `available_dwell ≤ 0` or undefined → "NOT ENGAGEABLE — no dwell available" (kind "error"). Underlying `tau_BT` and `available_dwell` numeric values are always displayed alongside the chip in their own KPI cards so the user sees the numbers, not just the verdict.
 
-**Plot A — On-Target Performance vs Slant Range**:
-- X: range; Y-left: I_peak (W/cm²); Y-right: PIB fraction
-- Curves: actual I_peak, diff-limited I_peak, PIB, S_TB, atmospheric transmission τ_atm
-- Reference lines: material damage threshold for selected material/thickness
-- **Hover tooltip content** (displayed when the user hovers over any point on any curve):
-  - Range (m, two significant figures)
-  - I_peak at this range (W/cm², three significant figures) and ratio to material damage threshold (e.g., "87% of damage threshold")
-  - PIB fraction at this range (two decimal places, e.g., "0.62")
-  - S_TB at this range (two decimal places)
-  - τ_atm at this range (two decimal places)
+**Hover tooltip content for carried-forward plots A, B, C** is unchanged from v1.8 (same fields, same sig-fig rules); new plots D–H follow the same unified-hover idiom (`hovermode='x unified'` for curve plots, `hovermode='closest'` for the NOHD cross-section schematic and the material comparison bar). Every plot uses the shared Plotly template from `ui/theme.py` so the palette, gridlines, axes, spike lines, and hover-box styling are identical across the app.
 
-**Plot B — Time-to-Burn-Through vs Slant Range**:
-- X: range; Y: tau_BT (log scale)
-- Shaded region: "engageable" (tau_BT < available_dwell)
-- Reference line: available_dwell at each range
-- **Hover tooltip content:**
-  - Range (m, two significant figures)
-  - tau_BT at this range (s, three significant figures)
-  - available_dwell at this range (s, three significant figures)
-  - Margin (signed percentage, computed as in Panel 2 verdict definition above)
+**Per-plot unified hover and crosshair.** Every plot sets Plotly's `hovermode='x unified'` (curves) or `'closest'` (schematics and grouped bars). Curve plots also enable spike lines on both axes (`showspikes=True, spikemode='across', spikedash='dot'`) so hovering draws a vertical + horizontal crosshair — the MATLAB-equivalent inspection behavior. Cross-plot synchronization (propagating the hovered x across all plots simultaneously) was considered for v1 but descoped in SPEC v1.6 — rationale unchanged. The user traces a single range across plots by moving the mouse to each plot in turn; within each plot, unified hover + spike lines give the multi-curve, axis-aligned read.
 
-**Plot C — Beam Diameter vs Range with Individual Contributions**:
-- X: range; Y: 1/e² diameter (cm, linear)
-- Solid: d_spot total; dashed: pure diffraction (2·w₀·sqrt(1+(L/z_R)²)), M² excess, turbulence, jitter
-- Shared reference-range slider with Plot A
-- **Hover tooltip content** (per curve hovered):
-  - Range (m, two significant figures)
-  - Diameter on the hovered curve (cm, three significant figures)
-  - Total d_spot at this range (cm, three significant figures) — included on every curve's tooltip so the user always sees the total alongside the contribution
-  - Curve label (e.g., "diffraction", "M² excess", "turbulence", "jitter", "total")
-
-**Per-plot unified hover.** Each of Plots A, B, and C sets Plotly's `hovermode='x unified'`: when the user hovers over any curve within a plot, a vertical crosshair appears and all curves on that plot show their value at the hovered x-coordinate in a single combined tooltip. This lets the user read across every curve within a plot in one motion. Cross-plot synchronization (propagating the hovered x across all three plots simultaneously) was considered for v1 but descoped in SPEC v1.6 — see that revision-history entry for rationale. The user traces a single range across Plots A/B/C by moving the mouse to each plot in turn; within each plot, unified hover gives the multi-curve read.
+**Plot modebar (curated).** Every plot's `config={...}` dict keeps `zoom2d`, `pan2d`, `zoomIn2d`, `zoomOut2d`, `resetScale2d`, `toImage` and removes `lasso2d`, `select2d`, `toggleSpikelines` (spikes always on), `autoScale2d` (redundant with reset); the Plotly logo is stripped (`displaylogo=False`). The modebar becomes visible on plot-hover only so it doesn't clutter the chart at rest. For plots whose dynamic range is wide (peak intensity vs range, extinction breakdown, transmission vs range), a small `[linear / log]` radio group is rendered **above the plot** (not inside the modebar) so the axis-scale toggle is visibly engineer-legible. PNG export via `toImage` produces a 2× DPI image with the current theme baked in.
 
 ### 5.3 UI Behavior Contract
 
 1. **No cached state between sessions, but state is shareable via URL.** Every session starts from the defaults. To share a specific input configuration with a colleague, the user clicks a "Share this analysis" button (in the sidebar) which generates a URL with the current input set encoded as query parameters (via Streamlit's `st.query_params`). Opening that URL recreates the exact input state, allowing reproducible team review. URL length stays well within browser limits because the parameter set is small (~30 numeric/enum values). JSON-file save/load remains a deferred v1.5 feature for users who prefer file-based archival; URL sharing covers the common case.
 
-2. **Recompute-on-change with caching.** Streamlit's `@st.cache_data` decorator wraps each physics-module call. Changing a Panel A input invalidates M1 and everything downstream; changing only a Panel F input invalidates only M9/M10.
+2. **Recompute-on-change with caching.** Streamlit's `@st.cache_data` decorator wraps each physics-module call. Changing a Laser-source input invalidates M1 and everything downstream; changing only a System-resources input invalidates only M9/M10.
 
 3. **Sweep caching.** Plots A, B, C compute over a range sweep. The sweep is cached as a single array; moving the reference slider does not recompute the sweep, only re-renders the highlighted point.
 
@@ -1131,6 +1096,16 @@ The Streamlit interface aggregates user inputs into the dicts expected by each p
 6. **Validate button runs M11.** Always available in the sidebar. Does not block the main analysis flow.
 
 7. **Share-this-analysis button.** A clearly labeled button (sidebar, near the Validate button) generates a shareable URL encoding the full current input state via `st.query_params`. Clicking the button **displays the URL in a copy-ready `st.code` block** below the button — the user selects and copies the URL manually. Rationale (SPEC v1.7): automatic clipboard writes depend on HTTPS, a user gesture, and browser clipboard permission, any of which may deny silently; a visible code block works deterministically in every Streamlit deployment (local dev, Streamlit Cloud, embedded iframes). On page load, if query parameters are present in the URL, the UI initializes input panels from those parameters instead of from defaults; if any parameter is malformed or out of its sanity range, the UI silently falls back to that input's default and adds a flag to the assumptions panel ("Input X out of range from URL, using default"). The URL-decode step runs **exactly once per session**, guarded by the `st.session_state['_url_decoded']` latch, so that subsequent Streamlit reruns (triggered by any panel widget change) do not overwrite the user's edits with the stale URL contents.
+
+8. **Light/dark theme toggle (v1.9).** A toggle control at the sidebar footer flips the app between a dark-mode primary palette (default) and a light-mode alternate. Both palettes are defined in `ui/theme.py` as token dicts; both pass WCAG-AA contrast for every text/background pair used, verified by the one-shot `scripts/check_contrast.py` audit (not in CI; run once per palette change). Flipping the toggle re-applies the Streamlit theme **and** swaps the shared Plotly template registered under `hel_dark` / `hel_light` so every chart in every tab re-themes in one action. The toggle state is session-local — refreshing the page starts from dark mode; a cookie / persistence extension is out of scope for v1.9.
+
+9. **Compute-time feedback (v1.9).** Clicking "Run Analysis" triggers a 1–4 s compute path. Behavior: (a) the button disables immediately and shows a subtle pulsing dot for the first 250 ms (prevents double-click); (b) at 300 ms, a thin indeterminate progress bar appears below the tab strip running edge-to-edge; (c) output cards render with a single 150 ms fade-in when the analysis completes; (d) the sidebar "Last run" indicator updates to `just now`. No modal, no full-page spinner, no "please wait" copy. If compute exceeds 6 s (guard; should not happen with current physics), the progress-bar tooltip updates to `Still working — {elapsed} s`. No cancellation button in v1.9.
+
+10. **Always-render plot frames (v1.9).** Every plot renders its axis frame and title even when the underlying data is missing or infeasible. Infeasibility cases — infeasible geometry, `tau_BT` undefined, no `available_dwell`, sweep out-of-range — render the frame + an in-chart English advisory ("No feasible engagement at current geometry. Reduce slant range or target altitude.") instead of disappearing silently. A missing plot is indistinguishable from a broken tool; a framed plot with an advisory communicates "we looked and here's why nothing is shown." Plot heights are fixed to the values specified in `ui/theme.py` (default 360 px; hero plots 420 px; paired 320 px; cross-section schematic 280 px) so the tab layout does not jump between runs.
+
+11. **Copy-style lint (v1.9).** User-visible strings in `ui/panels.py`, `ui/outputs.py`, `ui/plots.py`, and `ui/app.py` must not contain internal references that leak project mechanics: `SPEC §…`, `ARCH §…`, `M[0-9]` module tags, raw `assumptions_flagged` keys or `_flagged` substrings, or emoji characters (Unicode emoji ranges). `tests/test_copy_style.py` enforces this as a grep-based static check; violations fail CI. Exceptions: `ui/labels.py` (the source-of-truth mapping) is exempt; docstrings in any `ui/` file are exempt (grep scope is string literals and markdown-rendered text only); the footer provenance strip (item 12) is exempt to allow the literal "SPEC v1.9 · ARCH v1.6" version tag. Internal references remain freely used inside `physics/` docstrings, inside `assumptions_flagged` strings (which are cleaned up at render time in the Diagnostics tab), and inside any file not imported by the Streamlit runtime.
+
+12. **Footer provenance strip (v1.9).** Every page renders a single-line strip at the bottom of the main area, below the tab container: `HEL Engineering Calculator · SPEC v1.9 · ARCH v1.6 · build YYYY-MM-DD`. The version provenance that previously lived in the page subtitle (before v1.9 the title read "HEL Engineering Calculator" with a caption "SPEC v1.7 / ARCH v1.5") is now peripheral, present for auditors but out of the first-glance view. An "About" expander below the strip opens a small card with the live-app URL, a pointer to `SPEC.md Appendix B` for the reference library, and a link to the GitHub repo.
 
 ---
 
@@ -1306,25 +1281,25 @@ Total SPEC edit footprint from this review: citation-column addition to §3 M8 A
 ```
 USER INPUTS
     │
-    ├─→ Panel A (P0, M2, D, λ) ─┬─→ M1 ──┬──────────────┐
-    │                           │        │              │
-    ├─→ Panel B (η_opt,σ_jit) ──┼─→ M2   │              ↓
-    │                           │        │           M9 (NOHD)
-    ├─→ Panel C (geometry)  ────┼─→ M3   │              │
-    │                           │        ↓              │
-    ├─→ Panel D (atm,Cn²)   ────┼─→ M4 → M5             │
-    │                           │   │     │             │
-    ├─→ Panel E (aim,mat)   ────┼───│─────│─┐           │
-    │                           │   │     │ │           │
-    └─→ Panel F (power,safety) ─┼───│─────│─│─→ M10     │
-                                │   ↓     ↓ │   │       │
-                                └─→ M7 ←→ M6 │   │       │
-                                     │       │   │       │
-                                     ↓       │   │       │
-                                     M8 ←────┘   │       │
-                                     │           │       │
-                                     ↓           ↓       ↓
-                                   PLOT A/B/C  PANELS 1-5 NOHD DISPLAY
+    ├─→ Laser source (P0, M²,D,λ) ──┬─→ M1 ──┬──────────────┐
+    │                               │        │              │
+    ├─→ Beam director (η_opt,σ_jit) ┼─→ M2   │              ↓
+    │                               │        │           M9 (NOHD)
+    ├─→ Engagement geometry ────────┼─→ M3   │              │
+    │                               │        ↓              │
+    ├─→ Atmosphere (atm,Cn²)    ────┼─→ M4 → M5             │
+    │                               │   │     │             │
+    ├─→ Target & aimpoint       ────┼───│─────│─┐           │
+    │                               │   │     │ │           │
+    └─→ System resources        ────┼───│─────│─│─→ M10     │
+                                    │   ↓     ↓ │   │       │
+                                    └─→ M7 ←→ M6 │   │       │
+                                         │       │   │       │
+                                         ↓       │   │       │
+                                         M8 ←────┘   │       │
+                                         │           │       │
+                                         ↓           ↓       ↓
+                                     PLOTS A–H   TABS (1–6)  SAFETY TAB
 ```
 
 ---
@@ -1376,4 +1351,4 @@ Primary sources cited in this SPEC:
 
 ---
 
-**END OF SPEC.md v1.8**
+**END OF SPEC.md v1.9**
