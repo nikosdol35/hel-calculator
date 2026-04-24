@@ -349,6 +349,11 @@ OUTPUT_LABELS: dict[str, LabelEntry] = {
         "tooltip": "Front-face temperature at the moment of burn-through.",
         "unit":    "K",
     },
+    "T_surface_peak": {
+        "label":   "Peak surface temperature",
+        "tooltip": "Maximum front-face temperature reached during the integration window.",
+        "unit":    "°C",
+    },
     "failure_mode": {
         "label":   "Failure mode",
         "tooltip": "Failure criterion triggered at burn-through (melt, decomposition, thermal-runaway, etc.).",

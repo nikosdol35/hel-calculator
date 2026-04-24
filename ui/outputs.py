@@ -284,10 +284,25 @@ def _build_csv_snapshot(result: dict) -> str:
         module = by.get(module_key, {})
         if output_key not in module:
             continue
+        # Defense-in-depth: skip any output key without a user-facing label
+        # entry. Prevents a future _CSV_METRIC_KEYS / OUTPUT_LABELS drift
+        # from crashing the Overview tab (and, because st.tabs() renders
+        # every tab body on every rerun, the whole app).
+        try:
+            label = output_label(output_key)
+            unit = output_unit(output_key)
+        except KeyError:
+            continue
         raw = module[output_key]
         scaled = raw if isinstance(raw, str) else _scale(output_key, raw)
-        label = output_label(output_key)
-        unit = output_unit(output_key) if not isinstance(raw, str) else ""
+        # T_surface_peak is the only additive-offset conversion in the app
+        # (kelvin → celsius). ``_DISPLAY_SCALE`` is multiplicative only,
+        # so this special case lives here rather than polluting the scale
+        # table with a non-scalar entry.
+        if output_key == "T_surface_peak" and isinstance(scaled, (int, float)):
+            scaled = float(scaled) - 273.15
+        if isinstance(raw, str):
+            unit = ""
         writer.writerow((label, _csv_value_for(scaled), unit, ""))
 
     # Assumption-flag rows.
