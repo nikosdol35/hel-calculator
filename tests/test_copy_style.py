@@ -256,27 +256,37 @@ def test_module_tag_rule_discriminates_identifier_vs_prose(tmp_path: Path) -> No
     """
     sample = tmp_path / "sample.py"
     sample.write_text(
-        # Identifier-style literals — all exempt.
+        # Lines 1-2: identifier-style literals — all exempt.
         'x = {"M2": 1.0, "M6": 2.0}\n'
         'y = lookup("M10")\n'
-        # Prose-style literals — all flagged.
+        # Lines 3-5: prose-style literals — all flagged.
         'a = "M6↔M7 loop converged"\n'
         'b = "per SPEC §3 M6 tolerance"\n'
         'c = "M1 → M10 pipeline"\n',
         encoding="utf-8",
     )
     violations = _violations_in_file(sample)
-    # "SPEC §" also trips the forbidden-substring rule on line b; strip those
+    # "SPEC §" also trips the forbidden-substring rule on line 4; strip those
     # out and count only module-tag messages so this test stays focused.
     tag_violations = [v for v in violations if "module tag" in v]
-    # Expect exactly three: one per prose literal (a, b, c).
+    # Expect exactly three: one per prose literal (lines 3, 4, 5).
     assert len(tag_violations) == 3, (
         f"Expected 3 module-tag violations (one per prose literal), got "
         f"{len(tag_violations)}:\n  " + "\n  ".join(tag_violations)
     )
-    # And none of them can be identifier-only literals.
+    # The violation message format is
+    #   "{path.name}:{line}  module tag '{tag}' in user copy — …"
+    # so the cheapest invariant is that each violation references one of the
+    # prose-literal line numbers (3, 4, 5) and none of them references the
+    # identifier-literal line numbers (1, 2).
+    prose_line_prefixes = {"sample.py:3", "sample.py:4", "sample.py:5"}
+    identifier_line_prefixes = {"sample.py:1", "sample.py:2"}
     for v in tag_violations:
-        assert "↔" in v or "→" in v or "tolerance" in v, (
-            f"Tag-violation surface suggests an identifier literal was "
-            f"flagged (exemption may be broken): {v}"
+        assert any(v.startswith(p) for p in prose_line_prefixes), (
+            f"Tag violation should reference a prose line (3/4/5) of the "
+            f"sample file, got: {v}"
+        )
+        assert not any(v.startswith(p) for p in identifier_line_prefixes), (
+            f"Tag violation flags an identifier-literal line (exemption may "
+            f"be broken): {v}"
         )
