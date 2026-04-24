@@ -89,12 +89,20 @@ _BUILD_DATE = "2026-04-24"
 
 # ---------------------------------------------------------------------------
 # Page config + theme bootstrap + auth gate (must run before any widget).
+#
+# App mode (``"dark"`` / ``"light"``) lives in ``session_state`` so the
+# sidebar footer toggle added in PR 4 can flip it across reruns. The
+# default is ``"dark"`` per the Phase 3 plan — dark anchors the premium-
+# engineering-instrument reference (Bloomberg, Jupyter Lab Pro, LabVIEW).
 # ---------------------------------------------------------------------------
 st.set_page_config(
     page_title="HEL Engineering Calculator",
     layout="wide",
 )
-theme.apply("dark")
+
+_APP_MODE_KEY = "_app_mode"
+app_mode: str = st.session_state.get(_APP_MODE_KEY, "dark")
+theme.apply(app_mode)
 require_login()
 
 
@@ -287,6 +295,23 @@ with st.sidebar:
         step=0.1,
         key="R_ref_km",
     )
+
+    # --- Sidebar footer: dark / light theme toggle -----------------------
+    # Flips the session-state app-mode and triggers a rerun; the top-of-
+    # file ``theme.apply(app_mode)`` call will then pick up the new mode
+    # and swap both the CSS palette and the registered Plotly template.
+    st.markdown("---")
+    toggle_label = (
+        BUTTON_LABELS["theme_toggle_dark"]
+        if app_mode == "dark"
+        else BUTTON_LABELS["theme_toggle_light"]
+    )
+    if st.button(toggle_label, key="_theme_toggle_btn",
+                 use_container_width=True):
+        st.session_state[_APP_MODE_KEY] = (
+            "light" if app_mode == "dark" else "dark"
+        )
+        st.rerun()
 
 # ---------------------------------------------------------------------------
 # Validation suite — always available, does not block analysis.

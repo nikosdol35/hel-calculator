@@ -15,20 +15,22 @@ literal, excludes module / function / class docstrings (where SPEC /
 ARCH citations are legitimate maintainer references), and checks the
 remaining strings for forbidden substrings and emoji codepoints.
 
-Scoped files (PR 2): the five user-visible UI surfaces.
-    ui/app.py, ui/auth.py, ui/panels.py, ui/outputs.py, ui/components.py
+Scoped files (through PR 4): the six user-visible UI surfaces.
+    ui/app.py, ui/auth.py, ui/panels.py, ui/outputs.py,
+    ui/components.py, ui/plots.py
+
+PR 4 added ``ui/plots.py`` to the scan list once the plot constructors
+were rewritten to draw titles, axis labels, and series names from the
+English-prose vocabulary in ``ui/labels.py``.
 
 Deliberately NOT scanned:
     ui/labels.py  — this IS the source of truth for user copy; lint
                     would be circular.
     ui/theme.py   — CSS strings contain no user copy.
     ui/icons.py   — SVG path data only.
-    ui/plots.py   — will be folded into this lint in PR 4; PR 1 did
-                    a minimal title scrub but the full clean-up lives
-                    in the plot-theme PR.
     ui/presets.py — does not exist yet (PR 6).
 
-When PR 4 / PR 6 land, extend ``SCANNED_FILES`` below to cover them.
+When PR 6 lands, extend ``SCANNED_FILES`` below to cover ``ui/presets.py``.
 
 References:
     docs/phase3_ui_redesign_plan_2026-04-23.md § "Voice and tone".
@@ -58,6 +60,7 @@ SCANNED_FILES: tuple[Path, ...] = (
     _UI_DIR / "panels.py",
     _UI_DIR / "outputs.py",
     _UI_DIR / "components.py",
+    _UI_DIR / "plots.py",
 )
 
 
@@ -232,17 +235,23 @@ def test_no_forbidden_tokens_in_user_copy(path: Path) -> None:
         )
 
 
-def test_scan_list_covers_phase3_pr2_surface() -> None:
-    """Guard: ensure the scan list actually names the five PR 2 entry
+def test_scan_list_covers_phase3_pr4_surface() -> None:
+    """Guard: ensure the scan list actually names the six PR 4 entry
     points. If someone deletes an entry accidentally, the per-file test
-    disappears silently without this check."""
+    disappears silently without this check.
+
+    PR 4 added ``plots.py`` once its titles / axis labels / series names
+    were rewritten to draw from the English-prose ``ui/labels.py``
+    vocabulary. PR 6 will add ``presets.py`` when that file materializes.
+    """
     expected_names = {
-        "app.py", "auth.py", "panels.py", "outputs.py", "components.py",
+        "app.py", "auth.py", "panels.py",
+        "outputs.py", "components.py", "plots.py",
     }
     actual_names = {p.name for p in SCANNED_FILES}
     assert expected_names == actual_names, (
         f"SCANNED_FILES drift: expected {expected_names}, got {actual_names}. "
-        "If you are adding a file (e.g. PR 4 brings plots.py into scope), "
+        "If you are adding a file (e.g. PR 6 brings presets.py into scope), "
         "update the expected_names set in this guard too."
     )
 
