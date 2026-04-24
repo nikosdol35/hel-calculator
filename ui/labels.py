@@ -64,16 +64,18 @@ SECTION_LABELS: dict[str, str] = {
 # =============================================================================
 # Main-area tab labels (SPEC §5.2, v1.9)
 # =============================================================================
-# Six tabs in reading order. `icon` is the Lucide icon name (see ui/icons.py);
-# the render call is `icon(TAB_LABELS[key]["icon"], size=20) + TAB_LABELS[key]["label"]`.
+# Six tabs in reading order. **Text-only** per user decision on PR 1 open-items
+# (2026-04-24): the original draft paired each tab label with a Lucide icon;
+# the user chose text-only so the tab strip stays uncluttered. PR 3 renders
+# `st.tabs(list(TAB_LABELS.values()))` directly — no icon wrapper.
 
-TAB_LABELS: dict[str, dict[str, str]] = {
-    "overview":       {"label": "Overview",        "icon": "layout-dashboard"},
-    "engagement":     {"label": "Engagement",      "icon": "target"},
-    "target_effects": {"label": "Target effects",  "icon": "flame"},
-    "safety":         {"label": "Safety",          "icon": "shield"},
-    "atmosphere":     {"label": "Atmosphere",      "icon": "cloud"},
-    "diagnostics":    {"label": "Diagnostics",     "icon": "activity"},
+TAB_LABELS: dict[str, str] = {
+    "overview":       "Overview",
+    "engagement":     "Engagement",
+    "target_effects": "Target effects",
+    "safety":         "Safety",
+    "atmosphere":     "Atmosphere",
+    "diagnostics":    "Diagnostics",
 }
 
 
@@ -114,7 +116,6 @@ INPUT_LABELS: dict[str, LabelEntry] = {
     "sigma_jit": {
         "label":   "Pointing jitter (1-σ, per-axis)",
         "tooltip": "Per-axis one-sigma RMS angular jitter at the director output — the standard PTU/EO datasheet convention.",
-        # REDLINE: consider "Pointing jitter (per-axis RMS)" — shorter, still unambiguous.
         "unit":    "µrad",
     },
 
@@ -178,9 +179,6 @@ INPUT_LABELS: dict[str, LabelEntry] = {
     },
     "v_HV": {
         "label":   "Upper-level wind (HV)",
-        # REDLINE: SPEC calls this "HV wind speed" — the HV tag may be opaque
-        # to a first-time user. "Upper-level wind (HV)" spells it out without
-        # losing the association with the Hufnagel–Valley profile.
         "tooltip": "High-altitude wind parameter for the Hufnagel–Valley profile.",
         "unit":    "m/s",
     },
@@ -454,7 +452,8 @@ OUTPUT_LABELS: dict[str, LabelEntry] = {
 # =============================================================================
 
 PRESET_LABELS: dict[str, str] = {
-    # REDLINE: user picks the canonical four scenario names. The plan suggests:
+    # Approved on PR 1 (2026-04-24). Underlying parameter sets land in
+    # ui/presets.py with PR 6 per the Phase 3 rollout plan.
     "c_uas_short_range":      "C-UAS — short range",
     "counter_rocket":         "Counter-rocket",
     "long_range_surveillance": "Long-range surveillance",
@@ -524,12 +523,8 @@ ADVISORY: dict[str, str] = {
 LOGIN_COPY: dict[str, str] = {
     "wordmark":         "HEL Engineering Calculator",
     "password_label":   "Access code",
-    "password_help":    "Shared credentials. Contact the tool owner if you don't have them.",
-    # REDLINE: the plan offered three options for the help-line wording:
-    #   (a) "Shared credentials. Ask the tool owner if you don't have them."
-    #   (b) "Contact owner for access."                (most minimal)
-    #   (c) omit it entirely
-    # Default chosen: a slightly-softened (a). User picks.
+    "password_help":    "Contact owner for access.",
+    # User decision on PR 1 open-items (2026-04-24): minimal help-line copy.
     "submit":           "Sign in",
     "auth_failure":     "Invalid access code. Try again.",
 }
