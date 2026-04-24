@@ -1,6 +1,6 @@
 """Copy-style lint: forbidden tokens in user-facing UI strings.
 
-Phase 3 PR 1 adds this test to codify the voice-and-tone rules from
+Phase 3 PR 1 added this test to codify the voice-and-tone rules from
 ``docs/phase3_ui_redesign_plan_2026-04-23.md`` §"Voice and tone":
 
   * No emoji anywhere in user-visible copy.
@@ -15,19 +15,18 @@ literal, excludes module / function / class docstrings (where SPEC /
 ARCH citations are legitimate maintainer references), and checks the
 remaining strings for forbidden substrings and emoji codepoints.
 
-Scoped files (PR 1): the four user-visible UI entry points.
-    ui/app.py, ui/auth.py, ui/panels.py, ui/outputs.py
+Scoped files (PR 2): the five user-visible UI surfaces.
+    ui/app.py, ui/auth.py, ui/panels.py, ui/outputs.py, ui/components.py
 
 Deliberately NOT scanned:
     ui/labels.py  — this IS the source of truth for user copy; lint
                     would be circular.
     ui/theme.py   — CSS strings contain no user copy.
     ui/icons.py   — SVG path data only.
-    ui/style.py   — compatibility shim (to be deleted in PR 2).
-    ui/plots.py   — will be folded into this lint in PR 4; PR 1 does
-                    a minimal title scrub but leaves the full clean-up
-                    for the plot-theme PR.
-    ui/components.py, ui/presets.py — do not exist yet (PR 2, PR 6).
+    ui/plots.py   — will be folded into this lint in PR 4; PR 1 did
+                    a minimal title scrub but the full clean-up lives
+                    in the plot-theme PR.
+    ui/presets.py — does not exist yet (PR 6).
 
 When PR 4 / PR 6 land, extend ``SCANNED_FILES`` below to cover them.
 
@@ -58,6 +57,7 @@ SCANNED_FILES: tuple[Path, ...] = (
     _UI_DIR / "auth.py",
     _UI_DIR / "panels.py",
     _UI_DIR / "outputs.py",
+    _UI_DIR / "components.py",
 )
 
 
@@ -232,11 +232,13 @@ def test_no_forbidden_tokens_in_user_copy(path: Path) -> None:
         )
 
 
-def test_scan_list_covers_phase3_pr1_surface() -> None:
-    """Guard: ensure the scan list actually names the four PR 1 entry
+def test_scan_list_covers_phase3_pr2_surface() -> None:
+    """Guard: ensure the scan list actually names the five PR 2 entry
     points. If someone deletes an entry accidentally, the per-file test
     disappears silently without this check."""
-    expected_names = {"app.py", "auth.py", "panels.py", "outputs.py"}
+    expected_names = {
+        "app.py", "auth.py", "panels.py", "outputs.py", "components.py",
+    }
     actual_names = {p.name for p in SCANNED_FILES}
     assert expected_names == actual_names, (
         f"SCANNED_FILES drift: expected {expected_names}, got {actual_names}. "

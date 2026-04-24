@@ -413,6 +413,89 @@ select:focus-visible,
 .stButton > button[kind="primary"]:hover {{ background: var(--accent-primary-hover); }}
 .stButton > button[kind="primary"]:active {{ transform: translateY(1px); }}
 
+/* ---- Metric card sub-elements (emitted by ui/components.py) ------------ */
+/* The card surface itself is .hel-card above; these classes style what
+   lives inside it — label line, value + unit row, HIGH UNCERTAINTY "est."
+   superscript, and the size-md variant for compact cards. All values are
+   set in JetBrains Mono with tabular-nums so a row of cards aligns on the
+   decimal point without any per-card tweaking. */
+.hel-card-label {{
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--fg-secondary);
+  line-height: 1.5;
+  margin: 0 0 var(--space-2) 0;
+  letter-spacing: 0;
+}}
+.hel-card-value-row {{
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-2);
+  line-height: 1.1;
+}}
+.hel-card-value {{
+  font-family: 'JetBrains Mono', 'Menlo', ui-monospace, monospace;
+  font-variant-numeric: tabular-nums;
+  font-size: 28px;
+  font-weight: 500;
+  letter-spacing: -0.01em;
+  color: var(--fg-primary);
+}}
+.hel-card-value--md {{
+  font-size: 20px;
+  line-height: 1.2;
+}}
+.hel-card-unit {{
+  font-family: 'Inter', system-ui, -apple-system, sans-serif;
+  font-size: 14px;
+  font-weight: 400;
+  color: var(--fg-secondary);
+  white-space: nowrap;
+}}
+.hel-card-est {{
+  font-size: 10px;
+  font-style: italic;
+  color: var(--fg-tertiary);
+  vertical-align: super;
+  margin-left: 2px;
+  text-decoration: none;
+  letter-spacing: 0.02em;
+}}
+.hel-card-est:hover {{
+  color: var(--accent-primary);
+  text-decoration: underline;
+}}
+
+/* ---- Skeleton placeholder (pre-first-run) ------------------------------ */
+/* Same silhouette as a real card; a soft pulsing gradient signals "waiting
+   for data" without a spinner. The @keyframes is outside @media
+   (prefers-reduced-motion) so the reduced-motion override above slows
+   the pulse to the 50 ms floor. */
+.hel-skeleton {{
+  background: linear-gradient(
+    90deg,
+    var(--bg-surface) 0%,
+    var(--bg-surface-raised) 50%,
+    var(--bg-surface) 100%
+  );
+  background-size: 200% 100%;
+  animation: hel-skeleton-pulse 1.6s ease-in-out infinite;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-card);
+}}
+@keyframes hel-skeleton-pulse {{
+  0%   {{ background-position: 200% 0; }}
+  100% {{ background-position: -200% 0; }}
+}}
+
+/* ---- Chip list (severity-sorted Diagnostics-tab flag list) ------------- */
+.hel-chip-list {{
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  margin: var(--space-2) 0;
+}}
+
 /* ---- Footer provenance strip ------------------------------------------- */
 .hel-footer {{
   margin-top: var(--space-12); padding: var(--space-4) 0;

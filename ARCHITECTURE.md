@@ -1,6 +1,6 @@
 # ARCHITECTURE.md — HEL Engineering Calculator
 
-**Version:** 1.6 (Phase 3 UI redesign PR 1: new `ui/theme.py`, `ui/components.py`, `ui/labels.py`, `ui/icons.py`, `ui/presets.py`; tabbed main area; footer provenance strip; copy-style lint)
+**Version:** 1.7 (Phase 3 UI redesign PR 2: `ui/components.py` materialized with the six render helpers, `ui/outputs.py` rewritten to emit metric cards on the 12-column grid via `format_value`, verdict rendered via `status_chip`, assumption flags rendered as a severity-sorted chip list, `ui/style.py` compatibility shim deleted, `ui/plots.py` migrated to import directly from `ui.theme`)
 **Complements:** `SPEC.md` §6 (file layout) and project plan v0.8 §2.3 (three-layer separation)
 **Scope:** Concrete implementation map — file paths, function signatures, import rules, data flow.
 
@@ -11,6 +11,7 @@
 - v1.5 (2026-04-23) — **§5.1 page-load sequence gains an explicit `st.session_state['_url_decoded']` latch** (SPEC v1.7 improvement #1), preventing subsequent Streamlit reruns from re-applying stale URL-parameter values on top of the user's edits. §6.1 (app.py) responsibilities unchanged structurally but the share-URL behavior is now "display in `st.code` block" not "copy to clipboard" per SPEC v1.7 improvement #3. No function-signature, file-layout, or import-rule change.
 - v1.4 (2026-04-23) — **cross-plot hover-sync callback removed from §6.1 and §6.5** to match SPEC v1.6. The bespoke Streamlit ↔ Plotly JS callback that would have propagated the hovered x-coordinate across Plots A/B/C is descoped; each plot now relies on Plotly's built-in `hovermode='x unified'` (which was already required by §6.5, so that line is unchanged). §6.1 step 6 (hover-sync wiring) is deleted; step count 1–6 → 1–5. The "Total expected length" for app.py drops from 80–120 to 70–110 lines. §6.5 loses the "lives in `ui/app.py`" trailing sentence about the cross-plot callback. No file changes, no signature changes, no new files. Rationale lives in SPEC v1.6.
 - v1.3 (2026-04-23) — **orchestrator relocated from `ui/` to `physics/`.** The chain coordinator is pure Python (no Streamlit imports) and the M6↔M7 fixed-point loop is physics-critical, so it belongs in Layer 1 where `tests/` can import it directly under the §2 import rules. Updates: (a) §3 repo tree moves `orchestrator.py` under `physics/` and drops it from `ui/`; (b) §5.1 step 2 and §5.3 pseudocode headers updated to the new path; (c) §6.1 (app.py) gains a responsibility to wrap `physics.orchestrator.run_full_chain` in `@st.cache_data` (the caching wrapper lives in `app.py` so `orchestrator.py` stays pure); (d) §6.6 deleted, §6.7 renumbered to §6.6, §6.8 renumbered to §6.7; (e) UI layer file count corrected from 8 to 7 (6 functional + 1 `__init__.py`). No function-signature changes, no physics behavior changes. Resolves the self-contradiction in v1.1–1.2 §6.6 which said the orchestrator was "testable without Streamlit running" while §2 forbade `tests/` from importing from `ui/`.
+- v1.7 (2026-04-24) — **Phase 3 UI redesign, PR 2 of six: component system + metric-card surface + formatter + status chips.** No physics changes, no module I/O changes, no new files. (a) `ui/components.py` (introduced as a scaffold in v1.6) is now materialized with the six render helpers the rest of PR 2 builds on: `format_value(value, unit, *, sig_figs=3) -> str` (single gate for every number — 3 sig figs default, comma thousands-separator, scientific notation for |v|<0.01 or |v|≥1e5, non-breaking-space before unit, em-dash for non-finite), `metric_card(label, value, unit, *, tooltip, flag_est, size, sig_figs)`, `status_chip(text, severity)` (severity ∈ ok/warn/error/info; hue + Lucide icon + text dual-encoded), `section_header(title, *, icon)`, `skeleton_card(*, height_px, label)`, `footer_strip(spec, arch, build_date)`. (b) `ui/outputs.py` rewritten: every section emits `metric_card(...)` inside `st.columns(...)` cells (12-column grid), SI → display-unit scaling centralized in a single `_DISPLAY_SCALE` dict, inline verdict banner replaced with `status_chip`, section 4 assumption-flag bullet wall replaced with a severity-sorted chip list (`error → warn → info` order; keyword heuristic classifies each flag string without adding fields to `assumptions_flagged`). (c) `ui/style.py` compatibility shim deleted; `ui/plots.py` imports `COLOR_CAUTION / COLOR_PRIMARY / COLOR_REFERENCE / PLOT_HEIGHT_PX` directly from `ui.theme`. UI layer file count 12 → 11 (10 functional + 1 `__init__.py`). (d) §6.9 `ui/components.py` signatures updated to match the implementation (final kwargs, size variants). §6.6 deleted (shim gone); §6.7–§6.12 renumbered down one. Companion SPEC edits: §5.3 items 8–11 restated behaviorally with the final numeric-display and severity rules; §5.2 Overview verdict contract retained unchanged. Released as `SPEC.md v1.10`.
 - v1.6 (2026-04-24) — **Phase 3 UI redesign, structural scaffolding for PR 1 of six.** Adds five new UI files and two repo-level additions, and re-shapes the main area from single-scroll to tabbed. (a) §3 repo tree adds `ui/theme.py` (shared palette + CSS + Plotly template + font loader), `ui/components.py` (reusable metric card, status chip, section header, skeleton frame, numeric formatter, footer strip), `ui/labels.py` (single source of truth for SPEC-key → UI-label → tooltip mapping; every user-visible string in `ui/` reads from this file), `ui/icons.py` (Lucide SVG inline helper — ~12 icons bundled, no npm/CDN), and `ui/presets.py` (named scenario dicts driving the sidebar preset dropdown). Also adds `tests/test_copy_style.py` (copy-style lint that fails CI if forbidden tokens — `SPEC §`, `M[0-9]`, `_flagged`, emoji ranges — appear in user-visible `ui/` strings) and `scripts/check_contrast.py` (one-shot WCAG-AA verifier, NOT in CI; run once per palette change) alongside the plan-of-record `docs/phase3_ui_redesign_plan_2026-04-23.md` (reference document). UI layer file count 7 → 12 (11 functional + 1 `__init__.py`); total test files gain `test_copy_style.py` for a total of 13 test files. (b) §5.1 step 3 page-layout description changes from "main area = plots + output panels" to "main area = six tabs (Overview / Engagement / Target effects / Safety / Atmosphere / Diagnostics) + footer provenance strip"; the tabbed structure is a SPEC §5.2 re-mapping of the same five numeric panels and three plots plus three new plots — **no physics, no orchestrator, no module-output-key change**. (c) §6.1 app.py responsibilities gain: load theme via `ui.theme.apply(app_mode: 'dark' | 'light')`; render the footer provenance strip (`HEL Engineering Calculator · SPEC v1.9 · ARCH v1.6 · build YYYY-MM-DD`) on every page; the tab container replaces the single-scroll result flow. App.py line-count budget 70–110 → 100–160 to absorb the tab wiring and theme bootstrap. (d) New §6.8 `ui/theme.py`, §6.9 `ui/components.py`, §6.10 `ui/labels.py`, §6.11 `ui/icons.py`, §6.12 `ui/presets.py`. §6.6 `ui/style.py` is retained as a **compatibility shim** that re-exports `COLOR_SUCCESS / COLOR_WARNING / COLOR_CAUTION / PLOT_HEIGHT_PX` from `ui.theme` so existing `ui/outputs.py` and `ui/plots.py` imports keep working until PR 2 migrates them. (e) §6.5 `ui/plots.py` gains a responsibility line: every figure applies the shared Plotly template from `ui.theme.PLOTLY_TEMPLATE` (which encodes palette, gridline, axis, spike, and hover-box tokens) so one edit re-themes every chart. No function signatures changed for existing plot constructors. **No physics, no module I/O, no `assumptions_flagged` semantics, and no CLAUDE §7.1 formula is touched.** Companion SPEC edits: §5.1 sidebar layout restated behaviorally (preset dropdown + six sections + Run Analysis + Validate button + Share button + light/dark toggle), §5.2 re-mapped to the six tabs with three new plot specifications, §5.3 UI behavior contract extended with the compute-time-feedback, always-render-plot-frame, and copy-style-lint commitments. Released as `SPEC.md v1.9`.
 
 ---
@@ -110,8 +111,7 @@ hel-calculator/
 │   ├── components.py               ← metric_card / status_chip / section_header / skeleton_card / format_value / footer_strip (v1.6)
 │   ├── labels.py                   ← SPEC-key → UI-label → tooltip mapping (single source of truth, v1.6)
 │   ├── icons.py                    ← Lucide SVG inline helper (~12 icons bundled, v1.6)
-│   ├── presets.py                  ← Named scenario dicts for sidebar preset dropdown (v1.6)
-│   └── style.py                    ← Compatibility shim — re-exports COLOR_* and PLOT_HEIGHT_PX from ui.theme (retained for PR 1; consumers migrate to ui.theme in PR 2)
+│   └── presets.py                  ← Named scenario dicts for sidebar preset dropdown (v1.6)
 │
 ├── scripts/                        ← One-shot developer utilities (NOT in CI)
 │   └── check_contrast.py           ← WCAG-AA verifier for ui/theme.py palette pairs (v1.6)
@@ -123,7 +123,7 @@ hel-calculator/
     └── CHANGELOG.md                ← Human-readable version history (optional)
 ```
 
-**Total files:** roughly 50 (v1.6), most of them small (one module = one file, one test file per module, one UI file per concern). Every file has a single, clearly named purpose.
+**Total files:** roughly 49 (v1.7 — the v1.6 `ui/style.py` compatibility shim was deleted in PR 2), most of them small (one module = one file, one test file per module, one UI file per concern). Every file has a single, clearly named purpose.
 
 ---
 
@@ -383,68 +383,83 @@ Each returns a Plotly `Figure` object that `ui/app.py` passes to `st.plotly_char
 
 **Since v1.6, every figure applies the shared Plotly template from `ui.theme.PLOTLY_TEMPLATE`** (palette, gridlines, axes, spike-line styling, hover-box styling, tabular-nums tick labels) before any per-plot customization. One edit in `ui/theme.py` re-themes every chart in the app. Each figure also enables spike lines (`fig.update_xaxes(showspikes=True, spikesnap='cursor', spikemode='across', spikedash='dot')` and the symmetric y-axis call) for MATLAB-style crosshair hover, and installs the curated modebar config (zoom / pan / reset / PNG only; Plotly logo removed; visible on hover) via `st.plotly_chart(..., config=ui.theme.PLOTLY_MODEBAR_CONFIG)`. PR 5 (Phase 3) adds three new figure constructors — temperature-vs-time, τ_BT material comparison, NOHD cross-section, transmission vs range, extinction breakdown — under the same signature pattern; the function signatures of existing constructors A/B/C are unchanged in v1.6.
 
-### 6.6 `ui/style.py` — compatibility shim (v1.6)
-
-As of v1.6, `ui/style.py` is a thin shim that re-exports the status colors and plot-height default from `ui.theme` so that `ui/outputs.py` and `ui/plots.py` imports continue to resolve while PR 1 lands the new theme layer without touching every import site. The file is retained through PR 1 only; PR 2 migrates both consumers to import directly from `ui.theme` and this shim is deleted.
-
-```python
-# ui/style.py — DEPRECATED (v1.6). Re-exports from ui.theme for backward compatibility.
-from ui.theme import (
-    COLOR_PRIMARY,
-    COLOR_REFERENCE,
-    COLOR_SUCCESS,
-    COLOR_WARNING,
-    COLOR_CAUTION,
-    PLOT_HEIGHT_PX,
-)
-```
-
-### 6.7 `ui/__init__.py`
+### 6.6 `ui/__init__.py`
 
 Empty (by convention) — marks `ui/` as a Python package. No exports at the package level; all code is reached via explicit module imports (`from ui import app`, `from ui.panels import collect_all`, etc.). Cross-layer imports follow the same idiom: `from physics.orchestrator import run_full_chain`.
 
-### 6.8 `ui/theme.py` — shared visual tokens, CSS, Plotly template (v1.6)
+### 6.7 `ui/theme.py` — shared visual tokens, CSS, Plotly template (v1.7)
 
-Single source of truth for every visual token used in the app. Exports (names indicative; final names finalized in PR 1 code):
+Single source of truth for every visual token used in the app. Exports:
 
 - **`PALETTE_DARK` / `PALETTE_LIGHT`** — dict of token → hex for every surface, foreground, accent, status, and plot-only token (`bg.base`, `bg.surface`, `fg.primary`, `fg.secondary`, `accent.primary`, `status.ok`, `plot.gridline`, etc., per Phase 3 plan §3).
-- **`COLOR_PRIMARY / COLOR_REFERENCE / COLOR_SUCCESS / COLOR_WARNING / COLOR_CAUTION / PLOT_HEIGHT_PX`** — legacy names consumed by `ui/style.py` shim; values sourced from `PALETTE_*` so the old import path still resolves to the new palette.
-- **`PLOTLY_TEMPLATE`** — a `plotly.graph_objects.layout.Template` preset with paper bg, plot-area bg, gridlines, axes, spike lines, hover-box styling, tabular-nums tick labels, and default margins (`l=56, r=32, t=40, b=48`).
-- **`PLOTLY_MODEBAR_CONFIG`** — the `config=` dict passed to `st.plotly_chart` to keep only `zoom2d / pan2d / zoomIn2d / zoomOut2d / resetScale2d / toImage`, strip the Plotly logo, and set `modeBarButtonsToRemove=['lasso2d','select2d','toggleSpikelines','autoScale2d']`.
-- **`apply(app_mode: str = 'dark') -> None`** — the bootstrap call made once by `ui/app.py`. Injects the CSS for Inter + JetBrains Mono font loading, the palette custom properties, the card / chip / section-header / focus-ring / scrollbar rules, and the `prefers-reduced-motion` overrides. Registers `PLOTLY_TEMPLATE` under the `hel_dark` / `hel_light` name and sets it as the default via `plotly.io.templates.default`.
+- **`COLOR_PRIMARY / COLOR_REFERENCE / COLOR_SUCCESS / COLOR_WARNING / COLOR_CAUTION / PLOT_HEIGHT_PX`** — legacy names consumed by `ui/plots.py`. These are canonical public names (not shim exports) in v1.7; the short `ui/style.py` re-export path shipped in v1.6 was deleted when PR 2 migrated `ui/plots.py` to import them directly from `ui.theme`.
+- **`PLOT_HEIGHTS`** — dict of named plot sizes (`default: 360`, `hero: 420`, `paired: 320`, `cross-section: 280`) so each tab's figure picks a fixed height and the layout does not jump during the loading transition.
+- **`PLOTLY_TEMPLATE_DARK` / `PLOTLY_TEMPLATE_LIGHT` / `PLOTLY_TEMPLATE`** — `plotly.graph_objects.layout.Template` presets with paper bg, plot-area bg, gridlines, axes, spike lines, hover-box styling, tabular-nums tick labels, and default margins (`l=56, r=32, t=40, b=48`). `PLOTLY_TEMPLATE` is a back-compat alias for `PLOTLY_TEMPLATE_DARK`.
+- **`PLOTLY_MODEBAR_CONFIG`** — the `config=` dict passed to `st.plotly_chart` to keep only `zoom2d / pan2d / zoomIn2d / zoomOut2d / resetScale2d / toImage`, strip the Plotly logo, set `displayModeBar='hover'` so the modebar appears only on chart hover, and set `modeBarButtonsToRemove=['lasso2d','select2d','toggleSpikelines','autoScale2d']`. PNG exports at 2× DPI.
+- **`apply(app_mode: Literal['dark', 'light'] = 'dark') -> None`** — the bootstrap call made once by `ui/app.py`. Injects the CSS for Inter + JetBrains Mono font loading, the palette custom properties, the card / chip / section-header / focus-ring / scrollbar / skeleton-pulse / chip-list / card-label / card-value / card-unit / card-est rules, and the `prefers-reduced-motion` overrides. Registers the matching Plotly template under the `hel_dark` / `hel_light` name and sets it as the default via `plotly.io.templates.default`.
 
 No logic beyond palette tables, template construction, and CSS string injection. Imports: `streamlit`, `plotly.graph_objects`, `plotly.io`. No imports from elsewhere in `ui/`.
 
-### 6.9 `ui/components.py` — reusable UI primitives (v1.6)
+### 6.8 `ui/components.py` — reusable UI primitives (v1.7)
 
-Small, pure render helpers used by `ui/outputs.py`, `ui/panels.py`, and `ui/app.py`:
+Small, pure render helpers used by `ui/outputs.py`, `ui/panels.py`, and `ui/app.py`. Materialized in PR 2 with these signatures:
 
 ```python
-def metric_card(label: str, value: str, unit: str, *, tooltip: str | None = None, flag: str | None = None) -> None:
-    """KPI card: big tabular-nums value + label + unit; optional tooltip and 'est.' flag."""
+def format_value(
+    value: float | int | None,
+    unit: str = "",
+    *,
+    sig_figs: int = 3,
+) -> str:
+    """Single gate for every number on screen. 3 sig figs default; scientific
+    notation when |v| < 0.01 or |v| >= 1e5 (Unicode `×` + superscript digits);
+    comma thousands-separator at magnitudes >= 1000; non-breaking space before
+    the unit; em-dash (—) for None / NaN / inf.
+    """
 
-def status_chip(text: str, kind: str) -> None:
-    """kind ∈ {'ok', 'warn', 'error', 'info'}. Hue + Lucide icon + text."""
+def metric_card(
+    label: str,
+    value: float | int | str | None,
+    unit: str = "",
+    *,
+    tooltip: str | None = None,
+    flag_est: bool = False,
+    size: Literal["lg", "md"] = "lg",
+    sig_figs: int = 3,
+) -> None:
+    """KPI card: big tabular-nums value + label + unit; optional tooltip (rendered
+    as the card's title attribute) and optional 'est.' superscript linking to
+    #diagnostics for HIGH UNCERTAINTY values (SPEC §10). `value` may be a
+    pre-formatted string (material name, laser class) — routed through without
+    format_value / unit append. `size='md'` drops the value font size 28px → 20px.
+    """
 
-def section_header(text: str, *, icon: str | None = None) -> None:
-    """h3-styled section title for use inside a tab."""
+def status_chip(text: str, severity: Literal["ok", "warn", "error", "info"]) -> None:
+    """Hue + Lucide icon + text. Icon is check-circle / alert-triangle / x-circle /
+    info respectively — color-blind triple-encoding means a viewer can still read
+    the severity from the icon and the written label with the hue removed.
+    """
 
-def skeleton_card() -> None:
-    """Placeholder card rendered before first Run Analysis."""
+def section_header(title: str, *, icon: str | None = None) -> None:
+    """h3-styled section title for use inside a tab. Optional Lucide icon rendered
+    16px left of the title in accent.primary.
+    """
 
-def format_value(value: float, unit: str, *, sig_figs: int = 3) -> tuple[str, str]:
-    """Return (formatted_value, unit) per SPEC §5.3 numerical-display rules."""
+def skeleton_card(*, height_px: int = 88, label: str = "Pending first run") -> None:
+    """Placeholder card rendered before first Run Analysis. Same silhouette as a
+    real metric card with a soft pulsing gradient; prefers-reduced-motion
+    shortens the pulse to the 50ms floor.
+    """
 
 def footer_strip(spec_version: str, arch_version: str, build_date: str) -> None:
-    """One-line provenance strip rendered on every page."""
-
-def progress_bar() -> None:
-    """Indeterminate progress bar used by the Run Analysis compute-time-feedback sequence."""
+    """One-line provenance strip rendered on every page. Reads the one-line
+    template from `ui.labels.FOOTER_TEMPLATE` and wraps it in `.hel-footer`.
+    """
 ```
 
-Imports: `streamlit`, `ui.icons`, `ui.theme`. No physics imports.
+Imports: `streamlit`, `ui.icons`, `ui.labels` (inside `footer_strip` only, to keep the module boundary cheap). No physics imports. `progress_bar` (v1.6 draft) is deferred to PR 3 where the compute-time-feedback sequence actually wires it.
 
-### 6.10 `ui/labels.py` — single source of truth for user-visible strings (v1.6)
+### 6.9 `ui/labels.py` — single source of truth for user-visible strings (v1.6)
 
 Two dicts:
 
@@ -459,11 +474,11 @@ OUTPUT_LABELS: dict[str, dict] = {
 
 Every label used in `ui/panels.py` and `ui/outputs.py` is looked up here — no user-visible string is hard-coded anywhere else in `ui/`. The `tests/test_copy_style.py` lint enforces this by grepping the other `ui/` files for forbidden tokens (`SPEC §`, `M[0-9]`, `_flagged`, emoji ranges, raw SPEC input keys like `θ_diff_pure`). `ui/labels.py` itself is exempt from the lint.
 
-### 6.11 `ui/icons.py` — Lucide SVG inline helper (v1.6)
+### 6.10 `ui/icons.py` — Lucide SVG inline helper (v1.6)
 
 Tiny helper module that returns inline SVG markup for the ~12 Lucide icons actually used in the app (`check-circle`, `alert-triangle`, `x-circle`, `info`, `layout-dashboard`, `target`, `flame`, `shield`, `cloud`, `activity`, `chevron-down`, `sun-moon`). Each icon is a string constant containing the Lucide SVG path; `icon(name, size=16, stroke=1.5)` wraps it with the requested attributes and an `aria-hidden="true"` so screen readers skip decorative instances. For icon-only interactive controls the caller supplies an `aria-label` on the surrounding button. No network fetch, no npm, no runtime dependency on the Lucide package.
 
-### 6.12 `ui/presets.py` — named scenario dicts (v1.6)
+### 6.11 `ui/presets.py` — named scenario dicts (v1.6)
 
 ```python
 PRESETS: dict[str, dict] = {
