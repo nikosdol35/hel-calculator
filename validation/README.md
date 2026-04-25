@@ -37,8 +37,10 @@ Goes into `tests/` directly; no files under `validation/` for this layer. See th
 
 ## Layer 5 — Independent replication (Package 5)
 
-- `replication/replication_notebook.ipynb` — independent implementations of M1, M5, M7, M8.
-- `replication/replication_report.md` — per-scenario comparison table.
+- `replication/replication.py` — first-principles re-implementations of M1, M5, M7, M8, M9 using only `numpy` and `scipy.integrate.quad`. Nothing under `physics/` is imported. Runnable via `python validation/replication/replication.py`.
+- `replication/replication_notebook.ipynb` — Jupyter notebook with the same comparison driver, executed end-to-end via `nbclient`. Outputs committed in the file.
+- `replication/replication_report.md` — per-scenario agreement table. **45 comparison rows, worst |rel err| 4.04%, target ≤ 5% met.**
+- `replication/results.json` — raw per-row data for downstream tooling.
 
 ## How to audit
 
@@ -57,3 +59,4 @@ Layer 2 test coverage and Layer 3 numerical-methods reports complement the deriv
 - 2026-04-24 — tree created; Package 1 files written.
 - 2026-04-24 — Package 3 Layer 3 numerical-methods files written (`methods/m8_solver.md`, `methods/m6_m7_iteration.md`, `methods/m5_r0_integral.md`, `methods/m4_interp.md`) with companion tests in `tests/test_m8_numerics.py`, `tests/test_m6_m7_convergence.py`, `tests/test_m5_numerics.py`. Layer 3.4 (M4 interp) is doc-only — reuses the Package 2 `tests/test_helpers.py` coverage.
 - 2026-04-24 — Package 4 Layer 4 HIGH UNCERTAINTY closeout written (`uncertainty_closeout.md`). All six SPEC §10 items re-reviewed against 2026-04-24 literature and Packages 1–3 outputs. Five confirm prior disposition (close-at-current); one surfaces an ANSI Z136.1-2022 citation-refresh path (v2-scope, tool's current no-C_A 2014 formulas remain conservative under 2022); one remains deferred to v2 (available_dwell tracker-model). Zero paired SPEC + code edits required this package.
+- 2026-04-24 — Package 5 Layer 5 independent replication shipped (`replication/replication.py`, `replication/replication_notebook.ipynb`, `replication/replication_report.md`). Independent first-principles Python re-implementations of M1, M5, M7, M8, M9 against the three canonical scenarios pinned in `tests/golden/`. 45 comparison rows; worst relative error 4.04%; target ≤ 5% met. Five convention/sign mismatches surfaced and fixed in the replication code itself — calculator code unchanged. **Validation campaign Packages 1–5 complete.**

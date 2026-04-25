@@ -1,0 +1,333 @@
+[
+  {
+    "scenario": "c_uas_1500m",
+    "rows": [
+      {
+        "module": "M1",
+        "key": "theta_diff",
+        "independent": 1.6348395754399487e-05,
+        "calculator": 1.6348395754399487e-05,
+        "rel_err_pct": 0.0
+      },
+      {
+        "module": "M1",
+        "key": "w0",
+        "independent": 0.05,
+        "calculator": 0.05,
+        "rel_err_pct": 0.0
+      },
+      {
+        "module": "M1",
+        "key": "zR",
+        "independent": 7340.169751378023,
+        "calculator": 7340.169751378023,
+        "rel_err_pct": 0.0
+      },
+      {
+        "module": "M1",
+        "key": "I_exit",
+        "independent": 763943.7268410976,
+        "calculator": 763943.7268410976,
+        "rel_err_pct": 0.0
+      },
+      {
+        "module": "M5",
+        "key": "Cn2_integrated",
+        "independent": 2.5719185339925334e-12,
+        "calculator": 2.5719185339925334e-12,
+        "rel_err_pct": 0.0
+      },
+      {
+        "module": "M5",
+        "key": "r0_sph",
+        "independent": 0.1136282049418343,
+        "calculator": 0.1136282049418343,
+        "rel_err_pct": 0.0
+      },
+      {
+        "module": "M5",
+        "key": "w_turb",
+        "independent": 0.004496131639028397,
+        "calculator": 0.004496131639028397,
+        "rel_err_pct": 0.0
+      },
+      {
+        "module": "M7",
+        "key": "w_diff",
+        "independent": 0.051481447139772,
+        "calculator": 0.051481447139772,
+        "rel_err_pct": 0.0
+      },
+      {
+        "module": "M7",
+        "key": "w_jit",
+        "independent": 0.030000000000000002,
+        "calculator": 0.030000000000000002,
+        "rel_err_pct": 0.0
+      },
+      {
+        "module": "M7",
+        "key": "w_total",
+        "independent": 0.06007761489421056,
+        "calculator": 0.06021315519760972,
+        "rel_err_pct": -0.225100815518362
+      },
+      {
+        "module": "M7",
+        "key": "I_peak",
+        "independent": 171664.8447939007,
+        "calculator": 166755.54636419445,
+        "rel_err_pct": 2.9440090820033853
+      },
+      {
+        "module": "M8",
+        "key": "tau_BT",
+        "independent": 8.220342857148497,
+        "calculator": 8.363657142851379,
+        "rel_err_pct": -1.7135361153030546
+      },
+      {
+        "module": "M9",
+        "key": "MPE",
+        "independent": 25.45584412271571,
+        "calculator": 25.45584412271571,
+        "rel_err_pct": 0.0
+      },
+      {
+        "module": "M9",
+        "key": "NOHD_tophat",
+        "independent": 743167.7680306823,
+        "calculator": 743167.7680306823,
+        "rel_err_pct": 0.0
+      },
+      {
+        "module": "M9",
+        "key": "NOHD_gausspeak",
+        "independent": 1053531.6015518177,
+        "calculator": 1053531.6015518177,
+        "rel_err_pct": 0.0
+      }
+    ]
+  },
+  {
+    "scenario": "counter_rocket_3000m",
+    "rows": [
+      {
+        "module": "M1",
+        "key": "theta_diff",
+        "independent": 5.903587355755371e-06,
+        "calculator": 5.903587355755371e-06,
+        "rel_err_pct": 0.0
+      },
+      {
+        "module": "M1",
+        "key": "w0",
+        "independent": 0.15,
+        "calculator": 0.15,
+        "rel_err_pct": 0.0
+      },
+      {
+        "module": "M1",
+        "key": "zR",
+        "independent": 66061.5277624022,
+        "calculator": 66061.5277624022,
+        "rel_err_pct": 0.0
+      },
+      {
+        "module": "M1",
+        "key": "I_exit",
+        "independent": 848826.3631567751,
+        "calculator": 848826.3631567751,
+        "rel_err_pct": 0.0
+      },
+      {
+        "module": "M5",
+        "key": "Cn2_integrated",
+        "independent": 3.4187638721435545e-13,
+        "calculator": 3.4187638721435545e-13,
+        "rel_err_pct": 0.0
+      },
+      {
+        "module": "M5",
+        "key": "r0_sph",
+        "independent": 0.3813458348036448,
+        "calculator": 0.3813458348036448,
+        "rel_err_pct": 0.0
+      },
+      {
+        "module": "M5",
+        "key": "w_turb",
+        "independent": 0.0026793913592266724,
+        "calculator": 0.0026793913592266724,
+        "rel_err_pct": 0.0
+      },
+      {
+        "module": "M7",
+        "key": "w_diff",
+        "independent": 0.15026116521992908,
+        "calculator": 0.15026116521992908,
+        "rel_err_pct": 0.0
+      },
+      {
+        "module": "M7",
+        "key": "w_jit",
+        "independent": 0.030000000000000002,
+        "calculator": 0.030000000000000002,
+        "rel_err_pct": 0.0
+      },
+      {
+        "module": "M7",
+        "key": "w_total",
+        "independent": 0.15832167054153895,
+        "calculator": 0.1588053896257137,
+        "rel_err_pct": -0.30459865708261863
+      },
+      {
+        "module": "M7",
+        "key": "I_peak",
+        "independent": 147847.26430369623,
+        "calculator": 142748.983767532,
+        "rel_err_pct": 3.5715004069428855
+      },
+      {
+        "module": "M8",
+        "key": "tau_BT",
+        "independent": 13.90720000001764,
+        "calculator": 14.392457142864101,
+        "rel_err_pct": -3.3716073498058337
+      },
+      {
+        "module": "M9",
+        "key": "MPE",
+        "independent": 18.0,
+        "calculator": 18.0,
+        "rel_err_pct": 0.0
+      },
+      {
+        "module": "M9",
+        "key": "NOHD_tophat",
+        "independent": 7752216.379344533,
+        "calculator": 7752216.379344533,
+        "rel_err_pct": 0.0
+      },
+      {
+        "module": "M9",
+        "key": "NOHD_gausspeak",
+        "independent": 10984338.450389331,
+        "calculator": 10984338.450389331,
+        "rel_err_pct": 0.0
+      }
+    ]
+  },
+  {
+    "scenario": "long_range_8000m",
+    "rows": [
+      {
+        "module": "M1",
+        "key": "theta_diff",
+        "independent": 1.1841127766037012e-05,
+        "calculator": 1.1841127766037012e-05,
+        "rel_err_pct": 0.0
+      },
+      {
+        "module": "M1",
+        "key": "w0",
+        "independent": 0.125,
+        "calculator": 0.125,
+        "rel_err_pct": 0.0
+      },
+      {
+        "module": "M1",
+        "key": "zR",
+        "independent": 31669.280782155172,
+        "calculator": 31669.280782155172,
+        "rel_err_pct": 0.0
+      },
+      {
+        "module": "M1",
+        "key": "I_exit",
+        "independent": 407436.6543152521,
+        "calculator": 407436.6543152521,
+        "rel_err_pct": 0.0
+      },
+      {
+        "module": "M5",
+        "key": "Cn2_integrated",
+        "independent": 3.4207184338551767e-13,
+        "calculator": 3.4207184338551767e-13,
+        "rel_err_pct": 0.0
+      },
+      {
+        "module": "M5",
+        "key": "r0_sph",
+        "independent": 0.5947132007134304,
+        "calculator": 0.5947132007134304,
+        "rel_err_pct": 0.0
+      },
+      {
+        "module": "M5",
+        "key": "w_turb",
+        "independent": 0.00663688410471476,
+        "calculator": 0.00663688410471476,
+        "rel_err_pct": 0.0
+      },
+      {
+        "module": "M7",
+        "key": "w_diff",
+        "independent": 0.13367272312759176,
+        "calculator": 0.13367272312759176,
+        "rel_err_pct": 0.0
+      },
+      {
+        "module": "M7",
+        "key": "w_jit",
+        "independent": 0.128,
+        "calculator": 0.128,
+        "rel_err_pct": 0.0
+      },
+      {
+        "module": "M7",
+        "key": "w_total",
+        "independent": 0.19170536993010273,
+        "calculator": 0.19237159465478895,
+        "rel_err_pct": -0.3463217768100128
+      },
+      {
+        "module": "M7",
+        "key": "I_peak",
+        "independent": 10669.913447047564,
+        "calculator": 10256.031797277377,
+        "rel_err_pct": 4.035494994078097
+      },
+      {
+        "module": "M8",
+        "key": "tau_BT",
+        "independent": "no failure within 60s",
+        "calculator": "no failure within 60s",
+        "rel_err_pct": 0.0,
+        "verdict_match": true
+      },
+      {
+        "module": "M9",
+        "key": "MPE",
+        "independent": 3329.779922007619,
+        "calculator": 3329.779922007619,
+        "rel_err_pct": 0.0
+      },
+      {
+        "module": "M9",
+        "key": "NOHD_tophat",
+        "independent": 144027.88639269408,
+        "calculator": 144027.88639269408,
+        "rel_err_pct": 0.0
+      },
+      {
+        "module": "M9",
+        "key": "NOHD_gausspeak",
+        "independent": 212431.42070352618,
+        "calculator": 212431.42070352618,
+        "rel_err_pct": 0.0
+      }
+    ]
+  }
+]
