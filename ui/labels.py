@@ -58,6 +58,12 @@ SECTION_LABELS: dict[str, str] = {
     "atmosphere":          "Atmosphere",
     "target_aimpoint":     "Target & aimpoint",
     "system_resources":    "System resources",
+    # DRI Analyzer (independent of HEL physics) — three new collapsible
+    # expanders that drive the DRI tab. Default-collapsed so HEL-only
+    # users see the same sidebar they had before.
+    "dri_sensor":          "DRI sensor",
+    "dri_atmosphere":      "DRI atmosphere",
+    "dri_target":          "DRI target & criteria",
 }
 
 
@@ -79,6 +85,10 @@ TAB_LABELS: dict[str, str] = {
     # PR 1 of the math-tab plan (docs/math_tab_plan_2026-04-25.md). Tab is
     # the rightmost so it reads as "results, then the receipts behind them."
     "math":           "How it's calculated",
+    # DRI Analyzer (Detection / Recognition / Identification) — independent
+    # of HEL physics; passive-sensor analysis. Last in the strip so the
+    # HEL workflow reads first.
+    "dri_analyzer":   "DRI Analyzer",
 }
 
 
@@ -253,6 +263,92 @@ INPUT_LABELS: dict[str, LabelEntry] = {
         "label":   "Exposure duration (MPE)",
         "tooltip": "Worst-case continuous exposure used for the ANSI Z136.1 maximum permissible exposure calculation.",
         "unit":    "s",
+    },
+
+    # -- DRI Analyzer Section 7 — Sensor (independent of HEL chain) -----------
+    "dri_n_pixels_h": {
+        "label":   "Resolution (horizontal)",
+        "tooltip": "Number of pixels across the sensor's horizontal axis. Drives instantaneous-FOV per pixel.",
+        "unit":    "px",
+    },
+    "dri_n_pixels_v": {
+        "label":   "Resolution (vertical)",
+        "tooltip": "Number of pixels across the sensor's vertical axis. Display-only; the analysis assumes square pixels.",
+        "unit":    "px",
+    },
+    "dri_nfov_deg": {
+        "label":   "Narrow FOV (NFOV)",
+        "tooltip": "Narrow field of view — the zoomed-in setting. Headline DRI ranges are reported at this FOV.",
+        "unit":    "°",
+    },
+    "dri_wfov_deg": {
+        "label":   "Wide FOV (WFOV)",
+        "tooltip": "Wide field of view — the zoomed-out setting. Sets the upper bound of the FOV-sweep plots.",
+        "unit":    "°",
+    },
+    "dri_focal_length_mm": {
+        "label":   "Focal length",
+        "tooltip": "Lens focal length. Used with the f-number to derive the entrance-pupil diameter for diffraction.",
+        "unit":    "mm",
+    },
+    "dri_f_number": {
+        "label":   "F-number",
+        "tooltip": "Lens f-number (e.g. 2.8, 5.6). Sets the entrance-pupil diameter D = f / (f-number) which fixes the diffraction limit.",
+        "unit":    "",
+    },
+
+    # -- DRI Analyzer Section 8 — Atmosphere ----------------------------------
+    "dri_band": {
+        "label":   "Wavelength band",
+        "tooltip": "Operating band — Visible (550 nm), NIR (850 nm), SWIR (1550 nm), MWIR (4 µm) or LWIR (10 µm). MWIR/LWIR use a tabulated band-averaged extinction.",
+        "unit":    "",
+    },
+    "dri_cn2_preset": {
+        "label":   "Atmospheric turbulence Cn²",
+        "tooltip": "Refractive-index structure constant. Choose from seven preset levels covering desert-midday strong turbulence down to high-altitude weak turbulence.",
+        "unit":    "",
+    },
+    "dri_visibility_km": {
+        "label":   "Visibility",
+        "tooltip": "Meteorological visual range (Koschmieder). Drives the Kruse-McClatchey aerosol extinction.",
+        "unit":    "km",
+    },
+    "dri_C0": {
+        "label":   "Inherent contrast (C₀)",
+        "tooltip": "Target-vs-background luminance contrast at zero range. Daytime ground target ~0.3; high-contrast painted target ~0.7.",
+        "unit":    "",
+    },
+
+    # -- DRI Analyzer Section 9 — Target & criteria ---------------------------
+    "dri_target_preset": {
+        "label":   "Target",
+        "tooltip": "Choose a preset target (NATO standard, person, vehicle classes, drone classes) or pick Custom and enter your own dimension.",
+        "unit":    "",
+    },
+    "dri_target_h_m": {
+        "label":   "Custom target critical dimension",
+        "tooltip": "When 'Custom' is selected, enter the target's critical dimension h = √(width × height).",
+        "unit":    "m",
+    },
+    "dri_probability": {
+        "label":   "Probability of discrimination",
+        "tooltip": "Probability that an observer correctly performs the task at the reported range. Higher probability requires more cycles across the target.",
+        "unit":    "",
+    },
+    "dri_n_cycles_D": {
+        "label":   "Detection cycles (N₅₀)",
+        "tooltip": "Cycles across the target needed for 50% detection probability. Johnson 1958 default: 1.0.",
+        "unit":    "",
+    },
+    "dri_n_cycles_R": {
+        "label":   "Recognition cycles (N₅₀)",
+        "tooltip": "Cycles across the target needed for 50% recognition probability. Johnson 1958 default: 4.0.",
+        "unit":    "",
+    },
+    "dri_n_cycles_I": {
+        "label":   "Identification cycles (N₅₀)",
+        "tooltip": "Cycles across the target needed for 50% identification probability. Johnson 1958 default: 8.0.",
+        "unit":    "",
     },
 }
 
@@ -592,6 +688,58 @@ OUTPUT_LABELS: dict[str, LabelEntry] = {
         "label":   "Duty-cycle limit",
         "tooltip": "Fraction of time the system can fire continuously given Q_cool / Q_waste.",
         "unit":    "",
+    },
+
+    # -- DRI Analyzer outputs (independent of HEL chain) ---------------------
+    "dri_R_detection_m": {
+        "label":   "Detection range",
+        "tooltip": "Range at which the chosen target is detected at the user's probability — minimum of geometric (Johnson) range and atmospheric (Koschmieder) range.",
+        "unit":    "km",
+    },
+    "dri_R_recognition_m": {
+        "label":   "Recognition range",
+        "tooltip": "Range at which the target is recognised (object class) — fewer cycles than identification, more than detection.",
+        "unit":    "km",
+    },
+    "dri_R_identification_m": {
+        "label":   "Identification range",
+        "tooltip": "Range at which the target is identified (specific object) — the most demanding criterion.",
+        "unit":    "km",
+    },
+    "dri_R_atm_m": {
+        "label":   "Atmospheric range ceiling",
+        "tooltip": "Koschmieder visual range — the contrast-limited maximum range any DRI level can achieve at this visibility and target contrast.",
+        "unit":    "km",
+    },
+    "dri_alpha_per_km": {
+        "label":   "Atmospheric extinction (α)",
+        "tooltip": "Total extinction coefficient (Kruse + Kim aerosol; tabulated thermal). Each km of path attenuates by exp(-α).",
+        "unit":    "/km",
+    },
+    "dri_h_target_m": {
+        "label":   "Target critical dimension",
+        "tooltip": "h = √(width × height) — the geometric-mean dimension that drives Johnson cycles.",
+        "unit":    "m",
+    },
+    "dri_ifov_pixel_rad": {
+        "label":   "Per-pixel IFOV",
+        "tooltip": "Instantaneous field of view of one pixel — the geometric resolution limit before optics and atmosphere blur.",
+        "unit":    "µrad",
+    },
+    "dri_theta_diff_rad": {
+        "label":   "Diffraction blur (θ_diff)",
+        "tooltip": "Airy-disk angular radius from the entrance pupil — fundamental optical diffraction limit.",
+        "unit":    "µrad",
+    },
+    "dri_theta_turb_rad": {
+        "label":   "Turbulence blur (θ_turb)",
+        "tooltip": "Atmospheric-turbulence angular blur from the Fried parameter — λ / r₀ (plane-wave horizontal path).",
+        "unit":    "µrad",
+    },
+    "dri_ifov_eff_rad": {
+        "label":   "Effective IFOV",
+        "tooltip": "Pixel + diffraction + turbulence in quadrature (RSS) — the effective angular resolution at the converged path length.",
+        "unit":    "µrad",
     },
 }
 
@@ -962,6 +1110,58 @@ EXPLANATIONS: dict[str, str] = {
         "plain-language explanation. Toggle to Full view for the substituted "
         "values, the literature citation, the line of code that computes it, "
         "and any flagged assumptions."
+    ),
+
+    # --- DRI Analyzer tab -------------------------------------------------
+    "dri_intro": (
+        "This tab is independent of the laser-engagement chain. Given a "
+        "passive electro-optical sensor and an atmosphere, it returns the "
+        "ranges at which an operator can detect, recognise, and identify a "
+        "given target — using the Johnson criteria as the discrimination "
+        "rule. The headline numbers are computed at the narrow field of "
+        "view (NFOV); the plots below sweep the field of view from NFOV out "
+        "to WFOV so you can see how the ranges trade against zoom."
+    ),
+    "dri_methodology": (
+        "Each range is the smaller of two limits. The geometric Johnson "
+        "limit asks: at what range does the target subtend enough cycles "
+        "across the sensor for the chosen task? The atmospheric limit asks: "
+        "at what range does atmospheric extinction reduce the target's "
+        "contrast below the visual threshold? At long ranges, atmospheric "
+        "turbulence (Cn²) and lens diffraction add an extra angular blur "
+        "that further degrades the geometric limit — these are combined in "
+        "quadrature and folded into the effective per-pixel field of view. "
+        "The path length is solved self-consistently because the turbulence "
+        "blur depends on the answer."
+    ),
+    "dri_plot_fov_intro": (
+        "How the DRI distance changes as you zoom the camera. At narrow "
+        "FOV (high zoom) each pixel covers a smaller angle, so the target "
+        "subtends more cycles and the geometric Johnson range is longer — "
+        "until atmospheric extinction caps it. The dashed line shows the "
+        "atmospheric ceiling; the solid curve is the geometric limit; the "
+        "shaded area marks the regime where atmosphere dominates."
+    ),
+    "dri_plot_target_size_intro": (
+        "Range vs target critical dimension at the narrow field of view. "
+        "Bigger targets are easier — Johnson cycles scale linearly with "
+        "h = √(W·H). The atmospheric ceiling does not; that's why the "
+        "curves flatten at the largest sizes."
+    ),
+    "dri_plot_atmospheric_transmission_intro": (
+        "Atmospheric transmission τ = exp(−α·R) at the user's wavelength "
+        "and visibility. Useful for reading the Koschmieder envelope "
+        "behind the DRI ranges."
+    ),
+    "dri_plot_cn2_intro": (
+        "How the DRI distance varies across the seven Cn² preset levels. "
+        "Stronger turbulence (left) shrinks all three ranges; very weak "
+        "turbulence (right) lets the geometric Johnson limit dominate."
+    ),
+    "dri_plot_heatmap_intro": (
+        "Two-dimensional sweep: detection range as a function of both the "
+        "field of view and the target size. Useful for picking the FOV "
+        "that maximises range against a class of targets."
     ),
 }
 
