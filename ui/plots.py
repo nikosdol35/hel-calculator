@@ -1613,10 +1613,131 @@ def plot_e_engagement_margin_vs_range(
     return fig
 
 
+# ---------------------------------------------------------------------------
+# Plot C' — Spot tightening through trajectory (SPEC v2.0).
+# Replaces Plot C's "spot diameter components vs slant range" view, which
+# becomes degenerate under the v2.0 trajectory contract: closest-approach
+# values are constant per R_detect sweep so the components don't vary.
+# This plot looks at ONE engagement and shows how the spot tightens as
+# the target closes from R_detect down to R_min.
+# ---------------------------------------------------------------------------
+
+def plot_c_spot_tightening_through_trajectory(
+    result: dict | None,
+    *,
+    d_aim: float | None,
+) -> go.Figure:
+    """Spot diameter through the engagement trajectory.
+
+    For one engagement, plots the 1/e² spot diameter d_spot at each
+    sub-sample of the trajectory R(t), with a horizontal reference at
+    the bucket diameter ``d_aim``. The curve drops left-to-right as
+    the target closes (R_detect → R_min). Range where the spot still
+    exceeds the bucket is shaded in status.warn so the operator sees
+    at a glance how much of the trajectory was spent with the spot
+    bigger than the aimpoint.
+
+    Falls back to a frame-only figure when called with a v1.x result
+    (no trajectory series), with a centered advisory pointing the
+    user at the v2.0 contract.
+    """
+    height = PLOT_HEIGHTS["default"]
+    xtitle = "Trajectory slant range (km)"
+    ytitle = "1/e² spot diameter (cm)"
+    title = "Spot tightening through trajectory"
+
+    if (result is None
+            or "trajectory_R" not in result
+            or "trajectory_d_spot" not in result):
+        return _empty_frame(
+            title=title, xtitle=xtitle, ytitle=ytitle,
+            advisory=ADVISORY["infeasible_geometry"], height=height,
+        )
+
+    traj_R = result["trajectory_R"]
+    traj_d = result["trajectory_d_spot"]
+    if not traj_R or not traj_d:
+        return _empty_frame(
+            title=title, xtitle=xtitle, ytitle=ytitle,
+            advisory=ADVISORY["infeasible_geometry"], height=height,
+        )
+
+    palette = _active_palette()
+    x_km = [r / 1000.0 for r in traj_R]
+    d_cm = [d * 100.0 for d in traj_d]
+    d_aim_cm = (d_aim * 100.0) if (d_aim is not None and d_aim > 0) else None
+
+    fig = go.Figure()
+
+    # Spillover band — where d_cm > d_aim_cm.
+    if d_aim_cm is not None:
+        upper: list[float] = []
+        lower: list[float] = []
+        for d in d_cm:
+            if d > d_aim_cm:
+                upper.append(d)
+                lower.append(d_aim_cm)
+            else:
+                upper.append(math.nan)
+                lower.append(math.nan)
+        warn_rgba = _hex_to_rgba(palette["status.warn"], alpha=0.18)
+        fig.add_trace(
+            go.Scatter(
+                x=x_km + x_km[::-1],
+                y=upper + lower[::-1],
+                fill="toself",
+                fillcolor=warn_rgba,
+                line=dict(color="rgba(0,0,0,0)"),
+                hoverinfo="skip",
+                name="Spillover (spot > bucket)",
+                showlegend=True,
+            )
+        )
+        fig.add_hline(
+            y=d_aim_cm,
+            line=dict(color=palette["data.reference"],
+                      width=1.5, dash="dash"),
+            annotation_text=f"Bucket diameter ({d_aim_cm:.1f} cm)",
+            annotation_position="top right",
+            annotation_font=dict(color=palette["fg.secondary"], size=11),
+        )
+
+    # The d_spot trajectory itself.
+    s0 = _series_style(0, palette)
+    fig.add_trace(
+        go.Scatter(
+            x=x_km, y=d_cm,
+            mode="lines+markers",
+            name="Total spot diameter",
+            line=s0["line"], marker=s0["marker"],
+            hovertemplate=(
+                "Range %{x:.2f} km · spot %{y:.1f} cm<extra></extra>"
+            ),
+        )
+    )
+
+    fig.update_layout(
+        title=title,
+        hovermode="x unified",
+        height=height,
+    )
+    # The trajectory closes left-to-right (R_detect on the left,
+    # R_min on the right), but the natural reading direction for a
+    # "target closing on us" story is left-to-right with R decreasing.
+    # Reverse the x-axis so larger ranges sit on the left.
+    if x_km and x_km[0] > x_km[-1]:
+        fig.update_xaxes(title_text=xtitle, autorange="reversed")
+    else:
+        fig.update_xaxes(title_text=xtitle)
+    fig.update_yaxes(title_text=ytitle)
+    return fig
+
+
 __all__ = [
     "plot_a_on_target_performance",
     "plot_b_time_to_burnthrough",
     "plot_c_beam_diameter_breakdown",
+    "plot_c_spot_tightening_through_trajectory",
     "plot_d_blooming_distortion_number",
     "plot_e_engagement_margin_vs_range",
     "plot_g_spot_vs_bucket",

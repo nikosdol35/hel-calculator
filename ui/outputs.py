@@ -574,12 +574,26 @@ def render_tab_engagement(
         config=PLOTLY_MODEBAR_CONFIG,
     )
     explanation(EXPLANATIONS["plot_e_intro"], variant="plot")
-    st.plotly_chart(
-        plots.plot_c_beam_diameter_breakdown(sweep),
-        use_container_width=True,
-        config=PLOTLY_MODEBAR_CONFIG,
-    )
-    explanation(EXPLANATIONS["plot_c_intro"], variant="plot")
+    # SPEC v2.0 §8.2 — Plot C is replaced by Plot C' (spot tightening
+    # through trajectory) when the orchestrator emits trajectory series
+    # (v2 trajectory mode). Falls back to the v1 component-breakdown
+    # view for v1.x results.
+    if "trajectory_R" in result and "trajectory_d_spot" in result:
+        st.plotly_chart(
+            plots.plot_c_spot_tightening_through_trajectory(
+                result, d_aim=result.get("d_aim"),
+            ),
+            use_container_width=True,
+            config=PLOTLY_MODEBAR_CONFIG,
+        )
+        explanation(EXPLANATIONS["plot_c_v2_intro"], variant="plot")
+    else:
+        st.plotly_chart(
+            plots.plot_c_beam_diameter_breakdown(sweep),
+            use_container_width=True,
+            config=PLOTLY_MODEBAR_CONFIG,
+        )
+        explanation(EXPLANATIONS["plot_c_intro"], variant="plot")
     st.plotly_chart(
         plots.plot_d_blooming_distortion_number(
             sweep, reference_range=reference_range,

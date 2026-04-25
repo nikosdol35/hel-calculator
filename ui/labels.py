@@ -862,6 +862,16 @@ EXPLANATIONS: dict[str, str] = {
         "dominates; at long range turbulence and jitter grow fastest, "
         "with blooming kicking in once the on-path power density is high."
     ),
+    "plot_c_v2_intro": (
+        "This chart shows how the beam spot at the target tightens as the "
+        "target closes during the engagement. The horizontal reference is "
+        "the aimpoint bucket diameter; the amber band marks the part of "
+        "the trajectory where the spot is wider than the bucket and most "
+        "of the beam is missing the aimpoint. As the target gets closer, "
+        "the diffraction-limited spot shrinks and the spot eventually "
+        "fits inside the bucket — at which point on-target intensity "
+        "rises rapidly."
+    ),
     "plot_d_intro": (
         "This chart shows the thermal-blooming distortion number across "
         "range. Below the green band the air doesn't heat enough to bend "
