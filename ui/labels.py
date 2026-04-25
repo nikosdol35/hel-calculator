@@ -862,6 +862,17 @@ EXPLANATIONS: dict[str, str] = {
         "dominates; at long range turbulence and jitter grow fastest, "
         "with blooming kicking in once the on-path power density is high."
     ),
+    "plot_h_intro": (
+        "This is the engagement second-by-second. The top panel shows "
+        "how the slant range to the target shrinks through the "
+        "engagement; the second panel shows the on-target irradiance "
+        "rising as the spot tightens at closer ranges; the third panel "
+        "shows the front-face temperature climbing toward the "
+        "material's failure threshold; and the bottom panel shows the "
+        "cumulative absorbed energy. The vertical green dashed line on "
+        "every panel marks the kill moment — when the surface first "
+        "reaches the failure temperature."
+    ),
     "plot_c_v2_intro": (
         "This chart shows how the beam spot at the target tightens as the "
         "target closes during the engagement. The horizontal reference is "

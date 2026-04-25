@@ -1733,6 +1733,226 @@ def plot_c_spot_tightening_through_trajectory(
     return fig
 
 
+# ---------------------------------------------------------------------------
+# Plot H — Engagement profile timeline (SPEC v2.0 §8.3).
+# Headline new visualization for the trajectory model: shows the
+# anatomy of one engagement second by second. Four stacked panels
+# share a single time x-axis: trajectory R(t), on-target irradiance,
+# surface temperature with T_fail reference, and cumulative absorbed
+# energy. A vertical dashed line at the kill moment crosses every
+# panel so the eye instantly locates where the engagement closed.
+# ---------------------------------------------------------------------------
+
+def plot_h_engagement_profile(result: dict | None) -> go.Figure:
+    """Engagement profile vs time — 4-panel multi-subplot figure.
+
+    Panel 1 — R(t): trajectory slant range, log y-axis.
+    Panel 2 — I_peak(t) and I_avg_aim(t): irradiance climbing as the
+             target closes (W/cm² for display).
+    Panel 3 — T_surface(t): heat-solver surface temperature vs time
+             (°C), with horizontal T_fail reference and a vertical
+             kill-moment marker.
+    Panel 4 — E(t) cumulative absorbed: integrated absorbed flux
+             (J/cm² for display), showing how much energy was
+             actually deposited by each instant.
+
+    All four panels share a single x-axis (engagement time, s) and
+    a vertical dashed line at the kill moment when one occurred.
+
+    Renders the always-render frame with the "infeasible geometry"
+    advisory when called with a v1.x result (no trajectory series)
+    or when the trajectory data is missing.
+    """
+    import plotly.graph_objects as go  # local re-import for symbol clarity
+    from plotly.subplots import make_subplots
+
+    height = 700  # taller than PLOT_HEIGHTS["hero"]; multi-panel
+    title = "Engagement profile — what happens during the engagement"
+
+    if (result is None
+            or "trajectory_t" not in result
+            or "trajectory_R" not in result
+            or "trajectory_I_peak" not in result
+            or "trajectory_t_pde" not in result
+            or "trajectory_T_surface" not in result
+            or "trajectory_E_cumulative" not in result):
+        return _empty_frame(
+            title=title,
+            xtitle="Engagement time (s)",
+            ytitle="(empty)",
+            advisory=ADVISORY["infeasible_geometry"],
+            height=height,
+        )
+
+    palette = _active_palette()
+    t_traj = list(result["trajectory_t"])
+    R_traj = list(result["trajectory_R"])
+    I_peak_traj = list(result["trajectory_I_peak"])
+    I_avg_traj = list(result.get("trajectory_I_avg_aim", I_peak_traj))
+    t_pde = list(result["trajectory_t_pde"])
+    T_surface = list(result["trajectory_T_surface"])
+    E_cum = list(result["trajectory_E_cumulative"])
+
+    if not t_traj or not t_pde:
+        return _empty_frame(
+            title=title,
+            xtitle="Engagement time (s)",
+            ytitle="(empty)",
+            advisory=ADVISORY["infeasible_geometry"],
+            height=height,
+        )
+
+    # Convert SI to display units.
+    R_m = R_traj  # already metres; plot in m to keep log scale clean
+    I_peak_wpcm2 = [v * 1e-4 for v in I_peak_traj]
+    I_avg_wpcm2 = [v * 1e-4 for v in I_avg_traj]
+    T_surface_C = [v - 273.15 for v in T_surface]
+    E_cum_jpcm2 = [v * 1e-4 for v in E_cum]
+
+    # T_fail reference (°C) — drawn as a horizontal line on Panel 3.
+    # Look up from the M8 material table via the merged result. The
+    # orchestrator includes failure_mode but not T_fail directly; we
+    # peek at by_module's M8 outputs which carry the surface_peak
+    # and use it as a rough proxy. For the cleanest reference, the
+    # plot consumes T_surface_peak which equals T_fail at the kill
+    # moment by construction. None when there's no kill.
+    T_fail_C: float | None
+    if result.get("failure_mode") in ("melt", "decomposition", "vent"):
+        T_fail_C = float(result.get("T_surface_peak", 0.0)) - 273.15
+    else:
+        T_fail_C = None
+
+    # Kill marker — vertical dashed line on every panel.
+    tau_BT = result.get("tau_BT")
+    R_at_kill = result.get("R_at_kill")
+    kill_t: float | None = (
+        float(tau_BT) if (
+            tau_BT is not None
+            and result.get("failure_mode") in ("melt", "decomposition", "vent")
+        ) else None
+    )
+
+    fig = make_subplots(
+        rows=4, cols=1, shared_xaxes=True,
+        vertical_spacing=0.05,
+        subplot_titles=(
+            "Trajectory — slant range (m)",
+            "On-target irradiance (W/cm²)",
+            "Front-face temperature (°C)",
+            "Cumulative absorbed energy (J/cm²)",
+        ),
+    )
+
+    # Panel 1 — R(t)
+    s0 = _series_style(0, palette)
+    fig.add_trace(
+        go.Scatter(
+            x=t_traj, y=R_m,
+            mode="lines+markers",
+            name="Slant range",
+            line=s0["line"], marker=s0["marker"],
+            hovertemplate="t %{x:.2f} s · R %{y:.0f} m<extra></extra>",
+            showlegend=False,
+        ),
+        row=1, col=1,
+    )
+
+    # Panel 2 — I_peak and I_avg_aim
+    s1 = _series_style(1, palette)
+    fig.add_trace(
+        go.Scatter(
+            x=t_traj, y=I_peak_wpcm2,
+            mode="lines+markers",
+            name="I_peak",
+            line=s0["line"], marker=s0["marker"],
+            hovertemplate="t %{x:.2f} s · I_peak %{y:.2g} W/cm²<extra></extra>",
+        ),
+        row=2, col=1,
+    )
+    fig.add_trace(
+        go.Scatter(
+            x=t_traj, y=I_avg_wpcm2,
+            mode="lines+markers",
+            name="I_avg_aim",
+            line=s1["line"], marker=s1["marker"],
+            hovertemplate="t %{x:.2f} s · I_avg %{y:.2g} W/cm²<extra></extra>",
+        ),
+        row=2, col=1,
+    )
+
+    # Panel 3 — T_surface(t)
+    s2 = _series_style(2, palette)
+    fig.add_trace(
+        go.Scatter(
+            x=t_pde, y=T_surface_C,
+            mode="lines",
+            name="Surface T",
+            line=s2["line"],
+            hovertemplate="t %{x:.2f} s · T %{y:.0f} °C<extra></extra>",
+            showlegend=False,
+        ),
+        row=3, col=1,
+    )
+    if T_fail_C is not None:
+        fig.add_hline(
+            y=T_fail_C, line=dict(
+                color=palette["status.error"], width=1.5, dash="dash",
+            ),
+            annotation_text=f"T_fail ({T_fail_C:.0f} °C)",
+            annotation_position="top right",
+            annotation_font=dict(color=palette["fg.secondary"], size=11),
+            row=3, col=1,
+        )
+
+    # Panel 4 — E_cumulative(t)
+    fig.add_trace(
+        go.Scatter(
+            x=t_pde, y=E_cum_jpcm2,
+            mode="lines",
+            name="E cumulative",
+            line=s0["line"],
+            hovertemplate=(
+                "t %{x:.2f} s · E %{y:.2g} J/cm²<extra></extra>"
+            ),
+            showlegend=False,
+        ),
+        row=4, col=1,
+    )
+
+    # Kill-moment vertical dashed line on every panel.
+    if kill_t is not None:
+        kill_label = (
+            f"Kill at t = {kill_t:.2f} s"
+            + (f", R = {R_at_kill:.0f} m" if R_at_kill is not None else "")
+        )
+        for row_idx in (1, 2, 3, 4):
+            fig.add_vline(
+                x=kill_t,
+                line=dict(color=palette["status.ok"], width=1.5, dash="dash"),
+                annotation_text=kill_label if row_idx == 1 else None,
+                annotation_position="top right" if row_idx == 1 else None,
+                annotation_font=dict(
+                    color=palette["fg.secondary"], size=11,
+                ) if row_idx == 1 else None,
+                row=row_idx, col=1,
+            )
+
+    fig.update_layout(
+        title=title,
+        height=height,
+        hovermode="x unified",
+        showlegend=True,
+        legend=dict(
+            orientation="h", yanchor="bottom", y=1.02,
+            xanchor="right", x=1.0,
+        ),
+    )
+    # Panel 1 log y so 100 m and 5 km both read cleanly.
+    fig.update_yaxes(type="log", row=1, col=1)
+    fig.update_xaxes(title_text="Engagement time (s)", row=4, col=1)
+    return fig
+
+
 __all__ = [
     "plot_a_on_target_performance",
     "plot_b_time_to_burnthrough",
@@ -1741,6 +1961,7 @@ __all__ = [
     "plot_d_blooming_distortion_number",
     "plot_e_engagement_margin_vs_range",
     "plot_g_spot_vs_bucket",
+    "plot_h_engagement_profile",
     "plot_overview_dwell_vs_burnthrough",
     "plot_target_temperature_envelope",
     "plot_target_material_comparison",

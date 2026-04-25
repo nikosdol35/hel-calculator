@@ -168,6 +168,14 @@ def compute(inputs: dict) -> dict:
         R_of_t_in if callable(R_of_t_in) else None
     )
 
+    # PR 8 — optional trajectory recording. When ``record_trajectory``
+    # is True, M8 collects (t, T_surface, E_cumulative) samples every
+    # ~_TRAJECTORY_SAMPLE_DT_S of engagement time and emits them in
+    # the result dict. Plot H consumes these for the engagement-
+    # profile timeline. Default False keeps the v1.x scalar-output
+    # contract unchanged.
+    record_trajectory = bool(inputs.get("record_trajectory", False))
+
     assumptions_flagged: list[str] = []
 
     # A_λ: user override or table lookup
@@ -222,7 +230,21 @@ def compute(inputs: dict) -> dict:
 
     E_cumulative_absorbed = 0.0  # J/m² absorbed integrated over the run
 
-    for _step in range(max_steps):
+    # Trajectory-recording state (PR 8). Sample every ~50 ms of
+    # engagement time so the time series has ~80 points across a
+    # 4-second engagement (small enough for plotting + Streamlit
+    # serialisation; large enough to show the temperature ramp shape).
+    _TRAJECTORY_SAMPLE_DT_S = 0.050
+    sample_stride_steps = max(1, int(_TRAJECTORY_SAMPLE_DT_S / dt))
+    traj_t_pde: list[float] = []
+    traj_T_surface: list[float] = []
+    traj_E_cumulative: list[float] = []
+    if record_trajectory:
+        traj_t_pde.append(0.0)
+        traj_T_surface.append(float(T[0]))
+        traj_E_cumulative.append(0.0)
+
+    for step_index, _step in enumerate(range(max_steps)):
         T_s = float(T[0])
 
         # SPEC v2.0 — flux at current engagement time.
@@ -294,6 +316,14 @@ def compute(inputs: dict) -> dict:
         # `absorbed_flux * tau_BT` identity which assumed constant flux.
         E_cumulative_absorbed += max(absorbed_flux, 0.0) * dt
 
+        # PR 8 — record trajectory series at sparse intervals for
+        # Plot H. Sub-sampling rather than recording every PDE step
+        # keeps storage bounded (~80-200 points per engagement).
+        if record_trajectory and (step_index + 1) % sample_stride_steps == 0:
+            traj_t_pde.append(t)
+            traj_T_surface.append(float(T[0]))
+            traj_E_cumulative.append(E_cumulative_absorbed)
+
         if T[0] > T_surface_peak:
             T_surface_peak = float(T[0])
 
@@ -357,7 +387,16 @@ def compute(inputs: dict) -> dict:
             "timesteps"
         )
 
-    return {
+    # PR 8 — finalise the trajectory recording with the last state
+    # so the series ends at tau_BT (or the engagement-end moment).
+    if record_trajectory:
+        last_t = tau_BT if tau_BT is not None else t
+        if not traj_t_pde or traj_t_pde[-1] < last_t - 1e-12:
+            traj_t_pde.append(last_t)
+            traj_T_surface.append(float(T[0]))
+            traj_E_cumulative.append(E_cumulative_absorbed)
+
+    result: dict = {
         "tau_BT": tau_BT,
         "T_surface_peak": T_surface_peak,
         "E_delivered": E_delivered,
@@ -365,6 +404,11 @@ def compute(inputs: dict) -> dict:
         "R_at_kill": R_at_kill,
         "assumptions_flagged": assumptions_flagged,
     }
+    if record_trajectory:
+        result["trajectory_t_pde"] = tuple(traj_t_pde)
+        result["trajectory_T_surface"] = tuple(traj_T_surface)
+        result["trajectory_E_cumulative"] = tuple(traj_E_cumulative)
+    return result
 
 
 def _lookup_A_lambda(material: str, wavelength: float) -> tuple[float, str | None]:
