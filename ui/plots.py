@@ -1734,6 +1734,107 @@ def plot_c_spot_tightening_through_trajectory(
 
 
 # ---------------------------------------------------------------------------
+# Plot K — Operational envelope heatmap (SPEC v2.0 §8.6).
+# Strategic 2D view: for every (R_detect, v_tgt) pair on a 10x10 grid,
+# render the engagement margin as a colour-coded cell. Compute-on-
+# click in the UI (~100 orchestrator runs, ~100 s on first click,
+# instant subsequent renders via Streamlit cache). Tells the operator
+# at a glance where the system's engagement region is.
+# ---------------------------------------------------------------------------
+
+def plot_k_operational_envelope(envelope) -> go.Figure:
+    """Operational-envelope heatmap.
+
+    Inputs an ``EnvelopeGrid`` (from
+    ``physics.operational_envelope.compute_operational_envelope``)
+    and renders a 2D heatmap with R_detect on a log x-axis, v_tgt on
+    a linear y-axis, and per-cell colour = engagement margin (%).
+    Uses red→white→green for the diverging colour scale around the
+    0 % zero-crossing. A red dot annotates the user's current
+    scenario ("you are here").
+
+    Empty / None envelope → always-render frame fallback.
+    """
+    height = PLOT_HEIGHTS["hero"]
+    xtitle = "Detection range R_detect (km, log)"
+    ytitle = "Target velocity v_tgt (m/s)"
+    title = "Operational envelope — engagement margin map"
+
+    if envelope is None:
+        return _empty_frame(
+            title=title, xtitle=xtitle, ytitle=ytitle,
+            advisory=ADVISORY["infeasible_geometry"], height=height,
+        )
+
+    palette = _active_palette()
+    R_km = [r / 1000.0 for r in envelope.R_detect_axis]
+    v = list(envelope.v_tgt_axis)
+    grid = [list(row) for row in envelope.margin_grid]
+
+    # Diverging colour scale centred on 0 % margin: red below, green
+    # above, with the zero-crossing pinned to the centre by setting
+    # ``zmid=0`` on the heatmap. The amber band 0–30 % is implicit
+    # in the colour interpolation; the per-cell hover always reads
+    # the verdict tier explicitly.
+    fig = go.Figure(data=go.Heatmap(
+        x=R_km,
+        y=v,
+        z=grid,
+        zmin=-100.0,
+        zmid=0.0,
+        zmax=200.0,
+        colorscale=[
+            [0.0, palette["status.error"]],
+            [1.0 / 3.0, palette["status.error"]],   # < 0% all red
+            [1.0 / 3.0 + 0.001, palette["status.warn"]],
+            [(1.0 / 3.0) + (30.0 / 300.0),  # 0..30% amber band
+             palette["status.warn"]],
+            [(1.0 / 3.0) + (30.0 / 300.0) + 0.001, palette["status.ok"]],
+            [1.0, palette["status.ok"]],
+        ],
+        hovertemplate=(
+            "R_detect %{x:.2f} km · v_tgt %{y:.0f} m/s · "
+            "margin %{z:+.0f}%<extra></extra>"
+        ),
+        colorbar=dict(
+            title=dict(text="Margin (%)"),
+            tickvals=[-100, 0, 30, 200],
+            ticktext=["−100", "0", "+30", "+200"],
+        ),
+    ))
+
+    # "You are here" — current-scenario reference dot.
+    if envelope.current_R_detect > 0 and envelope.current_v_tgt > 0:
+        fig.add_trace(go.Scatter(
+            x=[envelope.current_R_detect / 1000.0],
+            y=[envelope.current_v_tgt],
+            mode="markers+text",
+            text=["You are here"],
+            textposition="top right",
+            marker=dict(
+                size=14, color=palette["fg.primary"],
+                line=dict(color=palette["bg.base"], width=2),
+                symbol="star",
+            ),
+            name="Current scenario",
+            hovertemplate=(
+                "Current scenario · R_detect %{x:.2f} km · "
+                "v_tgt %{y:.0f} m/s<extra></extra>"
+            ),
+            showlegend=False,
+        ))
+
+    fig.update_layout(
+        title=title,
+        height=height,
+        hovermode="closest",
+    )
+    fig.update_xaxes(title_text=xtitle, type="log")
+    fig.update_yaxes(title_text=ytitle)
+    return fig
+
+
+# ---------------------------------------------------------------------------
 # Plot J — Cumulative energy & useful-work diagnostic (SPEC v2.0 §8.5).
 # Reveals how much of the engagement window was actually delivering
 # damaging irradiance versus being too far out to matter. Single
@@ -2278,6 +2379,7 @@ __all__ = [
     "plot_h_engagement_profile",
     "plot_i_outcome_map_vs_R_detect",
     "plot_j_cumulative_energy_diagnostic",
+    "plot_k_operational_envelope",
     "plot_overview_dwell_vs_burnthrough",
     "plot_target_temperature_envelope",
     "plot_target_material_comparison",
