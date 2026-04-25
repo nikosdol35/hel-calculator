@@ -83,21 +83,22 @@ require_login()
 # ---------------------------------------------------------------------------
 # Page registration + dispatch.
 # ---------------------------------------------------------------------------
-# Streamlit's ``st.navigation`` looks up each page script by relative
-# path (relative to the working directory, which Streamlit sets to the
-# repo root when launched as ``streamlit run ui/app.py``). The default
-# page renders when the user lands on the bare URL.
+# Streamlit's ``st.navigation`` looks up each page script by a path
+# relative to the entrypoint script's directory. The default page
+# renders when the user lands on the bare URL.
 hel_page = st.Page(
     "pages/hel_calculator.py",
     title="HEL Calculator",
     icon=":material/cell_tower:",
     default=True,
 )
+dri_page = st.Page(
+    "pages/dri_analyzer.py",
+    title="DRI Analyzer",
+    icon=":material/photo_camera:",
+)
 
-# DRI page is added in PR 2 of the multipage campaign. Until then the
-# DRI Analyzer ships as a tab inside the HEL page so the user-visible
-# behaviour is unchanged from the pre-refactor app.
-pages = [hel_page]
+pages = [hel_page, dri_page]
 
 pg = st.navigation(pages)
 pg.run()

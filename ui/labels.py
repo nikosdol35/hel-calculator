@@ -85,10 +85,9 @@ TAB_LABELS: dict[str, str] = {
     # PR 1 of the math-tab plan (docs/math_tab_plan_2026-04-25.md). Tab is
     # the rightmost so it reads as "results, then the receipts behind them."
     "math":           "How it's calculated",
-    # DRI Analyzer (Detection / Recognition / Identification) — independent
-    # of HEL physics; passive-sensor analysis. Last in the strip so the
-    # HEL workflow reads first.
-    "dri_analyzer":   "DRI Analyzer",
+    # Multipage PR 2 (2026-04-26): "dri_analyzer" was here as an
+    # eighth tab; it now lives on its own page (ui/pages/dri_analyzer.py)
+    # registered alongside the HEL Calculator via st.navigation.
 }
 
 
@@ -266,6 +265,11 @@ INPUT_LABELS: dict[str, LabelEntry] = {
     },
 
     # -- DRI Analyzer Section 7 — Sensor (independent of HEL chain) -----------
+    "dri_preset": {
+        "label":   "Sensor preset",
+        "tooltip": "Load a defensible reference sensor configuration. Selecting a named preset overwrites every DRI sidebar field; selecting Custom leaves them as you have them.",
+        "unit":    "",
+    },
     "dri_n_pixels_h": {
         "label":   "Resolution (horizontal)",
         "tooltip": "Number of pixels across the sensor's horizontal axis. Drives instantaneous-FOV per pixel.",
@@ -779,6 +783,26 @@ PRESET_PICKER_HELP: str = (
     "Load a defensible reference input set. Selecting any named scenario "
     "overwrites every sidebar field; selecting Custom leaves your current "
     "edits in place."
+)
+
+
+# DRI Analyzer sensor-preset dropdown (multipage PR 2). Five sensor-class
+# starter sets covering the common civilian / defence configurations,
+# plus Custom for free-form editing.
+DRI_PRESET_LABELS: dict[str, str] = {
+    "eo_daytime_surveillance":    "EO daytime surveillance",
+    "eo_long_range_surveillance": "EO long-range surveillance",
+    "swir_night_vision":          "SWIR night-vision (1.55 µm)",
+    "mwir_thermal_imager":        "MWIR thermal imager (4 µm)",
+    "lwir_thermal_imager":        "LWIR thermal imager (10 µm)",
+    "custom":                     "Custom",
+}
+
+DRI_PRESET_PICKER_LABEL: str = "Sensor preset"
+DRI_PRESET_PICKER_HELP: str = (
+    "Load a defensible reference sensor configuration. Selecting any "
+    "named preset overwrites every DRI sidebar field; selecting Custom "
+    "leaves your current edits in place."
 )
 
 
