@@ -569,6 +569,13 @@ def render_tab_engagement(
             config=PLOTLY_MODEBAR_CONFIG,
         )
         explanation(EXPLANATIONS["plot_i_intro"], variant="plot")
+        # SPEC v2.0 §8.5 — Plot J (cumulative-energy diagnostic).
+        st.plotly_chart(
+            plots.plot_j_cumulative_energy_diagnostic(result),
+            use_container_width=True,
+            config=PLOTLY_MODEBAR_CONFIG,
+        )
+        explanation(EXPLANATIONS["plot_j_intro"], variant="plot")
     st.plotly_chart(
         plots.plot_g_spot_vs_bucket(sweep, d_aim=d_aim_si),
         use_container_width=True,

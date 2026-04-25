@@ -1734,6 +1734,171 @@ def plot_c_spot_tightening_through_trajectory(
 
 
 # ---------------------------------------------------------------------------
+# Plot J — Cumulative energy & useful-work diagnostic (SPEC v2.0 §8.5).
+# Reveals how much of the engagement window was actually delivering
+# damaging irradiance versus being too far out to matter. Single
+# cumulative-energy curve over engagement time, with a horizontal
+# reference at the lumped-mass failure fluence and a shaded "useful
+# zone" from the time the I_avg_aim first crosses a usefulness
+# threshold up to the kill moment.
+# ---------------------------------------------------------------------------
+
+# Threshold on I_avg_aim (W/m²) above which the engagement is
+# "delivering useful work" — below it the radiation+conv losses on
+# the surface dominate the absorbed flux for typical low-A_λ
+# materials and the heat balance barely tilts toward burn-through.
+# 1 W/cm² = 1e4 W/m² is the engineering rule of thumb.
+_USEFUL_FLUX_THRESHOLD_WPM2 = 1.0e4
+
+
+def plot_j_cumulative_energy_diagnostic(
+    result: dict | None,
+) -> go.Figure:
+    """Cumulative absorbed energy through the engagement.
+
+    Plots ``trajectory_E_cumulative`` (absorbed J/m², converted to
+    J/cm² for display) versus engagement time. A horizontal reference
+    line at the lumped-mass failure fluence ``E_fail = ρ·c_p·thickness·
+    (T_fail − T_amb)`` (looked up from ``physics.m8_material_tables``)
+    shows the energy budget needed to burn through. A shaded "useful
+    zone" between the moment ``I_avg_aim`` first exceeds 1 W/cm² and
+    the kill moment makes visible how much of the engagement window
+    was actually doing damaging work.
+
+    Falls back to the always-render frame for v1.x results (no
+    trajectory series).
+    """
+    height = PLOT_HEIGHTS["default"]
+    xtitle = "Engagement time (s)"
+    ytitle = "Cumulative absorbed energy (J/cm²)"
+    title = "Energy delivered & useful-work window"
+
+    if (result is None
+            or "trajectory_t_pde" not in result
+            or "trajectory_E_cumulative" not in result):
+        return _empty_frame(
+            title=title, xtitle=xtitle, ytitle=ytitle,
+            advisory=ADVISORY["infeasible_geometry"], height=height,
+        )
+
+    t_pde = list(result["trajectory_t_pde"])
+    E_cum = list(result["trajectory_E_cumulative"])
+    if not t_pde or not E_cum:
+        return _empty_frame(
+            title=title, xtitle=xtitle, ytitle=ytitle,
+            advisory=ADVISORY["infeasible_geometry"], height=height,
+        )
+
+    palette = _active_palette()
+    E_cum_jpcm2 = [v * 1e-4 for v in E_cum]  # J/m² → J/cm²
+
+    # Lumped-mass failure-fluence reference. Look up material props
+    # via m8_material_tables; degenerate gracefully if the material
+    # is missing (defensive).
+    E_fail_jpcm2: float | None = None
+    material = result.get("material")
+    thickness = result.get("thickness")
+    T_amb = result.get("T_ambient", 293.0)
+    try:
+        from physics.m8_material_tables import MATERIAL_PROPERTIES
+        if material in MATERIAL_PROPERTIES and thickness:
+            props = MATERIAL_PROPERTIES[material]
+            T_fail = props["T_fail"]
+            E_fail_jpm2 = (
+                props["rho"] * props["c_p"]
+                * float(thickness) * (T_fail - float(T_amb))
+            )
+            E_fail_jpcm2 = E_fail_jpm2 * 1e-4
+    except Exception:
+        E_fail_jpcm2 = None  # don't break the plot on lookup failure
+
+    # Useful-zone bounds (engagement-time axis):
+    #   start = first sub-sample where I_avg_aim crosses the threshold
+    #   end   = kill moment (tau_BT) when failure_mode is a kill verdict
+    useful_start_t: float | None = None
+    useful_end_t: float | None = None
+    traj_t = list(result.get("trajectory_t", []))
+    traj_I_avg = list(result.get("trajectory_I_avg_aim", []))
+    if traj_t and traj_I_avg:
+        for ti, Ii in zip(traj_t, traj_I_avg):
+            if Ii >= _USEFUL_FLUX_THRESHOLD_WPM2:
+                useful_start_t = float(ti)
+                break
+    failure_mode = result.get("failure_mode")
+    tau_BT = result.get("tau_BT")
+    if (failure_mode in ("melt", "decomposition", "vent")
+            and tau_BT is not None):
+        useful_end_t = float(tau_BT)
+
+    fig = go.Figure()
+
+    # Useful-zone shaded background.
+    if (useful_start_t is not None
+            and useful_end_t is not None
+            and useful_end_t > useful_start_t):
+        ok_rgba = _hex_to_rgba(palette["status.ok"], alpha=0.12)
+        fig.add_vrect(
+            x0=useful_start_t, x1=useful_end_t,
+            fillcolor=ok_rgba, line_width=0,
+            annotation_text=(
+                f"Useful zone "
+                f"({useful_end_t - useful_start_t:.2f} s; "
+                f"I_avg ≥ {_USEFUL_FLUX_THRESHOLD_WPM2 * 1e-4:.0f} "
+                f"W/cm²)"
+            ),
+            annotation_position="top left",
+            annotation_font=dict(color=palette["fg.secondary"], size=10),
+        )
+
+    # Cumulative absorbed-energy curve.
+    s0 = _series_style(0, palette)
+    fig.add_trace(
+        go.Scatter(
+            x=t_pde, y=E_cum_jpcm2,
+            mode="lines",
+            name="Cumulative absorbed energy",
+            line=dict(**{**s0["line"], "width": 2.5}),
+            hovertemplate=(
+                "t %{x:.2f} s · E %{y:.2g} J/cm²<extra></extra>"
+            ),
+        )
+    )
+
+    # Failure-fluence reference line (lumped-mass).
+    if E_fail_jpcm2 is not None and E_fail_jpcm2 > 0:
+        fig.add_hline(
+            y=E_fail_jpcm2,
+            line=dict(
+                color=palette["status.error"], width=1.5, dash="dash",
+            ),
+            annotation_text=(
+                f"E_fail (lumped-mass) ≈ {E_fail_jpcm2:.0f} J/cm²"
+            ),
+            annotation_position="bottom right",
+            annotation_font=dict(color=palette["fg.secondary"], size=11),
+        )
+
+    # Kill-moment vertical marker (when applicable).
+    if useful_end_t is not None:
+        fig.add_vline(
+            x=useful_end_t,
+            line=dict(color=palette["status.ok"], width=1.5, dash="dash"),
+            annotation_text=f"Kill at t = {useful_end_t:.2f} s",
+            annotation_position="top right",
+            annotation_font=dict(color=palette["fg.secondary"], size=11),
+        )
+
+    fig.update_layout(
+        title=title,
+        height=height,
+        hovermode="x unified",
+    )
+    fig.update_xaxes(title_text=xtitle)
+    fig.update_yaxes(title_text=ytitle)
+    return fig
+
+
+# ---------------------------------------------------------------------------
 # Plot I — Outcome map vs detection range (SPEC v2.0 §8.4).
 # The operational answer to "at what detection range does the
 # engagement actually close?" One curve of engagement-margin (%) vs
@@ -2112,6 +2277,7 @@ __all__ = [
     "plot_g_spot_vs_bucket",
     "plot_h_engagement_profile",
     "plot_i_outcome_map_vs_R_detect",
+    "plot_j_cumulative_energy_diagnostic",
     "plot_overview_dwell_vs_burnthrough",
     "plot_target_temperature_envelope",
     "plot_target_material_comparison",

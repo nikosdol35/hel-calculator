@@ -862,6 +862,17 @@ EXPLANATIONS: dict[str, str] = {
         "dominates; at long range turbulence and jitter grow fastest, "
         "with blooming kicking in once the on-path power density is high."
     ),
+    "plot_j_intro": (
+        "This chart shows how much of the engagement window was "
+        "actually delivering useful damage. The rising curve is the "
+        "total absorbed energy versus time; the dashed red reference "
+        "is roughly how much energy would be needed to heat the "
+        "target through to its failure temperature. The green-shaded "
+        "useful zone marks the part of the engagement where the "
+        "irradiance was high enough to matter — earlier than that "
+        "the target was too far away for the laser to deliver real "
+        "damage."
+    ),
     "plot_i_intro": (
         "This chart answers the question 'at what detection range "
         "does the engagement actually close?' The curve is the "
