@@ -374,6 +374,11 @@ OUTPUT_LABELS: dict[str, LabelEntry] = {
         "tooltip": "Slant range at the moment the engagement window ends — the user's standoff range R_min for tracker-supported engagements; the unchanged slant range in backward-compat mode.",
         "unit":    "km",
     },
+    "R_at_kill": {
+        "label":   "Slant range at kill",
+        "tooltip": "Slant range at the moment burn-through happens. None when no kill occurs within the engagement window.",
+        "unit":    "km",
+    },
     "margin": {
         "label":   "Engagement margin",
         "tooltip": "(available_dwell − time-to-burn-through) / time-to-burn-through. Positive means dwell exceeds the lethality requirement.",
