@@ -660,15 +660,13 @@ def section_9_dri_target(initial: dict | None = None) -> dict:
 # ---------------------------------------------------------------------------
 
 
-def collect_all(initial: dict | None = None) -> dict:
-    """Render all six HEL sidebar sections plus the three DRI sections,
-    returning the merged ``user_inputs`` dict.
+def collect_hel(initial: dict | None = None) -> dict:
+    """Render the six HEL sidebar sections only and return the merged dict.
 
-    ``initial`` is the URL-decoded prefill dict from ``ui/app.py``'s
-    session-state latch. When ``None``, each section falls back to its
-    SPEC §5.1 default. Section dicts have disjoint key spaces by
-    contract (DRI inputs use the ``dri_`` prefix), so merge order does
-    not lose any field.
+    Used by the HEL Calculator page in the multipage refactor — keeps
+    the HEL sidebar uncluttered with DRI inputs. Sections 1–6:
+    laser source, beam director, engagement geometry, atmosphere,
+    target & aimpoint, system resources.
     """
     merged: dict = {}
     merged.update(section_1_laser_source(initial))
@@ -677,8 +675,38 @@ def collect_all(initial: dict | None = None) -> dict:
     merged.update(section_4_atmosphere(initial))
     merged.update(section_5_target_aimpoint(initial))
     merged.update(section_6_system_resources(initial))
-    # DRI Analyzer (independent of HEL chain) — three new collapsible sections.
+    return merged
+
+
+def collect_dri(initial: dict | None = None) -> dict:
+    """Render the three DRI sidebar sections only and return the merged dict.
+
+    Used by the DRI Analyzer page in the multipage refactor — keeps
+    the DRI sidebar uncluttered with HEL inputs. Sections 7–9:
+    sensor, atmosphere, target & criteria.
+    """
+    merged: dict = {}
     merged.update(section_7_dri_sensor(initial))
     merged.update(section_8_dri_atmosphere(initial))
     merged.update(section_9_dri_target(initial))
     return merged
+
+
+def collect_all(initial: dict | None = None) -> dict:
+    """Render all six HEL sidebar sections plus the three DRI sections,
+    returning the merged ``user_inputs`` dict.
+
+    ``initial`` is the URL-decoded prefill dict from the page script's
+    session-state latch. When ``None``, each section falls back to its
+    SPEC §5.1 default. Section dicts have disjoint key spaces by
+    contract (DRI inputs use the ``dri_`` prefix), so merge order does
+    not lose any field.
+
+    In the multipage refactor each page calls only the half it needs
+    (``collect_hel`` / ``collect_dri``); ``collect_all`` is preserved
+    as a convenience for any caller that wants the unified view.
+    """
+    return {
+        **collect_hel(initial),
+        **collect_dri(initial),
+    }
