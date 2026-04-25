@@ -64,6 +64,12 @@ SCANNED_FILES: tuple[Path, ...] = (
     _UI_DIR / "components.py",
     _UI_DIR / "plots.py",
     _UI_DIR / "presets.py",
+    # Multipage PR 3 (2026-04-26): the page scripts under ui/pages/
+    # render their own sidebar / main-area copy and so go through the
+    # same forbidden-token gate as the rest of the user-visible
+    # surfaces.
+    _UI_DIR / "pages" / "hel_calculator.py",
+    _UI_DIR / "pages" / "dri_analyzer.py",
     # Math-tab plan PR 1 (docs/math_tab_plan_2026-04-25.md): the
     # glossary holds concept-level definitions and is plain-language
     # copy, so it goes through the same forbidden-token gate as the
@@ -267,6 +273,10 @@ def test_scan_list_covers_phase3_pr6_surface() -> None:
         # Math-tab PR 1 — glossary only; math_content.py is exempted
         # because its citation field is intentionally citation-heavy.
         "glossary.py",
+        # Multipage PR 3 (2026-04-26) — DRI Analyzer is now a sibling
+        # page. Both page scripts render their own user-visible copy
+        # and so go through the same forbidden-token gate.
+        "hel_calculator.py", "dri_analyzer.py",
     }
     actual_names = {p.name for p in SCANNED_FILES}
     assert expected_names == actual_names, (

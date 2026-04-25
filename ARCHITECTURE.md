@@ -109,20 +109,25 @@ hel-calculator/
 │   ├── test_copy_style.py               ← Copy-style lint: forbidden tokens in user-visible ui/ strings (v1.6)
 │   ├── test_dri_analyzer.py             ← DRI physics core (sensor-side analysis)
 │   ├── test_plot_dri_fov_sweep.py       ← DRI FOV-sweep plot smoke + structural
-│   └── test_plot_dri_optional.py        ← DRI optional plots (target size, atm transmission, Cn², heatmap)
+│   ├── test_plot_dri_optional.py        ← DRI optional plots (target size, atm transmission, Cn², heatmap)
+│   └── test_pages_smoke.py              ← Multipage refactor smoke + structural invariants
 │
-├── ui/                             ← LAYER 3: Streamlit interface
+├── ui/                             ← LAYER 3: Streamlit interface (multipage from 2026-04-26)
 │   ├── __init__.py
-│   ├── app.py                      ← Streamlit entry point (run with `streamlit run`)
-│   ├── auth.py                     ← Shared-credential login gate
-│   ├── panels.py                   ← The 6 input sections (sidebar)
-│   ├── outputs.py                  ← Numeric-panel renderers (per-tab)
+│   ├── app.py                      ← Thin entry point: page config + theme + auth + st.navigation
+│   ├── pages/                      ← Per-tool page scripts dispatched by st.navigation
+│   │   ├── __init__.py
+│   │   ├── hel_calculator.py       ← HEL Calculator page (six HEL sections, seven HEL tabs)
+│   │   └── dri_analyzer.py         ← DRI Analyzer page (three DRI sections, reactive)
+│   ├── auth.py                     ← Shared-credential login gate (covers both pages)
+│   ├── panels.py                   ← collect_hel / collect_dri / collect_all (sidebar input sections)
+│   ├── outputs.py                  ← Numeric-panel renderers (per-tab + DRI page)
 │   ├── plots.py                    ← Plotly chart constructors (shared template from theme.py)
 │   ├── theme.py                    ← Palette + CSS + Plotly template + font loader (v1.6)
 │   ├── components.py               ← metric_card / status_chip / section_header / skeleton_card / format_value / footer_strip (v1.6)
 │   ├── labels.py                   ← SPEC-key → UI-label → tooltip mapping (single source of truth, v1.6)
 │   ├── icons.py                    ← Lucide SVG inline helper (~12 icons bundled, v1.6)
-│   └── presets.py                  ← Named scenario dicts for sidebar preset dropdown (v1.6)
+│   └── presets.py                  ← HEL + DRI preset registries and apply_*_to_session_state helpers
 │
 ├── scripts/                        ← One-shot developer utilities (NOT in CI)
 │   └── check_contrast.py           ← WCAG-AA verifier for ui/theme.py palette pairs (v1.6)
@@ -329,18 +334,24 @@ M11's validation suite is NOT cached — it should re-run on demand every time t
 
 ## 6. UI Layer Structure
 
-### 6.1 `ui/app.py` — entry point
+### 6.1 `ui/app.py` — multipage entry point (2026-04-26 refactor)
 
-The one file Streamlit Cloud runs with `streamlit run ui/app.py`. Responsibilities:
+The one file Streamlit Cloud runs with `streamlit run ui/app.py`. As of the multipage refactor (2026-04-26), `app.py` is a thin shell that owns four cross-cutting concerns shared by every tool:
 
-1. Apply the app-wide theme via `ui.theme.apply(app_mode)` immediately after `st.set_page_config` (v1.6). The theme module injects the palette CSS, loads the Inter + JetBrains Mono font stack, and registers the shared Plotly template that every figure in `ui/plots.py` consumes. `app_mode` defaults to `'dark'` and is toggled by a sidebar footer control (per SPEC §5.2, §5.3 item 8).
-2. Check authentication (`ui/auth.py`).
-3. On first page load, decode any `st.query_params` present in the URL into an initial input dict (per SPEC §5.3 item 1); fall back to defaults for missing or malformed parameters and flag any out-of-range values for the diagnostics tab. Guard the decode with `st.session_state['_url_decoded']` so it runs exactly once per session (per SPEC v1.7 improvement #1).
-4. Lay out the page: **left sidebar** = preset dropdown (`ui.presets`) + six input sections (`ui.panels`) + "Run Analysis" button + "Validate" button + "Share this analysis" button + light/dark toggle; **main area** = `st.tabs([...])` with six tabs in SPEC §5.2 order (Overview / Engagement / Target effects / Safety / Atmosphere / Diagnostics); **footer** = a single-line provenance strip rendered by `ui.components.footer_strip()`.
-5. Wire up the "Run Analysis" button and per-tab result rendering; the click handler calls `physics.orchestrator.run_full_chain` via the `@st.cache_data`-wrapped helpers defined in §5.3 — the wrappers live in `app.py` (not in `orchestrator.py`) so the orchestrator stays pure Python and directly testable from `tests/`. The button wires the SPEC §5.3 item 9 compute-time-feedback sequence (button-disable pulse → thin progress bar → fade-in) via `ui.components.progress_bar()`.
-6. Wire up the "Share this analysis" sidebar button (per SPEC §5.3 item 7) which encodes the current input dict to `st.query_params` and renders the resulting URL in an `st.code(url)` block for manual copy (per SPEC v1.7 improvement #3).
+1. `sys.path` shim so `from physics import ...` resolves under Streamlit Cloud's invocation.
+2. `st.set_page_config(...)` (must be the first Streamlit call).
+3. Theme bootstrap via `ui.theme.apply(app_mode)`. The theme module injects the palette CSS, loads the Inter + JetBrains Mono font stack, and registers the shared Plotly template that every figure in `ui/plots.py` consumes. `app_mode` defaults to `'dark'` and is toggled by a per-page sidebar footer control.
+4. Auth gate via `ui.auth.require_login()` — one shared sign-in covers every page exposed by `st.navigation`.
 
-Total expected length: 100–160 lines (v1.6; expanded from 70–110 to absorb theme bootstrap, tab container wiring, and footer strip).
+After those four concerns are handled, `app.py` declares the pages and dispatches via Streamlit's native `st.navigation` API. Each page is a self-contained script under `ui/pages/` with its own sidebar, its own state, and its own content area; switching between pages preserves `st.session_state`.
+
+Two pages today:
+- **`ui/pages/hel_calculator.py`** — the HEL Calculator workflow (six HEL sidebar sections, preset dropdown, Run / Share / Validate buttons, the cached orchestrator chain, the seven-tab results stack). Page-scoped URL decode (`_url_decoded_hel`) reads non-`dri_*` query params; `dri_*` keys are skipped and decoded by the DRI page.
+- **`ui/pages/dri_analyzer.py`** — the DRI Analyzer (three DRI sidebar sections, sensor-preset dropdown, reactive recompute on every input edit, theme toggle). Page-scoped URL decode (`_url_decoded_dri`) reads only `dri_*` keys; share-URL button encodes only the DRI subset.
+
+Each page calls only the half of `panels` it needs (`panels.collect_hel` or `panels.collect_dri`), so a HEL-only user sees only HEL inputs and a DRI-only user sees only DRI inputs.
+
+Total expected length of `app.py`: ~70 lines (post-refactor — was 700+ lines pre-multipage).
 
 ### 6.2 `ui/auth.py` — login gate
 

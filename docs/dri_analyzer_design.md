@@ -388,9 +388,13 @@ docs/dri_analyzer_design.md      ← new (PR 4)
 
 ## 9 · UI layout
 
-### 9.1 — Sidebar (collapsed by default)
+> **Updated 2026-04-26 (multipage refactor).** The DRI Analyzer was originally specified as one tab inside the HEL Calculator. After three follow-up PRs (multipage PR 1 / 2 / 3) it lives on its own dedicated page under Streamlit's `st.navigation` system at `ui/pages/dri_analyzer.py`. This section reflects the post-multipage layout. The HEL Calculator page (`ui/pages/hel_calculator.py`) carries no DRI inputs at all; the DRI page carries no HEL inputs.
 
-Three new expanders below the existing six HEL sections:
+### 9.1 — DRI page sidebar
+
+The DRI page sidebar contains, top to bottom:
+
+**Sensor preset** dropdown — 5 starter sets (EO daytime surveillance · EO long-range surveillance · SWIR night-vision · MWIR thermal imager · LWIR thermal imager) plus Custom. Selecting any named preset overwrites every DRI sidebar field; Custom leaves the user's edits in place.
 
 **Expander: DRI sensor**
 - Resolution horizontal (px) — default 1920
@@ -412,7 +416,9 @@ Three new expanders below the existing six HEL sections:
 - Probability of discrimination — dropdown {50 %, 80 %, 95 %}
 - Johnson cycles override — three numeric inputs (D, R, I) — defaults 1.0 / 4.0 / 8.0
 
-### 9.2 — DRI tab content
+**Sidebar footer:** "Share this analysis" button (encodes only `dri_*` keys) and a dark / light theme toggle. **No Run button** — the DRI analysis is closed-form arithmetic (sub-100 ms full sweep) and recomputes reactively on every sidebar widget change.
+
+### 9.2 — DRI page main content
 
 ```
 ┌────────────────────────────────────────────────────────────────┐
