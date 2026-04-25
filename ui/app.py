@@ -137,6 +137,14 @@ def run_sweep_cached(frozen_inputs: tuple, ranges_m: tuple) -> list[dict]:
 
     Each sweep element is the merged-result dict with an extra
     ``"range"`` key so ``ui/plots`` can access the x-axis value directly.
+
+    **Tolerant of per-sample ValueErrors.** A single degenerate sample
+    (e.g. ``R_detect == R_min`` when in v2 trajectory mode → t_dwell=0
+    → M8 rejects) used to make the whole sweep raise and the engagement
+    tab show "No feasible engagement" on every plot. Now the bad sample
+    is skipped and the sweep returns the points that did succeed. If
+    *none* succeed the function still raises so the caller can fall
+    back to the empty-frame advisory.
     """
     base = dict(frozen_inputs)
     samples: list[dict] = []
@@ -144,10 +152,19 @@ def run_sweep_cached(frozen_inputs: tuple, ranges_m: tuple) -> list[dict]:
     # mode it varies R. Pick the right key based on what the inputs
     # carry.
     sweep_key = "R_detect" if "engagement_geometry" in base else "R"
+    last_exc: ValueError | None = None
     for R in ranges_m:
         inputs_at_R = {**base, sweep_key: R}
-        result = run_full_chain(inputs_at_R)
+        try:
+            result = run_full_chain(inputs_at_R)
+        except ValueError as exc:
+            # Skip degenerate sweep points — see docstring. Other
+            # samples may still produce useful curves.
+            last_exc = exc
+            continue
         samples.append({**result, "range": R})
+    if not samples and last_exc is not None:
+        raise last_exc
     return samples
 
 
@@ -475,11 +492,23 @@ except NotImplementedError as exc:
 R_selected = float(
     user_inputs.get("R_detect", user_inputs.get("R", 1500.0))
 )
-R_min = max(100.0, R_selected * 0.1)
-R_max = min(50_000.0, R_selected * 2.0)
+# SPEC v2.0: in trajectory mode the sweep MUST start strictly above
+# the user's standoff R_min — a sweep point at R_detect == R_min
+# yields t_dwell = 0 and M8 rejects the input ("t_dwell must be > 0").
+# Add a 1 m epsilon above R_min(input) so the sweep never touches the
+# degenerate boundary; cosmetic on the plot but prevents the whole
+# tab from collapsing to "No feasible engagement" when the lower
+# bound happens to coincide with R_min.
+_R_min_input = float(user_inputs.get("R_min", 0.0))
+R_low = max(100.0, R_selected * 0.1, _R_min_input + 1.0)
+R_high = min(50_000.0, R_selected * 2.0)
+# Guard: when R_selected is very close to R_min the upper bound can
+# fall below the lower bound. Clamp.
+if R_high <= R_low:
+    R_high = R_low + 100.0
 N_samples = 30
-step = (R_max - R_min) / (N_samples - 1)
-ranges = tuple(R_min + i * step for i in range(N_samples))
+step = (R_high - R_low) / (N_samples - 1)
+ranges = tuple(R_low + i * step for i in range(N_samples))
 
 sweep: list[dict] | None
 try:
