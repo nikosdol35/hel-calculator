@@ -576,6 +576,13 @@ def render_tab_engagement(
             config=PLOTLY_MODEBAR_CONFIG,
         )
         explanation(EXPLANATIONS["plot_j_intro"], variant="plot")
+
+        # SPEC v2.0 §8.6 — Plot K (operational envelope heatmap).
+        # Compute-on-click per the user's PR-4-stage decision: the
+        # full 10×10 grid is ~100 orchestrator runs (~100 s on first
+        # click). Cached at the @st.cache_data layer — subsequent
+        # renders are instant for the same input set.
+        _render_operational_envelope_plot(result)
     st.plotly_chart(
         plots.plot_g_spot_vs_bucket(sweep, d_aim=d_aim_si),
         use_container_width=True,
@@ -1200,6 +1207,109 @@ def _render_provenance_badges(entry) -> None:
             chips.append(":material/science: Independently replicated")
     if chips:
         st.caption(" · ".join(chips))
+
+
+@st.cache_data(max_entries=4, show_spinner="Computing operational envelope (~100 orchestrator runs, ~100 s)…")
+def _cached_envelope(frozen_inputs: tuple, n_R: int, n_v: int):
+    """Cache wrapper: compute and cache the operational-envelope grid
+    for the user's current input set. Re-running the math tab or
+    re-toggling the Engagement tab pulls from cache; only when the
+    user changes inputs does the cache miss and trigger the ~100 s
+    re-compute."""
+    from physics.operational_envelope import (
+        compute_operational_envelope,
+    )
+    return compute_operational_envelope(
+        dict(frozen_inputs), n_R=n_R, n_v=n_v,
+    )
+
+
+def _render_operational_envelope_plot(result: dict) -> None:
+    """Render the operational-envelope heatmap behind a Compute-on-
+    click button (SPEC v2.0 §8.6 / plan §14 user choice)."""
+    section_header("Operational envelope")
+    explanation(EXPLANATIONS["plot_k_intro_pre"])
+
+    # Compute button — Streamlit re-renders on each interaction, so
+    # the button's clicked-state is held in session state across
+    # reruns.
+    button_key = "_envelope_compute_clicked"
+    if button_key not in st.session_state:
+        st.session_state[button_key] = False
+
+    col_btn, col_note = st.columns([1, 3])
+    with col_btn:
+        if st.button("Compute envelope", key="_envelope_compute_btn"):
+            st.session_state[button_key] = True
+    with col_note:
+        st.caption(
+            "Computes a 10 × 10 (R_detect × v_tgt) grid of engagement "
+            "outcomes. Takes ~100 seconds on first click; cached "
+            "afterwards for instant re-renders."
+        )
+
+    if not st.session_state[button_key]:
+        return
+
+    # Build a frozen-inputs tuple for the cache key. Only the v2-mode
+    # inputs that affect the envelope are included (R_detect / v_tgt
+    # are swept per cell, so they are not part of the cache key).
+    frozen = _frozen_inputs_for_envelope(result)
+    if frozen is None:
+        st.warning(
+            "Operational envelope cannot be computed — the current "
+            "input set is missing v2.0 trajectory keys."
+        )
+        return
+
+    try:
+        envelope = _cached_envelope(frozen, 10, 10)
+    except Exception as exc:  # pragma: no cover — defensive
+        st.error(
+            f"Operational-envelope compute failed: {exc!s}. Try a "
+            "different scenario or report this as a bug."
+        )
+        return
+
+    from ui import plots
+    from ui.theme import PLOTLY_MODEBAR_CONFIG
+    st.plotly_chart(
+        plots.plot_k_operational_envelope(envelope),
+        use_container_width=True,
+        config=PLOTLY_MODEBAR_CONFIG,
+    )
+    explanation(EXPLANATIONS["plot_k_intro"], variant="plot")
+    st.caption(
+        f"Computed {len(envelope.v_tgt_axis) * len(envelope.R_detect_axis)} "
+        f"engagements · {envelope.n_kills} closed with margin · "
+        f"{envelope.n_failures} hit a validator boundary"
+    )
+
+
+def _frozen_inputs_for_envelope(result: dict) -> tuple | None:
+    """Frozen-inputs tuple for the operational-envelope cache. Same
+    shape as ``_frozen_inputs_for_sensitivity`` but R_detect / v_tgt
+    are excluded (they're swept per cell, not held fixed)."""
+    user_input_keys = (
+        "P0", "M2", "D", "wavelength", "eta_opt", "sigma_jit",
+        "H_e", "R_detect", "R_min", "H_t", "v_tgt",
+        "engagement_geometry",
+        "V", "RH", "T_ambient", "P_atm",
+        "cn2_model", "Cn2_value", "Cn2_ground", "v_HV",
+        "d_aim", "material", "thickness",
+        "eta_wallplug", "Q_cool", "C_thermal", "dT_max", "t_exp",
+        "backside_BC",
+    )
+    items = []
+    for k in user_input_keys:
+        v = result.get(k)
+        if v is None:
+            return None
+        if isinstance(v, (int, float, str, bool)):
+            items.append((k, v))
+        else:
+            return None
+    return tuple(items)
 
 
 def _frozen_inputs_for_sensitivity(result: dict) -> tuple | None:

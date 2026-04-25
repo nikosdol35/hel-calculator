@@ -862,6 +862,23 @@ EXPLANATIONS: dict[str, str] = {
         "dominates; at long range turbulence and jitter grow fastest, "
         "with blooming kicking in once the on-path power density is high."
     ),
+    "plot_k_intro_pre": (
+        "This is the strategic view of the engagement. For every "
+        "combination of detection range and target velocity in a "
+        "10-by-10 grid, the tool runs a full engagement analysis and "
+        "colour-codes the result. Computing the grid takes about a "
+        "minute and a half on first click; the result is cached for "
+        "the rest of the session so re-rendering is instant."
+    ),
+    "plot_k_intro": (
+        "Each cell is one engagement at a different (detection range, "
+        "target velocity) pair. Green cells closed the engagement with "
+        "margin to spare; amber cells closed it with little margin; red "
+        "cells did not close in time. The white star is your current "
+        "scenario's position on the envelope. The boundary between red "
+        "and green tells you the operational envelope of your system "
+        "for the configured target."
+    ),
     "plot_j_intro": (
         "This chart shows how much of the engagement window was "
         "actually delivering useful damage. The rising curve is the "
