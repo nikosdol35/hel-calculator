@@ -51,10 +51,16 @@ def test_math_content_entries_have_required_fields():
     on the MetricEntry itself — see test_every_math_content_key_has_label."""
     from ui.math_content import MATH_CONTENT
 
+    # Dimensionless metrics may carry an empty unit_si (the convention
+    # for ratios like S_TB, PIB_fraction, τ_atm, N_D).
+    dimensionless_ok = {
+        "tau_atm", "PIB_fraction", "S_TB", "N_D", "m67_converged",
+    }
     for key, entry in MATH_CONTENT.items():
         assert entry.display_name, f"{key}: missing display_name"
         assert entry.module, f"{key}: missing module"
-        assert entry.unit_si, f"{key}: missing unit_si"
+        if key not in dimensionless_ok:
+            assert entry.unit_si, f"{key}: missing unit_si"
         assert entry.explanation_short, (
             f"{key}: missing explanation_short — every metric needs a "
             f"plain-language one-liner"
@@ -128,6 +134,133 @@ def test_pr1_modules_present():
         f"PR 1 module entries ({sorted(pr1_entries)}) differ from "
         f"plan-specified set ({sorted(expected_pr1_keys)})"
     )
+
+
+def test_pr2_modules_present():
+    """PR 2 of the math-tab plan covers M4, M5, M6, M7 (20 numeric
+    entries — w_turb is in M5 only since the orchestrator merge
+    dedupes M5/M7 collision)."""
+    from ui.math_content import MATH_CONTENT
+
+    expected_pr2_keys = {
+        # M4 — atmosphere (6)
+        "alpha_mol_abs", "alpha_mol_scat", "alpha_aer_abs",
+        "alpha_aer_scat", "alpha_atm", "tau_atm",
+        # M5 — turbulence (3, w_turb owned by M5)
+        "Cn2_integrated", "r0_sph", "w_turb",
+        # M6 — blooming (3, all post-iteration)
+        "N_D", "S_TB", "w_bloom",
+        # M7 — spot/PIB (8, w_turb is M5's pass-through, not duplicated)
+        "w_diff", "w_jit", "w_total", "d_spot",
+        "I_peak", "PIB_fraction", "P_aim", "I_avg_aim",
+    }
+    actual = set(MATH_CONTENT.keys())
+    missing = expected_pr2_keys - actual
+    assert not missing, f"PR 2 missing entries: {missing}"
+
+
+def test_iterated_metrics_flagged():
+    """Metrics whose value comes from the M6↔M7 fixed-point loop must
+    have ``is_iterated=True`` set so the renderer can show the
+    'computed via fixed-point iteration' banner."""
+    from ui.math_content import MATH_CONTENT
+
+    expected_iterated = {"N_D", "S_TB", "w_bloom", "w_total"}
+    actual_iterated = {
+        k for k, e in MATH_CONTENT.items() if e.is_iterated
+    }
+    assert actual_iterated == expected_iterated, (
+        f"is_iterated flag drift: expected {expected_iterated}, "
+        f"got {actual_iterated}"
+    )
+
+
+def test_sensitivity_inputs_only_user_inputs():
+    """Every ``sensitivity_inputs`` entry must be an actual user input
+    key (so the perturbation runner can find it). Catches typos like
+    'V' vs 'visibility' or 'Cn2' vs 'Cn2_ground'."""
+    from ui.math_content import MATH_CONTENT
+
+    valid_user_inputs = {
+        "P0", "M2", "D", "wavelength", "eta_opt", "sigma_jit",
+        "H_e", "R", "H_t", "v_tgt", "v_perp",
+        "V", "RH", "T_ambient", "P_atm",
+        "cn2_model", "Cn2_value", "Cn2_ground", "v_HV",
+        "d_aim", "material", "thickness", "A_lambda",
+        "eta_wallplug", "Q_cool", "C_thermal", "dT_max", "t_exp",
+        "backside_BC",
+    }
+    for key, entry in MATH_CONTENT.items():
+        for sens in entry.sensitivity_inputs:
+            assert sens in valid_user_inputs, (
+                f"{key}: sensitivity_inputs references {sens!r} which "
+                f"is not a known user input"
+            )
+
+
+def test_format_sensitivity_line_empty():
+    """Empty sensitivity dict → graceful no-data string, not a crash."""
+    from ui.sensitivity import format_sensitivity_line
+    out = format_sensitivity_line({})
+    assert "no sensitivity data" in out.lower()
+
+
+def test_format_sensitivity_line_top_n():
+    """The formatted line shows only the top-N most-influential inputs
+    plus a "+K more" suffix when more exist."""
+    from ui.sensitivity import format_sensitivity_line
+
+    sens = {
+        "P0": 50.0,        # largest |influence|
+        "RH": -8.0,
+        "M2": 30.0,
+        "D": -3.0,
+        "wavelength": 1.5,
+    }
+    line = format_sensitivity_line(sens, top_n=3)
+    # Top-3 by |influence|: P0, M2, RH.
+    assert "P0" in line and "M2" in line and "RH" in line
+    # 5 - 3 = 2 hidden.
+    assert "+2 more" in line
+
+
+def test_compute_sensitivity_skips_zero_base():
+    """When the base value is zero, sensitivity is undefined — return
+    empty dict rather than emitting infinity."""
+    from ui.sensitivity import compute_sensitivity_for_metric
+
+    def runner(k, sign):
+        return {"foo": 0.0}
+
+    sens = compute_sensitivity_for_metric(
+        metric_key="foo",
+        sensitivity_inputs=("P0",),
+        base_result={"foo": 0.0},
+        base_inputs={"P0": 1000.0},
+        perturbation_runner=runner,
+    )
+    assert sens == {}
+
+
+def test_compute_sensitivity_signed_direction():
+    """Sensitivity sign reflects the +10 % perturbation direction —
+    metric goes up when input goes up → positive sign."""
+    from ui.sensitivity import compute_sensitivity_for_metric
+
+    def runner(k, sign):
+        # Linear metric: foo = 2 * P0
+        return {"foo": 2 * 1000.0 * (1.0 + sign * 0.10)}
+
+    sens = compute_sensitivity_for_metric(
+        metric_key="foo",
+        sensitivity_inputs=("P0",),
+        base_result={"foo": 2 * 1000.0},
+        base_inputs={"P0": 1000.0},
+        perturbation_runner=runner,
+    )
+    # +10 % input → +10 % metric (linear); sign positive.
+    assert sens["P0"] > 0
+    assert abs(abs(sens["P0"]) - 10.0) < 0.01
 
 
 # ---------------------------------------------------------------------------

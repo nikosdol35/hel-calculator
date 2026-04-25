@@ -1049,6 +1049,45 @@ def render_tab_diagnostics(result: dict) -> None:
 
 _MATH_VIEW_KEY = "_math_view_mode"
 _MATH_SEARCH_KEY = "_math_search"
+_MATH_SENSITIVITY_KEY = "_math_sensitivity_enabled"
+
+
+@st.cache_data(max_entries=128, show_spinner=False)
+def _perturbed_run(
+    frozen_inputs: tuple, input_key: str, sign: int
+) -> dict:
+    """Run the orchestrator with one user input perturbed by ±10 %.
+
+    Cached on (frozen_inputs, input_key, sign). With ~22 numeric inputs
+    × 2 signs there are at most 44 cache entries per (frozen_inputs,)
+    bucket; subsequent re-renders of the math tab in the same session
+    pull from cache.
+
+    Returns the merged-result dict in the same shape ui/app.py builds:
+    user_inputs ⊕ orchestrator_result. On any validator-bound failure
+    the perturbed run returns an empty dict so the sensitivity helper
+    can skip that input.
+    """
+    from physics.orchestrator import run_full_chain
+
+    base = dict(frozen_inputs)
+    val = base.get(input_key)
+    if val is None or isinstance(val, (str, bool)):
+        return {}
+    try:
+        new_val = float(val) * (1.0 + sign * 0.10)
+    except (TypeError, ValueError):
+        return {}
+    if new_val < 0:
+        new_val = 0.0
+    perturbed = {**base, input_key: new_val}
+    try:
+        result = run_full_chain(perturbed)
+    except Exception:
+        # Perturbation pushed an input outside validator bounds; signal
+        # "no data" rather than propagating.
+        return {}
+    return {**perturbed, **result}
 
 
 def _format_value_for_math_tab(key: str, value: float | int | str | None,
@@ -1115,6 +1154,67 @@ def _render_provenance_badges(entry) -> None:
             chips.append(":material/science: Independently replicated")
     if chips:
         st.caption(" · ".join(chips))
+
+
+def _frozen_inputs_for_sensitivity(result: dict) -> tuple | None:
+    """Build a hashable frozen-inputs tuple from the merged result so it
+    can key the perturbation cache. The merged dict is what
+    render_tab_math receives — it carries the user inputs as well as the
+    orchestrator output. Returns None when the dict doesn't look like a
+    real merged result (e.g. infeasible-geometry stub)."""
+    user_input_keys = (
+        "P0", "M2", "D", "wavelength", "eta_opt", "sigma_jit",
+        "H_e", "R", "H_t", "v_tgt", "v_perp",
+        "V", "RH", "T_ambient", "P_atm",
+        "cn2_model", "Cn2_value", "Cn2_ground", "v_HV",
+        "d_aim", "material", "thickness",
+        "eta_wallplug", "Q_cool", "C_thermal", "dT_max", "t_exp",
+        "backside_BC",
+    )
+    items = []
+    for k in user_input_keys:
+        v = result.get(k)
+        if v is None:
+            return None
+        # Normalise to hashable types only.
+        if isinstance(v, (int, float, str, bool)):
+            items.append((k, v))
+        else:
+            return None
+    return tuple(items)
+
+
+def _render_sensitivity_bar(entry, result: dict) -> None:
+    """Render the inline sensitivity line for one metric in Full view.
+
+    Computes the ±10 % response of the metric to each user input in
+    ``entry.sensitivity_inputs`` via the cached perturbation runner.
+    Displays the top-3 most influential inputs as a single line.
+
+    Skipped silently for metrics with no ``sensitivity_inputs``
+    (categorical / verdict outputs)."""
+    if not entry.sensitivity_inputs:
+        return
+    frozen = _frozen_inputs_for_sensitivity(result)
+    if frozen is None:
+        return
+
+    from ui.sensitivity import (
+        compute_sensitivity_for_metric, format_sensitivity_line,
+    )
+
+    def runner(input_key: str, sign: int) -> dict:
+        return _perturbed_run(frozen, input_key, sign)
+
+    sens = compute_sensitivity_for_metric(
+        metric_key=entry.key,
+        sensitivity_inputs=entry.sensitivity_inputs,
+        base_result=result,
+        base_inputs=dict(frozen),
+        perturbation_runner=runner,
+    )
+    line = format_sensitivity_line(sens)
+    st.caption(line)
 
 
 def _render_metric_row(entry, result: dict, *, view_mode: str) -> None:
@@ -1201,6 +1301,13 @@ def _render_metric_row(entry, result: dict, *, view_mode: str) -> None:
                 st.markdown("**Assumptions:**")
                 for a in entry.assumptions:
                     st.markdown(f"- {a}")
+
+            # Sensitivity bar — ±10 % response to each user input.
+            # Computed only in Full view to avoid the perturbation runs
+            # on every page render. Cached at the perturbation level so
+            # multiple metrics sharing inputs share cache entries.
+            if not entry.is_categorical:
+                _render_sensitivity_bar(entry, result)
 
 
 def _matches_search(entry, query: str) -> bool:
