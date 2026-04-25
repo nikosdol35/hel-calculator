@@ -246,6 +246,133 @@ def test_compute_sensitivity_skips_zero_base():
     assert sens == {}
 
 
+def test_pr4_constants_table_present():
+    """PR 4 of the math-tab plan ships a structured constants table.
+    Verify it covers every module that has hard-coded constants."""
+    from ui.constants_table import (
+        CONSTANTS_BY_MODULE, ConstantEntry, total_constant_count,
+    )
+
+    # Every entry is a ConstantEntry dataclass instance with the
+    # required fields populated.
+    for group_title, entries in CONSTANTS_BY_MODULE.items():
+        assert entries, f"empty group: {group_title!r}"
+        for c in entries:
+            assert isinstance(c, ConstantEntry)
+            assert c.name, f"missing name in {group_title!r}"
+            assert c.value, f"missing value for {c.name}"
+            # units may legitimately be empty for dimensionless constants
+            assert c.source, f"missing source for {c.name}"
+            assert c.verdict, f"missing verdict for {c.name}"
+            assert c.code_ref, f"missing code_ref for {c.name}"
+
+    # Sanity-check the total count — the audit roster has ~80
+    # explicit entries plus the multi-cell tables. We don't pin an
+    # exact number since adding a citation row is fine, but the
+    # count should be in a sensible range.
+    n = total_constant_count()
+    assert 50 <= n <= 200, (
+        f"constants table has {n} entries; expected 50-200 "
+        f"(roster grew or shrank unexpectedly)"
+    )
+
+
+def test_pr4_constants_verdicts_use_known_categories():
+    """Verdict strings come from a small known vocabulary so the
+    rendering layer can colour-code them consistently in a future
+    iteration."""
+    from ui.constants_table import CONSTANTS_BY_MODULE
+
+    known_verdict_prefixes = (
+        "verified",
+        "CLAUDE §7.1 invariant",
+        "HIGH UNCERTAINTY",
+        "deferred v2",
+    )
+    for group_title, entries in CONSTANTS_BY_MODULE.items():
+        for c in entries:
+            assert any(
+                c.verdict.startswith(p) for p in known_verdict_prefixes
+            ), (
+                f"{c.name}: unknown verdict {c.verdict!r}; expected "
+                f"one of {known_verdict_prefixes}"
+            )
+
+
+def test_pr4_worked_example_at_1km():
+    """The worked example is the c_uas preset at R = 1 km
+    (user-specified default)."""
+    from ui.worked_example import WORKED_EXAMPLE_INPUTS
+
+    assert WORKED_EXAMPLE_INPUTS["R"] == 1000, (
+        f"worked example R = {WORKED_EXAMPLE_INPUTS['R']}; "
+        f"expected 1000 m per the user's PR 4 directive"
+    )
+    # Other inputs match the c_uas_short_range scenario the rest of
+    # the project's golden fixtures use, so a reader can cross-check
+    # any single value against the existing golden JSON by changing
+    # only R.
+    assert WORKED_EXAMPLE_INPUTS["P0"] == 3000
+    assert WORKED_EXAMPLE_INPUTS["material"] == "CFRP"
+    assert WORKED_EXAMPLE_INPUTS["wavelength"] == 1.07e-6
+
+
+def test_pr4_worked_example_runs_without_error():
+    """compute_worked_example() must complete without exceptions and
+    return all 45 orchestrator output keys."""
+    from ui.worked_example import compute_worked_example
+    walkthrough = compute_worked_example()
+    # Result is the merged dict (inputs ⊕ orchestrator outputs).
+    expected_output_keys = {
+        # M1-M10 + orchestrator (verified by test_complete_metric_count)
+        "theta_diff", "w0", "zR", "I_exit", "P_exit",
+        "R_slant", "R_h", "elevation_angle", "available_dwell",
+        "alpha_mol_abs", "alpha_mol_scat", "alpha_aer_abs",
+        "alpha_aer_scat", "alpha_atm", "tau_atm",
+        "Cn2_integrated", "r0_sph", "w_turb",
+        "N_D", "S_TB", "w_bloom",
+        "w_diff", "w_jit", "w_total", "d_spot",
+        "I_peak", "PIB_fraction", "P_aim", "I_avg_aim",
+        "tau_BT", "T_surface_peak", "E_delivered", "failure_mode",
+        "MPE", "NOHD_tophat", "NOHD_gausspeak", "laser_class",
+        "P_in", "Q_waste", "t_sustain",
+        "duty_cycle_limit", "engagements_per_hour",
+        "engagement_viable",
+        "m67_iteration_count", "m67_converged",
+    }
+    actual_keys = set(walkthrough.result.keys())
+    missing = expected_output_keys - actual_keys
+    assert not missing, (
+        f"Worked example missing orchestrator outputs: {missing}"
+    )
+
+
+def test_pr4_walkthrough_steps_cover_every_metric():
+    """The 10-step walkthrough must reference every numeric metric
+    at least once. Categorical metrics (failure_mode, laser_class,
+    engagement_viable, m67_converged) and the m67_iteration_count
+    diagnostic appear inline as part of their respective steps."""
+    from ui.math_content import MATH_CONTENT
+    from ui.worked_example import WALKTHROUGH_STEPS
+
+    referenced = set()
+    for step in WALKTHROUGH_STEPS:
+        for key in step.metric_keys:
+            referenced.add(key)
+
+    # Every MATH_CONTENT key except the m67 iteration diagnostics
+    # (which the walkthrough mentions as part of step 6's narrative
+    # rather than as an explicit metric).
+    expected = set(MATH_CONTENT.keys()) - {
+        "m67_iteration_count", "m67_converged",
+    }
+    missing_from_walkthrough = expected - referenced
+    assert not missing_from_walkthrough, (
+        f"Walkthrough doesn't reference these metrics: "
+        f"{missing_from_walkthrough}"
+    )
+
+
 def test_pr3_modules_present():
     """PR 3 of the math-tab plan covers M8, M9, M10, and the
     orchestrator (12 numeric + 4 categorical + 1 diagnostic = 17 entries)."""

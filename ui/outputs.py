@@ -1400,11 +1400,12 @@ def render_tab_math(result: dict) -> None:
     # --- Quick-jump --------------------------------------------------------
     quick_targets: list[str] = ["[Glossary](#glossary)"]
     for module_id in MODULE_ORDER:
-        # Only list modules that actually have entries in MATH_CONTENT
-        # (PR 1 only ships M1-M3, the rest will appear as PR 2-3 land).
+        # Only list modules that actually have entries in MATH_CONTENT.
         if any(e.module == module_id for e in MATH_CONTENT.values()):
             anchor = module_id.lower()
             quick_targets.append(f"[{module_id}](#{anchor})")
+    quick_targets.append("[Constants & sources](#constants)")
+    quick_targets.append("[Worked example](#worked-example)")
     st.markdown(" · ".join(quick_targets))
 
     # --- Glossary ---------------------------------------------------------
@@ -1438,3 +1439,116 @@ def render_tab_math(result: dict) -> None:
         for entry in visible:
             _render_metric_row(entry, result, view_mode=view_mode)
             st.divider()
+
+    # --- Constants & sources section --------------------------------------
+    _render_constants_section()
+
+    # --- Worked example ---------------------------------------------------
+    _render_worked_example()
+
+
+@st.cache_data(max_entries=4, show_spinner=False)
+def _cached_worked_example() -> dict:
+    """Compute and cache the worked-example chain once per session.
+
+    The worked example is a static teaching artifact (always at the
+    canonical c_uas-1km scenario); recomputing on every rerun is
+    wasteful. Returns the same merged-result dict shape as
+    ``run_full_chain``."""
+    from ui.worked_example import compute_worked_example
+    walkthrough = compute_worked_example()
+    return walkthrough.result
+
+
+def _render_constants_section() -> None:
+    """Render the constants & sources tables in their own anchored
+    section, one expander per module group. The data lives in
+    ``ui/constants_table.py`` (mirror of validation/constants_audit.md)."""
+    from ui.constants_table import CONSTANTS_BY_MODULE, total_constant_count
+
+    st.markdown("<a id='constants'></a>", unsafe_allow_html=True)
+    st.markdown("### Constants & physical sources")
+    st.caption(
+        f"Every hard-coded numeric in the physics modules — "
+        f"{total_constant_count()} explicit entries plus the multi-cell "
+        f"data tables (α_mol, A_λ, material properties). Each value "
+        f"traces to its primary literature source. HIGH UNCERTAINTY "
+        f"badges flag entries currently held as engineering defaults."
+    )
+
+    for group_title, entries in CONSTANTS_BY_MODULE.items():
+        with st.expander(f"{group_title} ({len(entries)})", expanded=False):
+            # Build a Markdown table (Streamlit's st.dataframe is
+            # heavier and styles less consistently with the rest of
+            # the math tab; for ~10 rows per group, a plain table is
+            # adequate).
+            st.markdown(
+                "| Name | Value | Units | Source | Verdict | Code |\n"
+                "|---|---|---|---|---|---|"
+            )
+            for c in entries:
+                # Escape pipes so they don't break Markdown table
+                # rendering. The constants_table.py text never uses
+                # multi-line strings so no \n handling is needed.
+                cells = [
+                    c.name.replace("|", "\\|"),
+                    c.value.replace("|", "\\|"),
+                    c.units.replace("|", "\\|") if c.units else "—",
+                    c.source.replace("|", "\\|"),
+                    c.verdict.replace("|", "\\|"),
+                    f"`{c.code_ref}`",
+                ]
+                st.markdown("| " + " | ".join(cells) + " |")
+
+
+def _render_worked_example() -> None:
+    """Render the end-to-end walkthrough at the c_uas-1km worked
+    example. Static scenario (NOT the user's current run) — the
+    purpose is to show the full dependency chain in concrete numbers
+    so a junior engineer can see how the formulas fit together."""
+    from ui.labels import output_unit
+    from ui.math_content import MATH_CONTENT
+    from ui.worked_example import WALKTHROUGH_STEPS
+
+    st.markdown("<a id='worked-example'></a>", unsafe_allow_html=True)
+    st.markdown("### Worked example — c_uas at 1 km")
+    st.caption(
+        "End-to-end walk-through of the full dependency chain at a "
+        "fixed reference scenario (3 kW · 1 km · 1.07 µm · CFRP · "
+        "0.25 s exposure). This section's values do NOT follow your "
+        "sidebar inputs — it's a teaching artifact so you can see "
+        "how the 41 numeric metrics fit together. Your live values "
+        "are in the per-metric rows above."
+    )
+
+    try:
+        result = _cached_worked_example()
+    except Exception as exc:  # pragma: no cover — defensive
+        st.warning(
+            f"Worked example could not be computed: {exc!s}. The "
+            "static scenario should always be valid; if you see this, "
+            "report it as a bug."
+        )
+        return
+
+    for step in WALKTHROUGH_STEPS:
+        st.markdown(f"#### {step.section_title}")
+        st.markdown(f"*Given:* {step.given}")
+        st.markdown(step.narrative)
+
+        # Render each metric in the step as a small "key = value"
+        # line so the reader sees the concrete output.
+        lines: list[str] = []
+        for key in step.metric_keys:
+            entry = MATH_CONTENT.get(key)
+            if entry is None:
+                continue
+            si_value = result.get(key)
+            unit = output_unit(key)
+            rendered = _format_value_for_math_tab(key, si_value, unit)
+            lines.append(
+                f"- **{entry.display_name}** "
+                f"(`{key}`): {rendered}"
+            )
+        if lines:
+            st.markdown("\n".join(lines))
