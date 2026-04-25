@@ -1,10 +1,11 @@
 # SPEC.md — HEL Engineering Calculator
 
-**Version:** 1.12 (Package 3 numerical-methods validation surfaced a latent 10⁴ typo in the §3 M9 Band A pulsed-regime MPE constant; SPEC and code paired-fixed per CLAUDE §4.3. No other change.)
+**Version:** 2.0 (tracker-supported dwell + threat-trajectory model; resolves §10.5 v2-deferred item; major-version-worthy contract change to §3 M3 / M8 / M10 + §4 execution order. **This SPEC version describes the v2.0 contract; code implementation lands in PRs 2–12 of `docs/tracker_dwell_plan_2026-04-25.md`. Until the code PRs land, runtime behaviour continues to match the v1.12 contract in revision history below.**)
 **Supersedes:** `HEL_Calculator_Project_Plan_v0p8.docx` §3–§6 (which remains the plan-of-record; this SPEC is the implementation contract derived from it)
 **Status:** Implementation contract. Any requested feature not described here requires a SPEC update before implementation.
 
 **Revision history:**
+- v2.0 (2026-04-25) — **Tracker-supported dwell + threat-trajectory model.** Major contract change. Plan: `docs/tracker_dwell_plan_2026-04-25.md`. The first-order engagement-basket dwell formula `2·R·tan(FOV/2)/v_tgt` shipped through v1.x as an engineering placeholder (§10.5 deferred to v2); v2.0 replaces it with a tracker-supported trajectory model that takes the user's threat trajectory (head-on closing or lateral pass) as a first-class input and integrates the M8 heat PDE forward with time-varying boundary flux as the slant range changes. Edits: (a) **§3 M3** — inputs `R` and `v_perp` retired; new inputs `R_detect` (initial detection slant, m), `R_min` (engagement-end standoff, m), `engagement_geometry` (`"head_on"` | `"lateral"`); `v_tgt` semantics redefined as the target velocity along the threat trajectory; FOV-based `available_dwell` formula and the `_FOV_DEG_DEFAULT = 5°` constant retired; replaced with two closed-form trajectory dwell formulas (head-on `(R_detect − R_min)/v_tgt`; lateral `√(R_detect² − R_min²)/v_tgt`); new output `R_at_dwell_end` (= R_min for both geometries by construction); validator-level rejection of `R_detect < R_min` and stationary-target degenerate handling (`v_tgt < 0.1 m/s`). (b) **§3 M8** — `I_aim` semantics extended from scalar to time-dependent `I_aim(t)` driven by the trajectory R(t); the explicit-FD heat PDE is unchanged but the boundary-condition specification now varies through the integration; new stop condition `t ≥ t_dwell` in addition to `T_surface ≥ T_fail`; new output `R_at_kill` (slant range at moment of failure, None if no kill); new `failure_mode` value `"engagement_ended_at_R_min"` (target reached engagement-end without burn-through). (c) **§3 M9** — **explicit no-change note**: NOHD outputs depend only on (P0, M², D, λ, t_exp) and are geometry-independent; M9 is unchanged. (d) **§3 M10** — `engagement_viable` definition extended to `(tau_BT ≤ t_dwell) AND (R_at_kill ≥ R_min) AND thermal_budget_ok`. (e) **§4** — execution order documents the new trajectory loop: M1, M2 evaluated once (engagement-invariant scalars); M3 computes t_dwell; M9 evaluated once; then a sub-sampled trajectory loop driven by the M8 PDE timestep re-evaluates M4 / M5 / M6↔M7 at each upstream sub-sample (~50–100 ms of engagement time) and feeds the resulting `I_avg_aim(t)` into the PDE step; M6↔M7 Picard fixed-point uses warm-start from the previous sub-sample's converged `w_total` (typical iterations drop from 2–4 cold to 1–2 warm). (f) **§10.5** — disposition changes from "DEFERRED TO v2" to **CLOSED** with pointer to this v2.0 revision; plan §10.5 retired. (g) **CLAUDE §7.2 scope guard formally relaxed**: tracker-dependent dwell was listed as v2-deferred in CLAUDE §7.2; user explicitly approved relaxation 2026-04-25. (h) New orchestrator outputs catalogued: `R_at_kill`, `I_peak_max`, `I_avg_aim_max`, `trajectory_R`, `trajectory_t`, `trajectory_I_peak`, `trajectory_I_avg_aim`, `trajectory_T_surface`, `trajectory_E_cumulative`, `trajectory_d_spot`, `trajectory_PIB` — all consumed by the new Engagement-tab plots H–K. (i) Test impact: ~8 of the 30 SPEC §3 validation cases need new expected values; 4–6 brand-new cases for the trajectory model; all 3 golden-fixture JSON files re-seeded under the new contract; new test files `tests/test_trajectory.py`, `tests/test_m8_time_varying_flux.py`, `tests/test_orchestrator_trajectory_loop.py`, plus four new plot-smoke files. (j) UI impact: new sidebar inputs (`R_detect`, `R_min`, `engagement_geometry`); `v_perp` field removed; verdict chip carries operational specifics (kill time, kill range); Engagement tab adds four new plots (H engagement-profile timeline, I outcome-map vs R_detect, J cumulative-energy diagnostic, K operational-envelope heatmap with compute-on-click); existing Plot C (beam-diameter breakdown) replaced by Plot C' (spot tightening through trajectory) since closest-approach spot is degenerate under the new model; Plots A/B/D/E/G semantically updated for the R_detect-sweep convention. (k) Math tab: new `MATH_CONTENT` entries for `R_detect`, `R_min`, `engagement_geometry`, `R_at_kill`, `I_peak_max`; M3 / M8 row formulas rewritten; worked example becomes a head-on engagement at `R_detect = 1500 m, R_min = 100 m, v_tgt = 20 m/s`. (l) Out of scope (deferred to v3): tracker dynamics (slew-rate, gimbal acceleration), target maneuver, 3D trajectories, multi-target scheduling, line-of-sight masking, aspect-angle changes during the engagement.
 - v1.11 (2026-04-24) — **Phase 3 UI redesign, PR 6 of six: preset dropdown materialized + CSV export + friendly validator-error / welcome surfaces + accessibility polish.** All edits are UI-only under CLAUDE §3 rule 1; no physics, no module I/O, no `assumptions_flagged` semantic, no validation-case expected value, no `pytest tests/` outcome is touched. (a) **§5.1 preset dropdown** — the sidebar's top-of-list `Engagement scenario` selectbox is now wired to three defensible reference configurations (`c_uas_short_range` mirroring the canonical 3 kW / 1.5 km / CFRP test case; `counter_rocket` at 30 kW / 3 km / 4 mm CFRP casing / 100 m/s terminal-speed target; `long_range_surveillance` at 10 kW / 10 km / polycarbonate sensor window) plus a `"custom"` entry that leaves every widget value in place. Selecting a named scenario writes all six input-panel values into `st.session_state` in a single `on_change` callback so every widget re-renders pre-filled on the same run. Preset parameters live in `ui/presets.py::PRESET_PARAMETERS` in SI units (the same dict shape the orchestrator consumes) with a dedicated `_SI_TO_WIDGET` conversion table that handles display-unit widget keys (kW, cm, µm, µrad, kJ/K, °C). Every preset also resets the `_A_lambda_override` session-state latch so presets always surface the M8 material-table default absorptivity (and any HIGH UNCERTAINTY flag attached to it). (b) **§5.2 Overview tab gains a CSV snapshot export** — a small `st.download_button` at the foot of the Overview tab produces a four-column CSV (`Label, Value, Unit, Flag`) containing: one verdict summary row reproducing the on-screen chip text; one row per curated metric in `ui/outputs.py::_CSV_METRIC_KEYS` that is present in the result dict (output labels drawn from `ui.labels.output_label`, units from `ui.labels.output_unit`, values scaled through the same `_scale(output_key, raw)` helper the tabs use so numbers match on-screen display units, formatted with `{:.6g}` for six significant figures of round-trip fidelity); and one row per active entry in `assumptions_flagged`. The CSV uses `csv.writer` so embedded commas and quotes in flag strings escape correctly; the file is offered under `hel-analysis-snapshot.csv` with `mime="text/csv"`. This is strictly a render of already-computed orchestrator outputs — no physics, no module, no orchestrator behavior is touched. (c) **§5.3 item 9 (validator error surface)** — when a physics module's input validator raises `ValueError`, `ui/app.py` now renders the exception through `ui/components.py::error_card(title, message, *, suggestion)` rather than Streamlit's default full-width red `st.error` banner. The card uses a 4 px `--status-error` left border, the `x-circle` Lucide icon next to the headline in the error hue, and a body + optional suggestion on standard surface tokens — "here is what went wrong, here is what to change" reads calmer than a shouting stripe while keeping the error severity unambiguous (hue + icon + headline three-channel encoding, same rule as status chips). The raw `ValueError` message is quoted verbatim in the body so the user can see the exact sanity-range violation. (d) **§5.3 item 10 (first-run welcome)** — before the user has clicked Run Analysis even once, `ui/app.py` renders a centered `.hel-welcome-card` (title `"Ready to run"`, body walking the user through the preset dropdown → sidebar edit → Run Analysis sequence) instead of the plain `st.info` banner used through PR 5. The card sits on the same elevated surface token as metric cards; the body is capped at 520 px for an engineer-friendly line-measure. (e) **§5.3 item 8 (accessibility polish)** — the `prefers-reduced-motion` media query shipped in PR 4 is verified to collapse the progress-bar sliding animation, error-card focus transitions, and welcome-card fade-in to the 50 ms floor; no other motion is introduced in PR 6. (f) **No change** to §1 conventions, §2 interface contract, §3 module specifications, §4 execution order, §5.1 input-panel contents / sanity ranges / default-expansion rules, §5.2 tab dispatch table / plot specifications / numeric-display conventions, §5.3 items 1–7 and 11–12, §6 file layout (covered by the companion ARCHITECTURE.md v2.0), §7 dependency pinning, §8 CI workflow, §9 implementation checklist, §10 disposition summary. **Test count unchanged at 30** for physics modules; `tests/test_copy_style.py` extends its `SCANNED_FILES` tuple to cover `ui/presets.py` and the scan-list guard is renamed `test_scan_list_covers_phase3_pr6_surface`.
 - v1.0 — initial draft; post-audit fixes applied before first delivery (dn/dT formula corrected, M6.2 canonical case revised to 10 kW, test count 28→29)
 - v1.1 — consistency fixes surfaced during ARCHITECTURE.md audit: (a) `assumptions_flagged` key added to M2, M3, M5 Outputs tables (previously missing — §2 interface contract requires every module to return this, but the per-module tables had drifted); (b) M11 now has an explicit function signature `run_validation_suite() -> dict` with a documented return schema, so ARCHITECTURE can reference it without inventing the contract.
@@ -193,41 +194,61 @@ P_exit = η_opt · P₀
 
 ### M3 — Engagement Geometry
 
-**File:** `physics/m3_geometry.py`
+**File:** `physics/m3_geometry.py` (with new helper `physics/m_trajectory.py` per v2.0)
 
-**Purpose:** Computes slant-range geometry from user-specified emplacement, target altitude, and horizontal range. Also defines the target dwell window for lethality analysis (Plot B).
+**Purpose:** Computes initial slant-range geometry from user-specified emplacement, target altitude, and detection range. Defines the **threat trajectory** R(t) and the **available dwell window** under the assumption of a tracker-equipped director (resolves §10.5 v2-deferred item).
 
 **Inputs:**
 | Key | Unit | Type | Valid Range | Description |
 |---|---|---|---|---|
 | `H_e` | m | float | 0 – 3000 | Emplacement altitude AGL |
-| `R` | m | float | 50 – 50,000 | Slant range to target |
-| `H_t` | m | float | 0 – 5000 | Target altitude AGL |
-| `v_tgt` | m/s | float | 0 – 100 | Target velocity |
-| `v_perp` | m/s | float | 0 – 30 | Crosswind component perpendicular to beam |
+| `R_detect` | m | float | 50 – 50,000 | Slant range at which target is first detected and engaged (replaces v1.x `R`) |
+| `R_min` | m | float | 10 – 5,000 | Engagement-end standoff. Head-on: target's release / danger range. Lateral: closest-approach distance (perpendicular standoff from director). |
+| `H_t` | m | float | 0 – 5000 | Target altitude AGL (constant during engagement; v3 will allow climb/dive) |
+| `v_tgt` | m/s | float | 0 – 100 | Target velocity along the threat trajectory (closing speed for head-on, lateral speed for pass-by) |
+| `engagement_geometry` | str | enum | — | One of `"head_on"` (target closes along LOS) or `"lateral"` (target flies perpendicular pass at distance R_min) |
+
+**Validator constraints (v2.0):** `R_detect ≥ R_min` (geometrically required for both geometries; lateral derivation needs `R_detect² ≥ R_min²` since slant = √(R_min² + axial²)). Stationary-target degenerate handling: when `v_tgt < 0.1 m/s`, treat as a single-point engagement at R = R_detect with t_dwell = 60 s (the M8 timeout); this preserves the v1 single-point analysis as the stationary edge case.
 
 **Outputs:**
 | Key | Unit | Description |
 |---|---|---|
-| `R_slant` | m | Slant path length (equal to R for v1) |
-| `R_h` | m | Horizontal component of range |
-| `elevation_angle` | rad | Beam elevation angle |
-| `available_dwell` | s | Target time-in-basket estimate (for Plot B) |
-| `assumptions_flagged` | list[str] | e.g., `["v2 tracker-dependent dwell model deferred; heuristic used"]` |
+| `R_slant` | m | Initial slant range (= R_detect at t=0); used by M1, M9 for initial-state evaluation |
+| `R_h` | m | Horizontal component at t=0 |
+| `elevation_angle` | rad | Beam elevation at t=0 |
+| `available_dwell` | s | Trajectory-derived engagement window (formulas below) |
+| `R_at_dwell_end` | m | Slant range at engagement-end (= R_min for both geometries by construction) |
+| `assumptions_flagged` | list[str] | e.g., `["tracker-supported trajectory; pre-engagement detection at R_detect"]` |
 
-**Equations:**
+**Equations (v2.0 — closed forms; no quadrature needed):**
+
+**Head-on geometry** (target closes along LOS at constant v_tgt):
 ```
-R_h             = sqrt(R² − (H_t − H_e)²)   [assumes R ≥ |H_t − H_e|]
-elevation_angle = arctan((H_t − H_e) / R_h)
-available_dwell = 2·R · tan(FOV/2) / v_tgt   [approximate, FOV=5° default]
+R(t)        = R_detect − v_tgt · t      for t ∈ [0, t_dwell]
+t_dwell     = (R_detect − R_min) / v_tgt
+R_at_kill   ≥ R_min                     (or None if no kill)
 ```
 
-**Reference:** Plain geometry. `available_dwell` is a conservative engagement-basket heuristic; the full tracker-dependent calculation is deferred to v2.
+**Lateral geometry** (target flies straight perpendicular line past director with closest approach R_min; engagement window from R_detect inbound to closest-approach moment per v2.0 design):
+```
+x_0         = sqrt(R_detect² − R_min²)   [axial distance from closest approach at t=0]
+R(t)        = sqrt(R_min² + (x_0 − v_tgt·t)²)
+t_dwell     = x_0 / v_tgt = sqrt(R_detect² − R_min²) / v_tgt
+```
 
-**Validation case** (pytest: `test_m3_geometry`):
-- Inputs: H_e=2, R=5000, H_t=200, v_tgt=20, v_perp=3
-- Expected: R_h ≈ 4996.1 m; elevation_angle ≈ 0.0396 rad (2.27°)
-- Tolerance: 0.1%
+**Initial geometry (both cases):**
+```
+R_h             = sqrt(R_detect² − (H_t − H_e)²)   [assumes R_detect ≥ |H_t − H_e|]
+elevation_angle = arctan2((H_t − H_e), R_h)
+```
+
+**Reference:** Plain geometry + closed-form trajectory closure. v2.0 resolves §10.5 (the v1 `2·R·tan(FOV/2)/v_tgt` engagement-basket heuristic was a deliberate first-order placeholder for the staring-director case). Tracker dynamics (slew-rate, gimbal acceleration), target maneuver, 3D trajectories, line-of-sight masking are out of v2 scope per `docs/tracker_dwell_plan_2026-04-25.md` §13.
+
+**Validation cases** (pytest: `test_m3_geometry`):
+- `test_m3_head_on_canonical`: Inputs H_e=2, R_detect=5000, R_min=100, H_t=200, v_tgt=20, engagement_geometry='head_on' → R_h ≈ 4996.1 m; elevation_angle ≈ 0.0396 rad (2.27°); available_dwell = (5000 − 100)/20 = 245 s; tolerance 0.1 %.
+- `test_m3_lateral_canonical`: Inputs same but engagement_geometry='lateral' → available_dwell = sqrt(5000² − 100²)/20 ≈ 249.95 s; tolerance 0.1 %.
+- `test_m3_validator_R_detect_below_R_min`: R_detect=50, R_min=100 → ValueError with descriptive message.
+- `test_m3_stationary_target`: v_tgt=0.05 → degenerate path; t_dwell clamped to 60 s; analysis at R=R_detect.
 
 ---
 
@@ -591,10 +612,10 @@ I_avg_aim     = P_aim / (π · R_aim²)
 
 **Purpose:** Computes the dwell time required to defeat a selected material at a specified thickness, given the peak or average irradiance delivered by M7. Uses a 1-D transient heat conduction model with absorbed-flux surface boundary, convective backside cooling, and phase-change (metals) or decomposition-threshold (polymers, foams, LiPo) completion criteria.
 
-**Inputs:**
+**Inputs (v2.0 — `I_aim` is now time-varying):**
 | Key | Unit | Type | Description |
 |---|---|---|---|
-| `I_aim` | W/m² | float | Delivered irradiance (from M7; use `I_avg_aim` conservatively or `I_peak` for best-case) |
+| `I_aim` | W/m² | float **or** `Callable[[float], float]` | Delivered irradiance. v1.x: scalar (constant during integration). **v2.0: callable `I_aim(t)` returning the absorbed flux at engagement-time t**; the orchestrator's trajectory loop builds this callable by sub-sampling the upstream M4/M5/M6/M7 chain at intervals of ~50–100 ms and interpolating between sub-samples (see §4 execution order). Backward-compatibility: a scalar still works (wrapped internally in `lambda t: scalar`); v1-style tests stay green. |
 | `material` | str | enum | One of: `'anodized_Al'`, `'CFRP'`, `'GFRP'`, `'polycarbonate'`, `'ABS'`, `'EPP_foam'`, `'LiPo'` |
 | `thickness` | m | float | Material thickness (0.0001 – 0.020) |
 | `A_lambda` | — | float | Absorptivity at user wavelength (default from table; user-overridable 0.05–0.99) |
@@ -602,14 +623,16 @@ I_avg_aim     = P_aim / (π · R_aim²)
 | `backside_BC` | enum | str | `'insulated'` or `'convective'` |
 | `v_tgt` | m/s | float | For convective h estimation (from M3) |
 | `T_ambient` | K | float | (from M4) |
+| `t_dwell` | s | float | **v2.0 NEW.** Engagement window from M3; the PDE integration stops at `t = t_dwell` (timeout) if `T_surface < T_fail`. |
 
-**Outputs:**
+**Outputs (v2.0 — adds `R_at_kill`):**
 | Key | Unit | Description |
 |---|---|---|
-| `tau_BT` | s | Time-to-burn-through |
-| `T_surface_peak` | K | Peak surface temperature reached |
-| `E_delivered` | J | Total energy delivered at burn-through |
-| `failure_mode` | str | `'melt'` (metals), `'decomposition'` (polymers), `'vent'` (LiPo), or `'no_failure_before_timeout'` |
+| `tau_BT` | s | Time-to-burn-through (None or t_dwell-clamped if no failure within window) |
+| `T_surface_peak` | K | Peak surface temperature reached during the integration |
+| `E_delivered` | J | Total absorbed energy delivered at burn-through (or at engagement-end if no failure) |
+| `failure_mode` | str | `'melt'` (metals), `'decomposition'` (polymers), `'vent'` (LiPo), `'no_failure_before_timeout'` (PDE-timeout cap reached without failure), or **v2.0 NEW: `'engagement_ended_at_R_min'`** (target reached engagement-end range without burn-through) |
+| `R_at_kill` | m \| None | **v2.0 NEW.** Slant range at the moment of failure (None if no kill). Computed from the orchestrator's trajectory R(t) at the kill timestep. |
 | `assumptions_flagged` | list[str] | e.g., `["A_λ at default value (high uncertainty)"]` |
 
 **Equations:**
@@ -698,6 +721,8 @@ Emissivity ε_IR = 0.85 default for all materials (relatively minor effect below
 **File:** `physics/m9_nohd.py`
 
 **Purpose:** Computes the Nominal Ocular Hazard Distance per ANSI Z136.1 / IEC 60825-1. Reports both the top-hat (ANSI general) and Gaussian-peak (single-mode HEL) conventions. Single-mode HEL safety cases should cite the Gaussian-peak value.
+
+**v2.0 explicit no-change note:** M9 outputs (`MPE`, `NOHD_tophat`, `NOHD_gausspeak`, `laser_class`) depend only on `(P0, M², D, λ, t_exp)` — the laser-source and aperture parameters and the eye-safety exposure time. They are **geometry-independent**: the trajectory model introduced in v2.0 does not change any M9 output. NOHD remains a **pre-engagement safety bound** characterising where the laser's beam is hazardous if a bystander is in the line of sight, not a per-engagement quantity that varies with the threat trajectory. This note is recorded so reviewers see the v2.0 review explicitly considered M9, did not skip it, and concluded no change.
 
 **Inputs:**
 | Key | Unit | Type | Description |
@@ -804,7 +829,7 @@ Convert MPE_irradiance from W/cm² to W/m²: multiply by 10⁴.
 | `P_in` | W | Prime power draw |
 | `Q_waste` | W | Waste heat generated |
 | `t_sustain` | s | Maximum sustainable run-time (inf for steady-state) |
-| `engagement_viable` | bool | True iff `t_engagement ≤ t_sustain` |
+| `engagement_viable` | bool | **v2.0 extended definition:** True iff `(tau_BT ≤ t_dwell) AND (R_at_kill ≥ R_min) AND (t_engagement ≤ t_sustain)`. The first two clauses are the geometric/trajectory closure check from M3+M8; the third is the thermal-budget check (v1.x). The `R_at_kill` clause is logically redundant with the τ_BT clause but retained explicitly so the verdict surface is robust under future changes to either side. |
 | `duty_cycle_limit` | — | Maximum duty cycle (if transient) |
 | `engagements_per_hour` | float | At given duty cycle and engagement duration |
 
@@ -969,24 +994,35 @@ Any FAIL is reported prominently; the tool continues to operate but displays a b
 
 ## 4. Module Execution Order (Orchestration)
 
-When the user clicks "Run Analysis," modules execute in strict dependency order:
+**v2.0 — trajectory loop replaces the v1.x single-point chain.** When the user clicks "Run Analysis," modules execute in this dependency order:
 
 ```
-M1 (laser source)
- └─→ M2 (beam director)
-      └─→ M3 (geometry)
-           └─→ M4 (atmosphere) ──┐
-                └─→ M5 (turbulence)  │
-                     └─→ M7 (spot+PIB) ←─┐
-                          ←──── M6 (blooming) [ITERATED with M7]
-                               └─→ M8 (burn-through)
-                                    └─→ M10 (power/thermal)
-
-In parallel:
-M1 → M9 (NOHD)    [independent of the propagation chain]
+M1 (laser source)                     [engagement-invariant scalar outputs]
+ └─→ M2 (beam director)               [engagement-invariant scalar outputs]
+      └─→ M3 (geometry + trajectory)  [computes t_dwell, R(t) callable]
+           ├─→ M9 (NOHD)              [geometry-independent; runs once at t=0]
+           └─→ TRAJECTORY LOOP (driven by M8 PDE timestep):
+                 ├─ at every PDE step (~1–10 ms of engagement time):
+                 │     R_now = R(t)
+                 │     (sub-sampled every ~50–100 ms; cached + interpolated):
+                 │       M4 (atmosphere)  at R_now → tau_atm, alpha_atm
+                 │       M5 (turbulence)  at R_now → r0_sph, w_turb
+                 │       M6↔M7 fixed-point at R_now → S_TB, w_bloom, w_total,
+                 │                                    I_avg_aim
+                 │     q(t) = A_λ · I_avg_aim(t) − ε·σ·(T⁴ − T_amb⁴)
+                 │     PDE step forward with q(t)
+                 │     if T_surface ≥ T_fail:  kill at R_now; break
+                 │     if t ≥ t_dwell:         timeout; break
+                 └─ M8 result: tau_BT, R_at_kill, T_surface_peak, E_delivered,
+                                failure_mode, trajectory_* time series
+                      └─→ M10 (power/thermal)
 ```
 
-The M6↔M7 iteration: start with `S_TB = 1, w_bloom = 0`; compute M7's `w_total`; pass to M6; update `S_TB, w_bloom`; re-run M7. Iterate until `w_total` changes less than 1% between iterations, max 10 iterations.
+**Sub-sampling and warm-starts (v2.0):** Most M4/M5/M6/M7 outputs change slowly with R(t) — every 50–100 ms of engagement time is sufficient resolution. Sub-sample the upstream chain at this interval; cache intermediate values; interpolate `I_avg_aim(t)` between sub-samples for the in-between PDE timesteps. The M6↔M7 Picard fixed-point at each sub-sample uses **warm-start** from the previous sub-sample's converged `w_total` — typical iteration count drops from 2–4 (cold) to 1–2 (warm). The HV-5/7 quad integral cached across sub-samples within ~5 % R-change. Realistic per-orchestrator-call wall-time on the canonical scenario: 0.5–2 s.
+
+**The M6↔M7 iteration (within one sub-sample):** start with the warm-start guess (or `S_TB = 1, w_bloom = 0` cold); compute M7's `w_total`; pass to M6; update `S_TB, w_bloom`; re-run M7. Iterate until `w_total` changes less than 1 % between iterations, max 10 iterations.
+
+**Stationary-target degenerate path (v_tgt < 0.1 m/s):** the trajectory loop reduces to the v1 single-point chain — M4/M5/M6/M7 evaluate once at R = R_detect, M8 integrates the PDE at constant flux. Preserved verbatim from v1.12 for the hovering-target case.
 
 For the sweep plots (Plots A, B, C), the orchestrator calls this chain once per range point across the user-specified sweep.
 
@@ -1270,7 +1306,7 @@ The six items below were flagged HIGH UNCERTAINTY at Phase 0 contract time. Afte
 
 4. **Blooming broadening factor 0.3 — accepted for v1.** NRL-derived engineering estimate. Sprangle et al (NRL/MR/6790-08-9141) is already cited in §3 M6 reference line as the empirical basis for the 0.3 multiplier and the multi-physics context. HELEEOS benchmark path available for programs with access.
 
-5. **available_dwell heuristic — DEFERRED TO v2.** The `2·R·tan(FOV/2)/v_tgt` formula is an explicit first-order engagement-basket estimate; a full tracker-dependent model (slew-rate limits, target maneuver, line-of-sight masking, multi-target prioritization) is out of v1 scope by original plan §10.2.
+5. **available_dwell heuristic — CLOSED at SPEC v2.0 (2026-04-25).** The v1.x `2·R·tan(FOV/2)/v_tgt` engagement-basket formula was the explicit first-order placeholder for the staring-director case. v2.0 replaces it with a **tracker-supported trajectory model** that takes the user's threat trajectory (head-on closing or lateral pass) as a first-class input and integrates the M8 heat PDE forward with time-varying boundary flux as the slant range changes through the engagement. New M3 inputs `R_detect`, `R_min`, `engagement_geometry` parameterise the trajectory; closed-form dwell formulas per §3 M3. Tracker dynamics (slew-rate, gimbal acceleration), target maneuver, 3D trajectories, line-of-sight masking remain v3-deferred — see `docs/tracker_dwell_plan_2026-04-25.md` §13. CLAUDE §7.2 scope guard formally relaxed at v2.0; user approved 2026-04-25.
 
 6. **Convective backside BC — accepted for v1, citation added.** `h_conv = 10 + 6.2·sqrt(v_tgt)` cross-checked against Incropera & DeWitt 6th ed. Ch. 7 flat-plate correlation (`Nu_L = 0.664·Re_L^(1/2)·Pr^(1/3)` + natural-convection floor) within ±20% per review memo §10.6. Acceptable for v1; program-specific vehicle data overrides via UI input when available.
 
@@ -1353,4 +1389,6 @@ Primary sources cited in this SPEC:
 
 ---
 
-**END OF SPEC.md v1.9**
+**END OF SPEC.md v2.0**
+
+**v2.0 implementation status:** the v2.0 contract above describes the tracker-supported dwell + threat-trajectory model. Code changes land in PRs 2–12 of `docs/tracker_dwell_plan_2026-04-25.md`; until those land, runtime behaviour continues to match the v1.12 contract recorded in revision history. PR 1 of that plan ships **this SPEC update + the plan document only**; no code or test changes.
