@@ -2406,12 +2406,136 @@ def plot_h_engagement_profile(result: dict | None) -> go.Figure:
     return fig
 
 
+# ---------------------------------------------------------------------------
+# DRI Analyzer — independent of the HEL chain. Three FOV-sweep plots
+# (Detection / Recognition / Identification) show how the DRI distance
+# changes as the camera zooms from NFOV to WFOV, with the geometric
+# Johnson limit (solid) and the atmospheric Koschmieder ceiling
+# (dashed) overlaid so the user reads the binding constraint at a
+# glance. PR 4 adds the four optional plots (target-size sweep,
+# transmission curve, Cn² sweep, heatmap).
+# ---------------------------------------------------------------------------
+
+
+def plot_dri_distance_vs_fov(
+    sweep: list[dict] | None,
+    *,
+    level: str,
+    nfov_deg: float | None = None,
+) -> go.Figure:
+    """DRI distance (km) vs camera FOV (deg) for one DRI level.
+
+    Each sweep entry is a dict produced by
+    ``physics.dri_analyzer.fov_sweep`` and carries:
+        - "fov_deg"
+        - "R_final_m" (the smaller of geometry-limited and atm-limited)
+        - "R_geom_eff_m"
+        - "R_atm_m"
+        - "binding"  ("atmosphere" | "geometry")
+
+    Renders three traces:
+        - Geometric limit   (solid, primary palette colour)
+        - Atmospheric limit (dashed reference, gray)
+        - Final range       (filled area below — colour-codes the
+                             regime: green where geometry binds, amber
+                             where atmosphere binds).
+
+    A vertical reference line marks the user's NFOV so the headline
+    metric in the tab body is locatable on the curve.
+
+    Empty / None sweep falls back to the always-render frame.
+    """
+    height = PLOT_HEIGHTS["default"]
+    title = f"{level} range vs field of view"
+    xtitle = "Field of view (deg)"
+    ytitle = f"{level} range (km)"
+
+    if not sweep:
+        return _empty_frame(
+            title=title, xtitle=xtitle, ytitle=ytitle,
+            advisory=ADVISORY["infeasible_geometry"], height=height,
+        )
+
+    palette = _active_palette()
+    fovs = [float(s["fov_deg"]) for s in sweep]
+    R_geom_km = [float(s["R_geom_eff_m"]) / 1000.0 for s in sweep]
+    R_atm_km = [float(s["R_atm_m"]) / 1000.0 for s in sweep]
+    R_final_km = [float(s["R_final_m"]) / 1000.0 for s in sweep]
+
+    s0 = _series_style(0, palette)
+    ref_line = _reference_style(palette)
+
+    fig = go.Figure()
+
+    # Final range — thicker line + filled area to ground-truth the
+    # binding regime visually.
+    fig.add_trace(go.Scatter(
+        x=fovs, y=R_final_km,
+        mode="lines",
+        name=f"{level} range (final)",
+        line=dict(**{**s0["line"], "width": 3}),
+        fill="tozeroy",
+        fillcolor=_hex_to_rgba(palette["status.ok"], alpha=0.10),
+        hovertemplate=(
+            "FOV %{x:.2f}° · R %{y:.2f} km<extra></extra>"
+        ),
+    ))
+
+    # Geometric limit — solid primary line at the same colour but no fill.
+    fig.add_trace(go.Scatter(
+        x=fovs, y=R_geom_km,
+        mode="lines",
+        name="Geometric limit (Johnson)",
+        line=dict(color=palette["data.a"], width=1.5, dash="solid"),
+        hovertemplate=(
+            "FOV %{x:.2f}° · geom %{y:.2f} km<extra></extra>"
+        ),
+    ))
+
+    # Atmospheric ceiling — dashed reference (constant in FOV).
+    fig.add_trace(go.Scatter(
+        x=fovs, y=R_atm_km,
+        mode="lines",
+        name="Atmospheric ceiling (Koschmieder)",
+        line=ref_line,
+        hovertemplate=(
+            "FOV %{x:.2f}° · atm %{y:.2f} km<extra></extra>"
+        ),
+    ))
+
+    # NFOV reference (vertical, dashed).
+    if nfov_deg is not None and nfov_deg > 0:
+        fig.add_vline(
+            x=float(nfov_deg),
+            line=dict(
+                color=palette["fg.tertiary"], width=1.0, dash="dot",
+            ),
+            annotation_text="NFOV",
+            annotation_position="top left",
+            annotation_font=dict(color=palette["fg.secondary"], size=10),
+        )
+
+    fig.update_layout(
+        title=title,
+        height=height,
+        hovermode="x unified",
+        legend=dict(
+            orientation="h", yanchor="bottom", y=1.02,
+            xanchor="right", x=1.0,
+        ),
+    )
+    fig.update_xaxes(title_text=xtitle)
+    fig.update_yaxes(title_text=ytitle, rangemode="tozero")
+    return fig
+
+
 __all__ = [
     "plot_a_on_target_performance",
     "plot_b_time_to_burnthrough",
     "plot_c_beam_diameter_breakdown",
     "plot_c_spot_tightening_through_trajectory",
     "plot_d_blooming_distortion_number",
+    "plot_dri_distance_vs_fov",
     "plot_e_engagement_margin_vs_range",
     "plot_g_spot_vs_bucket",
     "plot_h_engagement_profile",

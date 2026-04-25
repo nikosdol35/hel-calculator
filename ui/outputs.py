@@ -1764,7 +1764,11 @@ def _render_worked_example() -> None:
 # =============================================================================
 
 
-def render_tab_dri_analyzer(result: dict) -> None:
+def render_tab_dri_analyzer(
+    result: dict,
+    *,
+    dri_sweeps: dict[str, list[dict]] | None = None,
+) -> None:
     """Render the DRI Analyzer tab.
 
     Reads:
@@ -1772,14 +1776,18 @@ def render_tab_dri_analyzer(result: dict) -> None:
         - The DRI compute outputs (dri_R_detection_m / _recognition_m /
           _identification_m, binding labels, atmospheric / optical
           diagnostics, assumptions_flagged).
+        - dri_sweeps (optional) — pre-computed FOV-sweep dicts keyed by
+          {"Detection", "Recognition", "Identification"}; built by
+          ``ui.app.run_dri_fov_sweep_cached``. PR 3.
     Writes:
         - A 3-card headline row of D / R / I ranges at NFOV.
         - A verdict chip naming the limiting term per level.
+        - Three required FOV-sweep plots (D / R / I).
         - A small diagnostics row (atmospheric ceiling, IFOV components).
         - The methodology / assumptions panel.
 
-    PR 3 will wire the three FOV-sweep plots; PR 4 the four optional
-    plots + design doc.
+    PR 4 will add four optional plots (target-size sweep, transmission
+    curve, Cn² sweep, heatmap).
     """
     from ui.components import status_chip
 
@@ -1831,6 +1839,25 @@ def render_tab_dri_analyzer(result: dict) -> None:
         chip_text = "Atmosphere-limited at " + ", ".join(levels_atm)
         chip_severity = "info"
     status_chip(chip_text, chip_severity)
+
+    # --- Required FOV-sweep plots (D / R / I) ------------------------------
+    if dri_sweeps:
+        from ui import plots
+        from ui.theme import PLOTLY_MODEBAR_CONFIG
+
+        section_header("DRI distance vs field of view")
+        explanation(EXPLANATIONS["dri_plot_fov_intro"])
+
+        nfov_deg = result.get("dri_nfov_deg")
+        for level in ("Detection", "Recognition", "Identification"):
+            sweep = dri_sweeps.get(level) or []
+            st.plotly_chart(
+                plots.plot_dri_distance_vs_fov(
+                    sweep, level=level, nfov_deg=nfov_deg,
+                ),
+                use_container_width=True,
+                config=PLOTLY_MODEBAR_CONFIG,
+            )
 
     # --- Diagnostics row ----------------------------------------------------
     section_header("Diagnostics")
