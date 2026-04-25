@@ -494,38 +494,57 @@ progress_slot.empty()
 st.session_state[_LAST_RUN_AT] = time.time()
 
 # ---------------------------------------------------------------------------
-# Tabbed results — six panes in reading order. Each tab's content lives
+# Tabbed results — seven panes in reading order. Each tab's content lives
 # in a dedicated ``render_tab_<name>`` function in ``ui/outputs.py``. The
 # tab container fades in via a CSS animation on ``.stTabs`` from
 # ``ui/theme.py`` (150 ms ease-out; clamped to 50 ms under
 # prefers-reduced-motion).
+#
+# Build a {key: tab_widget} dict instead of positional destructuring —
+# adding a tab to TAB_LABELS no longer requires editing this block, and
+# a partially-deployed ui/labels.py (e.g. Streamlit Cloud build cache
+# missing the latest math-tab key) degrades gracefully rather than
+# crashing the whole app at the unpacking line.
 # ---------------------------------------------------------------------------
-(tab_overview, tab_engagement, tab_target, tab_safety,
- tab_atmos, tab_diag, tab_math) = st.tabs(list(TAB_LABELS.values()))
+tab_widgets = st.tabs(list(TAB_LABELS.values()))
+tabs = dict(zip(TAB_LABELS.keys(), tab_widgets))
 
-with tab_overview:
-    outputs.render_tab_overview(merged)
+# Each render block is keyed by TAB_LABELS key. The .get() with a
+# falsy fallback means a missing key no-ops cleanly; the tab simply
+# doesn't render. This is the line that breaks the otherwise hard
+# dependency between TAB_LABELS and the render dispatch — important
+# because the two files can drift in deploy environments where the
+# build cache is partial.
+if "overview" in tabs:
+    with tabs["overview"]:
+        outputs.render_tab_overview(merged)
 
-with tab_engagement:
-    outputs.render_tab_engagement(
-        merged,
-        reference_range=R_ref_km * 1000.0,
-        sweep=sweep,
-    )
+if "engagement" in tabs:
+    with tabs["engagement"]:
+        outputs.render_tab_engagement(
+            merged,
+            reference_range=R_ref_km * 1000.0,
+            sweep=sweep,
+        )
 
-with tab_target:
-    outputs.render_tab_target_effects(merged)
+if "target_effects" in tabs:
+    with tabs["target_effects"]:
+        outputs.render_tab_target_effects(merged)
 
-with tab_safety:
-    outputs.render_tab_safety(merged)
+if "safety" in tabs:
+    with tabs["safety"]:
+        outputs.render_tab_safety(merged)
 
-with tab_atmos:
-    outputs.render_tab_atmosphere(merged, sweep=sweep)
+if "atmosphere" in tabs:
+    with tabs["atmosphere"]:
+        outputs.render_tab_atmosphere(merged, sweep=sweep)
 
-with tab_diag:
-    outputs.render_tab_diagnostics(merged)
+if "diagnostics" in tabs:
+    with tabs["diagnostics"]:
+        outputs.render_tab_diagnostics(merged)
 
-with tab_math:
-    outputs.render_tab_math(merged)
+if "math" in tabs:
+    with tabs["math"]:
+        outputs.render_tab_math(merged)
 
 _render_footer()
