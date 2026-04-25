@@ -130,8 +130,23 @@ INPUT_LABELS: dict[str, LabelEntry] = {
     },
     "R": {
         "label":   "Slant range to target",
-        "tooltip": "Line-of-sight distance from the beam director to the aimpoint.",
+        "tooltip": "Line-of-sight distance from the beam director to the aimpoint. (v1.x backward-compat key; SPEC v2.0 uses R_detect.)",
         "unit":    "m",
+    },
+    "R_detect": {
+        "label":   "Detection range R_detect",
+        "tooltip": "Slant range at which the target is first detected and the laser begins engagement. The trajectory model integrates from here down to R_min as the target closes (head-on) or passes (lateral).",
+        "unit":    "m",
+    },
+    "R_min": {
+        "label":   "Standoff range R_min",
+        "tooltip": "Engagement-end standoff. Head-on: the target's release / danger range — the engagement must close before the target gets this close. Lateral: the closest-approach distance — the perpendicular standoff from the director.",
+        "unit":    "m",
+    },
+    "engagement_geometry": {
+        "label":   "Engagement geometry",
+        "tooltip": "Threat trajectory shape. Head-on: target closes along the line of sight at v_tgt. Lateral: target flies a perpendicular pass with closest-approach distance R_min.",
+        "unit":    "",
     },
     "H_t": {
         "label":   "Target altitude",
@@ -140,7 +155,7 @@ INPUT_LABELS: dict[str, LabelEntry] = {
     },
     "v_tgt": {
         "label":   "Target velocity",
-        "tooltip": "Target's along-track speed in the sensor frame.",
+        "tooltip": "Target velocity along the threat trajectory: closing speed for head-on, lateral speed for a pass-by.",
         "unit":    "m/s",
     },
     "v_perp": {

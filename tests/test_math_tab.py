@@ -420,18 +420,17 @@ def test_pr4_constants_verdicts_use_known_categories():
 
 
 def test_pr4_worked_example_at_1km():
-    """The worked example is the c_uas preset at R = 1 km
-    (user-specified default)."""
+    """The worked example is the c_uas preset under the SPEC v2.0
+    trajectory contract: head-on closing from R_detect = 1500 m to
+    R_min = 100 m. (Originally pinned at R = 1 km in PR 4 of the
+    math-tab plan; rewritten in PR 6 of the tracker-dwell plan to
+    consume the new trajectory inputs.)"""
     from ui.worked_example import WORKED_EXAMPLE_INPUTS
 
-    assert WORKED_EXAMPLE_INPUTS["R"] == 1000, (
-        f"worked example R = {WORKED_EXAMPLE_INPUTS['R']}; "
-        f"expected 1000 m per the user's PR 4 directive"
-    )
-    # Other inputs match the c_uas_short_range scenario the rest of
-    # the project's golden fixtures use, so a reader can cross-check
-    # any single value against the existing golden JSON by changing
-    # only R.
+    assert WORKED_EXAMPLE_INPUTS["engagement_geometry"] == "head_on"
+    assert WORKED_EXAMPLE_INPUTS["R_detect"] == 1500
+    assert WORKED_EXAMPLE_INPUTS["R_min"] == 100
+    # Other inputs match the c_uas_short_range scenario.
     assert WORKED_EXAMPLE_INPUTS["P0"] == 3000
     assert WORKED_EXAMPLE_INPUTS["material"] == "CFRP"
     assert WORKED_EXAMPLE_INPUTS["wavelength"] == 1.07e-6

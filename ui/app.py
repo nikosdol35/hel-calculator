@@ -140,8 +140,12 @@ def run_sweep_cached(frozen_inputs: tuple, ranges_m: tuple) -> list[dict]:
     """
     base = dict(frozen_inputs)
     samples: list[dict] = []
+    # SPEC v2.0: in trajectory mode the sweep varies R_detect; in v1.x
+    # mode it varies R. Pick the right key based on what the inputs
+    # carry.
+    sweep_key = "R_detect" if "engagement_geometry" in base else "R"
     for R in ranges_m:
-        inputs_at_R = {**base, "R": R}
+        inputs_at_R = {**base, sweep_key: R}
         result = run_full_chain(inputs_at_R)
         samples.append({**result, "range": R})
     return samples
@@ -156,7 +160,11 @@ _URL_PREFILL_KEY = "_url_prefill"
 _URL_FLAGS_KEY = "_url_flags"
 #: Keys whose values should be carried as strings (enums); everything
 #: else is parsed as float.
-_URL_STRING_KEYS = frozenset({"cn2_model", "material", "backside_BC"})
+_URL_STRING_KEYS = frozenset({
+    "cn2_model", "material", "backside_BC",
+    # SPEC v2.0 §3 M3 — engagement_geometry is a string enum.
+    "engagement_geometry",
+})
 
 
 def _decode_url_params_once() -> None:
@@ -325,11 +333,17 @@ with st.sidebar:
     # Reference-range slider — drives the spot-and-Strehl section's
     # "at reference range" display and highlights the same range on
     # the performance, burn-through, and beam-breakdown plots.
+    # SPEC v2.0: in trajectory mode the reference range corresponds to
+    # R_detect (the sweep varies detection range). Falls back to v1's
+    # R when the user is on the legacy contract.
+    _R_ref_default = float(
+        user_inputs.get("R_detect", user_inputs.get("R", 1500.0))
+    )
     R_ref_km = st.slider(
         "Reference range (km)",
         min_value=0.1,
-        max_value=float(user_inputs.get("R", 1500.0)) / 1000.0 * 2.0 + 0.1,
-        value=float(user_inputs.get("R", 1500.0)) / 1000.0,
+        max_value=_R_ref_default / 1000.0 * 2.0 + 0.1,
+        value=_R_ref_default / 1000.0,
         step=0.1,
         key="R_ref_km",
     )
@@ -458,7 +472,9 @@ except NotImplementedError as exc:
     st.stop()
 
 # --- Range-sweep samples for the Engagement tab ---------------------------
-R_selected = float(user_inputs.get("R", 1500.0))
+R_selected = float(
+    user_inputs.get("R_detect", user_inputs.get("R", 1500.0))
+)
 R_min = max(100.0, R_selected * 0.1)
 R_max = min(50_000.0, R_selected * 2.0)
 N_samples = 30
