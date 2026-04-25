@@ -559,6 +559,16 @@ def render_tab_engagement(
             config=PLOTLY_MODEBAR_CONFIG,
         )
         explanation(EXPLANATIONS["plot_h_intro"], variant="plot")
+        # SPEC v2.0 §8.4 — Plot I (outcome map vs R_detect) sits right
+        # under Plot H. Both rely on the v2 trajectory contract; both
+        # are gated on the same trajectory_t_pde guard so they appear
+        # or disappear together.
+        st.plotly_chart(
+            plots.plot_i_outcome_map_vs_R_detect(sweep),
+            use_container_width=True,
+            config=PLOTLY_MODEBAR_CONFIG,
+        )
+        explanation(EXPLANATIONS["plot_i_intro"], variant="plot")
     st.plotly_chart(
         plots.plot_g_spot_vs_bucket(sweep, d_aim=d_aim_si),
         use_container_width=True,
