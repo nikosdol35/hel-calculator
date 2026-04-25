@@ -132,6 +132,56 @@ def run_chain_cached(frozen_inputs: tuple) -> dict:
 
 
 @st.cache_data(max_entries=10, show_spinner=False)
+def run_dri_fov_sweep_cached(
+    frozen_inputs: tuple,
+    level: str,
+    n_points: int = 30,
+) -> list[dict]:
+    """Cache wrapper: DRI FOV-sweep evaluation NFOV → WFOV.
+
+    Pulls NFOV / WFOV / sensor / atmosphere / target keys from the
+    frozen `user_inputs` tuple and produces a list of dicts (one per
+    FOV grid point) ready for ``plot_dri_distance_vs_fov``. Cheap —
+    each cell is closed-form arithmetic + a 3-step path-length
+    fixed-point iteration; ~30 cells finish in <50 ms.
+    """
+    from physics import dri_analyzer
+    base = dict(frozen_inputs)
+    nfov = float(base["dri_nfov_deg"])
+    wfov = float(base["dri_wfov_deg"])
+    if wfov <= nfov:
+        return []
+    # Resolve the target h_target the same way compute() does.
+    target_preset = base["dri_target_preset"]
+    if target_preset == "Custom":
+        h_target = float(base.get("dri_target_h_m", 1.0))
+    else:
+        h_target = dri_analyzer.target_critical_dim(target_preset)
+    cn2 = dri_analyzer.CN2_PRESETS[base["dri_cn2_preset"]]
+    n_cycles_50 = float(base[{
+        "Detection": "dri_n_cycles_D",
+        "Recognition": "dri_n_cycles_R",
+        "Identification": "dri_n_cycles_I",
+    }[level]])
+    return dri_analyzer.fov_sweep(
+        level=level,
+        fov_low_deg=nfov,
+        fov_high_deg=wfov,
+        n_points=n_points,
+        h_target=h_target,
+        n_pixels_h=int(base["dri_n_pixels_h"]),
+        band=base["dri_band"],
+        cn2=cn2,
+        V_km=float(base["dri_visibility_km"]),
+        f_mm=float(base["dri_focal_length_mm"]),
+        f_number=float(base["dri_f_number"]),
+        C0=float(base.get("dri_C0", 0.30)),
+        probability=float(base.get("dri_probability", 0.50)),
+        n_cycles_50=n_cycles_50,
+    )
+
+
+@st.cache_data(max_entries=10, show_spinner=False)
 def run_sweep_cached(frozen_inputs: tuple, ranges_m: tuple) -> list[dict]:
     """Cache wrapper: orchestrator evaluation at N slant-range samples.
 
@@ -532,6 +582,19 @@ try:
 except (KeyError, ValueError):
     dri_result = {}
 
+# DRI FOV sweeps for the three required plots (Detection / Recognition
+# / Identification). Each sweep is ~30 closed-form evaluations + a
+# 3-step path-length fixed-point — well under 100 ms total. Cached at
+# the @st.cache_data layer so re-renders on the same inputs are free.
+dri_sweeps: dict[str, list[dict]] = {}
+if dri_result:
+    dri_frozen = _freeze(user_inputs)
+    for _level in ("Detection", "Recognition", "Identification"):
+        try:
+            dri_sweeps[_level] = run_dri_fov_sweep_cached(dri_frozen, _level)
+        except (KeyError, ValueError):
+            dri_sweeps[_level] = []
+
 # Merge user_inputs into the result so the output sections can read
 # ``result['M2']`` and ``result['sigma_jit']`` without changing the
 # ARCH §6.4 signature. User-input keys are disjoint from module-output
@@ -609,6 +672,6 @@ if "math" in tabs:
 
 if "dri_analyzer" in tabs:
     with tabs["dri_analyzer"]:
-        outputs.render_tab_dri_analyzer(merged)
+        outputs.render_tab_dri_analyzer(merged, dri_sweeps=dri_sweeps)
 
 _render_footer()
