@@ -84,6 +84,8 @@ _DISPLAY_SCALE: dict[str, float] = {
     # Distance — SI m → display km
     "NOHD_tophat":    1e-3,
     "NOHD_gausspeak": 1e-3,
+    # SPEC v2.0 §3 M3 — engagement-end slant range, displayed in km
+    "R_at_dwell_end": 1e-3,
     # Angle — SI rad → display µrad
     "theta_diff":       1e6,
     "theta_diff_pure":  1e6,

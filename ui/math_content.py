@@ -439,6 +439,50 @@ def _entries() -> dict[str, MetricEntry]:
         ),
     ))
 
+    rows.append(MetricEntry(
+        key="R_at_dwell_end",
+        module="M3",
+        display_name="Slant range at engagement-end",
+        symbol_latex=r"R_\text{end}",
+        unit_si="m",
+        formula_latex=r"R_\text{end} = R_\text{min}",
+        formula_text=(
+            "R_at_dwell_end = R_min   "
+            "(SPEC v2.0 — engagement window ends at the standoff range "
+            "for both head-on and lateral; equals R_slant in v1.x "
+            "backward-compat mode where there is no trajectory)"
+        ),
+        formula_dependencies=("R_slant",),
+        sensitivity_inputs=("R", "R_min"),
+        explanation_short=(
+            "The slant range at the moment the engagement window ends. "
+            "For a tracker-supported engagement, this is the user's "
+            "standoff range R_min — the closest the target gets before "
+            "the laser must cease engagement (or the closest-approach "
+            "point of a lateral pass)."
+        ),
+        explanation_full=(
+            "SPEC v2.0 introduces this output as part of the trajectory "
+            "model. For head-on engagements, R_at_dwell_end equals "
+            "R_min (the user's engagement-end standoff). For lateral "
+            "engagements, R_at_dwell_end equals R_min (the perpendicular "
+            "closest-approach distance) by construction. In v1.x "
+            "backward-compat mode (no trajectory model), the output "
+            "equals R_slant — the engagement happens at a single range. "
+            "Stationary targets (v_tgt < 0.1 m/s) report R_at_dwell_end "
+            "= R_detect since the engagement runs at constant range."
+        ),
+        citation="SPEC v2.0 §3 M3",
+        code_ref="physics/m3_geometry.py::compute",
+        derivation_link="docs/tracker_dwell_plan_2026-04-25.md",
+        provenance=(),
+        assumptions=(
+            "R_at_dwell_end is the engagement-end range, NOT the kill "
+            "range. The kill range (where the burn-through actually "
+            "happens) is reported separately as R_at_kill from M8.",
+        ),
+    ))
+
     # =========================================================================
     # M4 — Atmosphere
     # =========================================================================

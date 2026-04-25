@@ -369,6 +369,11 @@ OUTPUT_LABELS: dict[str, LabelEntry] = {
         "tooltip": "Maximum time the beam can hold the aimpoint given the engagement kinematics.",
         "unit":    "s",
     },
+    "R_at_dwell_end": {
+        "label":   "Slant at engagement-end",
+        "tooltip": "Slant range at the moment the engagement window ends — the user's standoff range R_min for tracker-supported engagements; the unchanged slant range in backward-compat mode.",
+        "unit":    "km",
+    },
     "margin": {
         "label":   "Engagement margin",
         "tooltip": "(available_dwell − time-to-burn-through) / time-to-burn-through. Positive means dwell exceeds the lethality requirement.",
