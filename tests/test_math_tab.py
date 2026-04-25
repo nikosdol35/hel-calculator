@@ -51,15 +51,19 @@ def test_math_content_entries_have_required_fields():
     on the MetricEntry itself — see test_every_math_content_key_has_label."""
     from ui.math_content import MATH_CONTENT
 
-    # Dimensionless metrics may carry an empty unit_si (the convention
-    # for ratios like S_TB, PIB_fraction, τ_atm, N_D).
+    # Dimensionless numeric metrics may carry an empty unit_si (the
+    # convention for ratios like S_TB, PIB_fraction, τ_atm, N_D).
+    # Categorical (verdict) outputs likewise have no unit since they
+    # are strings or booleans.
     dimensionless_ok = {
-        "tau_atm", "PIB_fraction", "S_TB", "N_D", "m67_converged",
+        "tau_atm", "PIB_fraction", "S_TB", "N_D",
+        "duty_cycle_limit",      # 0..1 dimensionless
+        "m67_iteration_count",   # integer count
     }
     for key, entry in MATH_CONTENT.items():
         assert entry.display_name, f"{key}: missing display_name"
         assert entry.module, f"{key}: missing module"
-        if key not in dimensionless_ok:
+        if key not in dimensionless_ok and not entry.is_categorical:
             assert entry.unit_si, f"{key}: missing unit_si"
         assert entry.explanation_short, (
             f"{key}: missing explanation_short — every metric needs a "
@@ -240,6 +244,107 @@ def test_compute_sensitivity_skips_zero_base():
         perturbation_runner=runner,
     )
     assert sens == {}
+
+
+def test_pr3_modules_present():
+    """PR 3 of the math-tab plan covers M8, M9, M10, and the
+    orchestrator (12 numeric + 4 categorical + 1 diagnostic = 17 entries)."""
+    from ui.math_content import MATH_CONTENT
+
+    expected_pr3_keys = {
+        # M8 — burn-through (3 numeric + 1 categorical)
+        "tau_BT", "T_surface_peak", "E_delivered", "failure_mode",
+        # M9 — eye safety (3 numeric + 1 categorical)
+        "MPE", "NOHD_tophat", "NOHD_gausspeak", "laser_class",
+        # M10 — power & thermal (5 numeric + 1 categorical)
+        "P_in", "Q_waste", "t_sustain",
+        "duty_cycle_limit", "engagements_per_hour",
+        "engagement_viable",
+        # Orchestrator (1 numeric + 1 categorical)
+        "m67_iteration_count", "m67_converged",
+    }
+    actual = set(MATH_CONTENT.keys())
+    missing = expected_pr3_keys - actual
+    assert not missing, f"PR 3 missing entries: {missing}"
+
+
+def test_solver_based_metrics_flagged():
+    """The three M8 PDE outputs must have ``is_solver_based=True`` so
+    the renderer shows the multi-line formula recipe instead of trying
+    to fit the heat PDE into a single LaTeX cell."""
+    from ui.math_content import MATH_CONTENT
+
+    expected_solver_keys = {"tau_BT", "T_surface_peak", "E_delivered"}
+    actual_solver_keys = {
+        k for k, e in MATH_CONTENT.items() if e.is_solver_based
+    }
+    assert actual_solver_keys == expected_solver_keys, (
+        f"is_solver_based flag drift: expected {expected_solver_keys}, "
+        f"got {actual_solver_keys}"
+    )
+
+
+def test_categorical_metrics_count_and_keys():
+    """The four categorical (verdict) outputs are exactly the ones
+    plan §2 enumerates: failure_mode, laser_class, engagement_viable,
+    m67_converged. None has a LaTeX formula; all have prose
+    formula_text."""
+    from ui.math_content import MATH_CONTENT
+
+    expected_categorical = {
+        "failure_mode",
+        "laser_class",
+        "engagement_viable",
+        "m67_converged",
+    }
+    actual_categorical = {
+        k for k, e in MATH_CONTENT.items() if e.is_categorical
+    }
+    assert actual_categorical == expected_categorical, (
+        f"Categorical-flag drift: expected {expected_categorical}, "
+        f"got {actual_categorical}"
+    )
+
+    for key in actual_categorical:
+        entry = MATH_CONTENT[key]
+        assert entry.formula_latex is None, (
+            f"{key}: categorical metric should NOT have formula_latex"
+        )
+        assert entry.formula_text, (
+            f"{key}: categorical metric must have prose formula_text "
+            f"(the verdict rule)"
+        )
+
+
+def test_complete_metric_count():
+    """After PR 3, MATH_CONTENT must cover all 45 unique orchestrator
+    output keys (41 numeric + 4 categorical) per the plan §2 inventory.
+
+    Catches both under-coverage (a key the orchestrator emits with no
+    math-tab record) and ahead-of-schedule drift (an extra record
+    that doesn't match a real output)."""
+    from physics.orchestrator import run_full_chain
+    from tests.golden.scenarios import C_UAS_1500M
+    from ui.math_content import MATH_CONTENT
+
+    res = run_full_chain(C_UAS_1500M)
+    # Drop the by_module / assumptions_flagged auxiliaries — they
+    # aren't displayable metrics.
+    output_keys = set(res.keys()) - {"by_module", "assumptions_flagged"}
+
+    math_keys = set(MATH_CONTENT.keys())
+
+    missing_in_math = output_keys - math_keys
+    extra_in_math = math_keys - output_keys
+
+    assert not missing_in_math, (
+        f"Orchestrator emits {len(missing_in_math)} key(s) with no "
+        f"math-tab record: {missing_in_math}"
+    )
+    assert not extra_in_math, (
+        f"MATH_CONTENT has {len(extra_in_math)} key(s) the orchestrator "
+        f"does not emit: {extra_in_math}"
+    )
 
 
 def test_compute_sensitivity_signed_direction():

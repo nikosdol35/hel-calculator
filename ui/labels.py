@@ -413,6 +413,26 @@ OUTPUT_LABELS: dict[str, LabelEntry] = {
         "tooltip": "How many back-to-back engagements the system can sustain in one hour, given cooling recovery.",
         "unit":    "",
     },
+    # Categorical / verdict outputs surfaced in the math tab (PR 3 of
+    # the math-tab plan). Engagement viability and the M6↔M7 iteration
+    # diagnostics already render via dedicated cards on the Overview /
+    # Diagnostics tabs but did not have OUTPUT_LABELS entries until the
+    # math-tab coverage test required them.
+    "engagement_viable": {
+        "label":   "Engagement viable",
+        "tooltip": "True when the system can sustain output long enough to defeat the target before the cooling loop saturates.",
+        "unit":    "",
+    },
+    "m67_iteration_count": {
+        "label":   "M6↔M7 iterations",
+        "tooltip": "How many passes the blooming–focusing fixed-point loop took to converge to 1 % tolerance.",
+        "unit":    "",
+    },
+    "m67_converged": {
+        "label":   "M6↔M7 converged",
+        "tooltip": "Whether the blooming–focusing loop reached its convergence tolerance within the 10-iteration cap.",
+        "unit":    "",
+    },
 
     # -- Atmosphere (Atmosphere tab) ------------------------------------------
     "alpha_atm": {

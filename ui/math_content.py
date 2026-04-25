@@ -1225,6 +1225,713 @@ def _entries() -> dict[str, MetricEntry]:
         assumptions=(),
     ))
 
+    # =========================================================================
+    # M8 — Burn-through (solver-based; see plan §6.1 for the special row layout)
+    # =========================================================================
+
+    rows.append(MetricEntry(
+        key="tau_BT",
+        module="M8",
+        display_name="Time to burn-through",
+        symbol_latex=r"\tau_\text{BT}",
+        unit_si="s",
+        is_solver_based=True,
+        formula_latex=(
+            r"\dfrac{\partial T}{\partial t} = "
+            r"\alpha_\text{th} \, \dfrac{\partial^{2} T}{\partial x^{2}}"
+        ),
+        formula_text=(
+            "Solver-based — no closed form. Heat PDE:\n"
+            "    dT/dt = alpha_th * d^2T/dx^2     (alpha_th = k/(rho·c_p))\n"
+            "Front-face BC:  -k * dT/dx|_0 = A_lambda * I_avg_aim\n"
+            "                                  - eps*sigma*(T^4 - T_amb^4)\n"
+            "Back-face BC:   -k * dT/dx|_L = h_conv * (T - T_amb)\n"
+            "                                  [or insulated]\n"
+            "Stop condition: tau_BT = first t when T_surface >= T_fail"
+        ),
+        formula_dependencies=("I_avg_aim",),
+        sensitivity_inputs=(
+            "P0", "eta_opt", "M2", "D", "wavelength", "sigma_jit",
+            "R", "V", "RH", "v_perp", "Cn2_ground", "v_HV",
+            "d_aim", "thickness", "T_ambient", "v_tgt",
+        ),
+        explanation_short=(
+            "How long the laser must hold the target steady to defeat it. "
+            "If shorter than the dwell window, the engagement closes — "
+            "this is the headline number for the engagement-viability "
+            "question."
+        ),
+        explanation_full=(
+            "Result of forward-time integration of a 1-D transient heat "
+            "PDE through the target's thickness. Front face absorbs a "
+            "fraction A_λ of the incoming irradiance and re-radiates "
+            "thermally; back face is either insulated or convects to "
+            "ambient air at h_conv = 10 + 6.2·√v_tgt. The solver is "
+            "explicit finite-difference with 50 µm grid spacing and a "
+            "CFL-safe 0.4×Δx²/(2α) timestep; tau_BT is reported as soon "
+            "as the front-face temperature reaches the material's "
+            "tabulated failure threshold (melt for metals, decomposition "
+            "for polymers, vent onset for batteries)."
+        ),
+        citation=(
+            "Carslaw & Jaeger 1959 §2.3; Incropera & DeWitt §5 / "
+            "SPEC §3 M8"
+        ),
+        code_ref="physics/m8_burnthrough.py::compute",
+        derivation_link="validation/derivations/m8_thermal.md",
+        provenance=(ProvenanceFlag.HIGH_UNCERTAINTY,
+                    ProvenanceFlag.REPLICATED),
+        assumptions=(
+            "1-D heat conduction (lateral spreading neglected — valid "
+            "when bucket diameter ≫ thermal diffusion length).",
+            "A_lambda lookup from the v1 material table; users with "
+            "measured data should override via Panel E.",
+            "h_conv = 10 + 6.2·√v_tgt natural+forced convection "
+            "engineering correlation (Incropera & DeWitt Ch. 7).",
+            "60 s solver timeout; if T_fail isn't reached within the "
+            "window, tau_BT clamps to 60 s and the engagement is "
+            "flagged as 'no failure within window'.",
+        ),
+    ))
+
+    rows.append(MetricEntry(
+        key="T_surface_peak",
+        module="M8",
+        display_name="Peak front-face temperature",
+        symbol_latex=r"T_\text{surf,peak}",
+        unit_si="K",
+        is_solver_based=True,
+        formula_latex=(
+            r"T_\text{surf,peak} = "
+            r"\max_{0 \le t \le \tau_\text{BT}} T_\text{surf}(t)"
+        ),
+        formula_text=(
+            "T_surface_peak = max over 0 <= t <= tau_BT of T_surface(t)\n"
+            "(value of the solver's surface-node temperature at tau_BT)"
+        ),
+        formula_dependencies=("tau_BT",),
+        sensitivity_inputs=(
+            "P0", "eta_opt", "M2", "D", "wavelength", "sigma_jit",
+            "R", "V", "RH", "v_perp", "Cn2_ground", "v_HV",
+            "d_aim", "thickness", "T_ambient", "v_tgt",
+        ),
+        explanation_short=(
+            "How hot the laser-side surface gets before failure. By "
+            "design this is at or just above the material's failure "
+            "threshold — that's what defines 'burn-through' here."
+        ),
+        explanation_full=(
+            "Reported value is the surface-node temperature at the "
+            "solver's stopping point, which is the first time the "
+            "surface reaches the failure threshold T_fail. If the "
+            "simulation hits its 60 s timeout without reaching T_fail "
+            "the value reported is the surface temperature at t = 60 s."
+        ),
+        citation="SPEC §3 M8",
+        code_ref="physics/m8_burnthrough.py::compute",
+        derivation_link="validation/derivations/m8_thermal.md",
+        provenance=(),
+        assumptions=(),
+    ))
+
+    rows.append(MetricEntry(
+        key="E_delivered",
+        module="M8",
+        display_name="Energy delivered to the target",
+        symbol_latex=r"E_\text{delivered}",
+        unit_si="J/m^2",
+        is_solver_based=True,
+        formula_latex=(
+            r"E_\text{delivered} = "
+            r"A_\lambda \cdot I_\text{avg,aim} \cdot \tau_\text{BT}"
+        ),
+        formula_text=(
+            "E_delivered = A_lambda * I_avg_aim * tau_BT   "
+            "[absorbed energy per unit area at burn-through]"
+        ),
+        formula_dependencies=("I_avg_aim", "tau_BT"),
+        sensitivity_inputs=(
+            "P0", "eta_opt", "M2", "D", "wavelength", "sigma_jit",
+            "R", "V", "RH", "v_perp", "Cn2_ground", "v_HV",
+            "d_aim", "thickness", "T_ambient", "v_tgt",
+        ),
+        explanation_short=(
+            "Total absorbed energy per unit area at the moment of "
+            "burn-through. A useful cross-check — for a given material, "
+            "the value should be roughly constant across operating "
+            "conditions because that's the failure fluence."
+        ),
+        explanation_full=(
+            "Computed inside the M8 solver as the absorbed flux times "
+            "the time to failure. For metals reaching melt, this is "
+            "approximately the sensible-heat fluence ρ·c_p·(T_fail−T_amb)·"
+            "thickness plus the latent-heat term L_f·ρ·thickness. For "
+            "polymers, the latent term is omitted (decomposition is "
+            "modelled as instantaneous at T_fail). Engineering trade "
+            "studies often quote 'failure fluence' for a material; this "
+            "metric is the tool's numerical realisation of that "
+            "quantity."
+        ),
+        citation="SPEC §3 M8",
+        code_ref="physics/m8_burnthrough.py::compute",
+        derivation_link="validation/derivations/m8_thermal.md",
+        provenance=(ProvenanceFlag.HIGH_UNCERTAINTY,),
+        assumptions=(
+            "Absorbed-energy reporting uses the material-table A_lambda; "
+            "see SPEC §10.2 for the HIGH UNCERTAINTY caveat.",
+        ),
+    ))
+
+    rows.append(MetricEntry(
+        key="failure_mode",
+        module="M8",
+        display_name="Failure mode",
+        symbol_latex=r"",
+        unit_si="",
+        is_categorical=True,
+        formula_text=(
+            "Set by the M8 solver when T_surface reaches T_fail. The\n"
+            "tabulated mode for the chosen material:\n"
+            "  metals (anodised Al)    -> 'melt'\n"
+            "  CFRP / GFRP / ABS / PC  -> 'decomposition'\n"
+            "  EPP foam                -> 'decomposition'\n"
+            "  LiPo cell               -> 'vent'\n"
+            "If the 60 s solver timeout fires without reaching T_fail,\n"
+            "the value is 'no_failure_before_timeout'."
+        ),
+        formula_dependencies=("tau_BT",),
+        sensitivity_inputs=(),
+        explanation_short=(
+            "How the target fails when enough energy has been "
+            "deposited: melt for metals, decomposition for polymers and "
+            "composites, vent for sealed cells like LiPo batteries."
+        ),
+        explanation_full=(
+            "The failure mode is a per-material classification, not a "
+            "calculation — the solver simply reports the mode tabulated "
+            "for the user's selected material when the surface first "
+            "reaches T_fail. The mode determines downstream engineering "
+            "questions: 'melt' suggests the target's structural skin is "
+            "compromised; 'decomposition' suggests a polymer matrix has "
+            "given way (often before structural failure); 'vent' on a "
+            "LiPo means the cell will release flammable gas."
+        ),
+        citation="SPEC §3 M8 / m8_material_tables.py",
+        code_ref="physics/m8_burnthrough.py::compute",
+        derivation_link="validation/derivations/m8_thermal.md",
+        provenance=(),
+        assumptions=(),
+    ))
+
+    # =========================================================================
+    # M9 — Eye-safety / NOHD
+    # =========================================================================
+
+    rows.append(MetricEntry(
+        key="MPE",
+        module="M9",
+        display_name="Maximum permissible exposure",
+        symbol_latex=r"\text{MPE}",
+        unit_si="W/m^2",
+        formula_latex=(
+            r"\text{MPE}(\lambda, t) = \begin{cases} "
+            r"5 \times 10^{-7} / t \cdot 10^{4} & \text{if } t < 18\,\mu\text{s} \\ "
+            r"1.8 \times 10^{-3} \, t^{-0.25} \cdot 10^{4} & "
+            r"\text{if } 18\,\mu\text{s} \le t \le 10\,\text{s, Band A} \\ "
+            r"0.56 \, t^{-0.75} \cdot 10^{4} & "
+            r"\text{if } t \le 10\,\text{s, Band B} \\ "
+            r"\text{(chronic limits otherwise)} & "
+            r"\end{cases}"
+        ),
+        formula_text=(
+            "MPE = piecewise per ANSI Z136.1-2014 (no C_A applied —\n"
+            "       conservative posture per the §10.3 disposition).\n"
+            "  Band A (400-1400 nm), 18us <= t <= 10s:\n"
+            "       MPE = 1.8e-3 * t^(-0.25)  W/cm^2\n"
+            "  Band B (1400-4000 nm), t <= 10s:\n"
+            "       MPE = 0.56 * t^(-0.75)    W/cm^2\n"
+            "  Pulsed (t < 18 us):     MPE = 5e-7 / t  W/cm^2\n"
+            "  Output W/m^2 = above * 1e4"
+        ),
+        formula_dependencies=(),
+        sensitivity_inputs=("wavelength", "t_exp"),
+        explanation_short=(
+            "The highest irradiance level at which a typical eye can "
+            "tolerate direct exposure for the configured exposure time, "
+            "per the ANSI laser-safety standard."
+        ),
+        explanation_full=(
+            "Piecewise function of wavelength and exposure time: the "
+            "Band A formula covers the 400–1400 nm retinal-hazard "
+            "range, Band B covers 1400–4000 nm (mostly cornea+lens). "
+            "v1 conservatively omits the wavelength-correction factor "
+            "C_A (which would raise the MPE — a less-conservative "
+            "result). The pulsed-regime constant was a paired SPEC + "
+            "code edit at v1.12 fixing a typo that gave a 10⁴× "
+            "discontinuity at the 18 µs join."
+        ),
+        citation="ANSI Z136.1-2014 Table 5; SPEC §3 M9 / SPEC §10.3",
+        code_ref="physics/m9_nohd.py::_mpe_irradiance_wpm2",
+        derivation_link="validation/derivations/m9_safety.md",
+        provenance=(ProvenanceFlag.HIGH_UNCERTAINTY,),
+        assumptions=(
+            "C_A wavelength correction NOT applied — conservative.",
+            "Band C (λ > 4 µm) deferred to v2; Band B formulas used as "
+            "placeholder there.",
+        ),
+    ))
+
+    rows.append(MetricEntry(
+        key="NOHD_tophat",
+        module="M9",
+        display_name="NOHD — top-hat (ANSI general)",
+        symbol_latex=r"\text{NOHD}_\text{TH}",
+        unit_si="m",
+        formula_latex=(
+            r"\text{NOHD}_\text{TH} = \max\!\left(0, \; "
+            r"\dfrac{1}{\theta} \sqrt{\dfrac{4 \, P_{0}}"
+            r"{\pi \, \text{MPE}}} \;-\; \dfrac{D}{\theta}\right)"
+        ),
+        formula_text=(
+            "NOHD_tophat = max(0, (1/theta) * sqrt(4*P0 / (pi*MPE)) "
+            "                       - D/theta)\n"
+            "(D/theta is the aperture correction — beam fills aperture "
+            "out to that range)"
+        ),
+        formula_dependencies=("theta_diff", "MPE"),
+        sensitivity_inputs=("P0", "M2", "D", "wavelength", "t_exp"),
+        explanation_short=(
+            "Distance beyond which the average beam irradiance is below "
+            "the maximum permissible exposure, under the ANSI general "
+            "(top-hat) convention."
+        ),
+        explanation_full=(
+            "The top-hat convention assumes uniform intensity across "
+            "the beam — appropriate for the ANSI default safety case. "
+            "The aperture correction D/θ subtracts the distance over "
+            "which the beam fills the launch aperture (in that "
+            "near-field zone, the beam is still essentially "
+            "collimated, not diverging). For tightly-focused systems "
+            "with a small aperture, the correction is small; for "
+            "large apertures with tight divergence, it can be a "
+            "substantial fraction of the NOHD."
+        ),
+        citation="ANSI Z136.1-2014 §6.1; SPEC §3 M9",
+        code_ref="physics/m9_nohd.py::compute",
+        derivation_link="validation/derivations/m9_safety.md",
+        provenance=(ProvenanceFlag.REPLICATED,),
+        assumptions=(
+            "Top-hat (uniform) beam profile across the aperture.",
+            "Aperture correction subtracted; result clamped to zero "
+            "when subtraction would go negative (rare; only for very "
+            "tight divergence).",
+        ),
+    ))
+
+    rows.append(MetricEntry(
+        key="NOHD_gausspeak",
+        module="M9",
+        display_name="NOHD — Gaussian-peak (single-mode HEL)",
+        symbol_latex=r"\text{NOHD}_\text{GP}",
+        unit_si="m",
+        formula_latex=(
+            r"\text{NOHD}_\text{GP} = \max\!\left(0, \; "
+            r"\dfrac{1}{\theta} \sqrt{\dfrac{8 \, P_{0}}"
+            r"{\pi \, \text{MPE}}} \;-\; \dfrac{D}{\theta}\right)"
+        ),
+        formula_text=(
+            "NOHD_gausspeak = max(0, (1/theta) * sqrt(8*P0 / (pi*MPE)) "
+            "                       - D/theta)"
+        ),
+        formula_dependencies=("theta_diff", "MPE"),
+        sensitivity_inputs=("P0", "M2", "D", "wavelength", "t_exp"),
+        explanation_short=(
+            "Distance beyond which the on-axis peak irradiance is below "
+            "the MPE. The Gaussian-peak factor of 8 (vs. the top-hat 4) "
+            "gives a NOHD √2 larger — more conservative for a "
+            "single-mode HEL whose energy is concentrated on-axis."
+        ),
+        explanation_full=(
+            "The factor of 8 in the numerator captures the on-axis peak "
+            "irradiance of a Gaussian beam (the factor of 2 from the "
+            "Gaussian peak compared to the spatially-averaged irradiance "
+            "in the top-hat formula). The tool reports both NOHD "
+            "conventions so the operator can pick the one that matches "
+            "the safety case being made — typically Gaussian-peak for "
+            "single-mode HEL beams."
+        ),
+        citation="ANSI Z136.1-2014; SPEC §3 M9 / CLAUDE §7.1",
+        code_ref="physics/m9_nohd.py::compute",
+        derivation_link="validation/derivations/m9_safety.md",
+        provenance=(ProvenanceFlag.CLAUDE_71_INVARIANT,
+                    ProvenanceFlag.REPLICATED),
+        assumptions=(
+            "Single-mode Gaussian beam profile.",
+        ),
+    ))
+
+    rows.append(MetricEntry(
+        key="laser_class",
+        module="M9",
+        display_name="Laser class",
+        symbol_latex=r"",
+        unit_si="",
+        is_categorical=True,
+        formula_text=(
+            "Per ANSI Z136.1 / IEC 60825-1 power thresholds (CW NIR):\n"
+            "  P0 <= 0.39 mW    -> 'Class 1'\n"
+            "  P0 <= 1 mW       -> 'Class 1M'\n"
+            "  P0 <= 5 mW       -> 'Class 3R'\n"
+            "  P0 <= 500 mW     -> 'Class 3B'\n"
+            "  P0 > 500 mW      -> 'Class 4'\n"
+            "HEL P0 values always classify as Class 4."
+        ),
+        formula_dependencies=(),
+        sensitivity_inputs=("P0",),
+        explanation_short=(
+            "Standard hazard classification of the laser, set entirely "
+            "by output power in the CW near-infrared regime. Every HEL "
+            "in this tool's range comes out Class 4 — the most-hazardous "
+            "category."
+        ),
+        explanation_full=(
+            "The classification gates downstream operational rules: "
+            "Class 4 requires beam-stop interlocks, controlled-area "
+            "barriers, dedicated laser-safety officer oversight, and "
+            "specific-wavelength eyewear for everyone inside the NOHD."
+        ),
+        citation="ANSI Z136.1-2014 §3 / IEC 60825-1:2014",
+        code_ref="physics/m9_nohd.py::_classify",
+        derivation_link="validation/derivations/m9_safety.md",
+        provenance=(),
+        assumptions=(
+            "CW NIR convention; pulsed and visible-band classifications "
+            "are not in v1 scope.",
+        ),
+    ))
+
+    # =========================================================================
+    # M10 — Power and thermal resources
+    # =========================================================================
+
+    rows.append(MetricEntry(
+        key="P_in",
+        module="M10",
+        display_name="Wallplug input power",
+        symbol_latex=r"P_\text{in}",
+        unit_si="W",
+        formula_latex=r"P_\text{in} = \dfrac{P_{0}}{\eta_\text{wp}}",
+        formula_text="P_in = P0 / eta_wallplug",
+        formula_dependencies=(),
+        sensitivity_inputs=("P0", "eta_wallplug"),
+        explanation_short=(
+            "Electrical wattage the laser draws from prime power to "
+            "deliver the user-input optical output power."
+        ),
+        explanation_full=(
+            "Inverse of the wallplug efficiency. A 30 %-efficient laser "
+            "outputting 3 kW optical needs 10 kW electrical input; the "
+            "remaining 7 kW becomes waste heat and shows up in the "
+            "Q_waste row below."
+        ),
+        citation="SPEC §3 M10",
+        code_ref="physics/m10_power_thermal.py::compute",
+        derivation_link="validation/derivations/m10_power.md",
+        provenance=(),
+        assumptions=(
+            "Constant wallplug efficiency over the engagement (no warm-"
+            "up or thermal-runaway derating).",
+        ),
+    ))
+
+    rows.append(MetricEntry(
+        key="Q_waste",
+        module="M10",
+        display_name="Waste heat",
+        symbol_latex=r"Q_\text{waste}",
+        unit_si="W",
+        formula_latex=r"Q_\text{waste} = P_\text{in} - P_{0}",
+        formula_text="Q_waste = P_in - P0",
+        formula_dependencies=("P_in",),
+        sensitivity_inputs=("P0", "eta_wallplug"),
+        explanation_short=(
+            "How much heat the cooling loop must remove to keep the "
+            "laser running. Equals input power minus optical output."
+        ),
+        explanation_full=(
+            "First-law energy balance: every watt of electrical input "
+            "either leaves as laser light or has to be dumped as heat. "
+            "Q_waste is what the cooling loop sees."
+        ),
+        citation="SPEC §3 M10",
+        code_ref="physics/m10_power_thermal.py::compute",
+        derivation_link="validation/derivations/m10_power.md",
+        provenance=(),
+        assumptions=(),
+    ))
+
+    rows.append(MetricEntry(
+        key="t_sustain",
+        module="M10",
+        display_name="Sustain time",
+        symbol_latex=r"t_\text{sustain}",
+        unit_si="s",
+        formula_latex=(
+            r"t_\text{sustain} = \begin{cases} \infty & "
+            r"\text{if } Q_\text{waste} \le Q_\text{cool} \\ "
+            r"\dfrac{C_\text{th} \, \Delta T_\text{max}}"
+            r"{Q_\text{waste} - Q_\text{cool}} & "
+            r"\text{otherwise} \end{cases}"
+        ),
+        formula_text=(
+            "if Q_waste <= Q_cool:    t_sustain = inf\n"
+            "else:                    t_sustain = C_thermal * dT_max\n"
+            "                                  / (Q_waste - Q_cool)"
+        ),
+        formula_dependencies=("Q_waste",),
+        sensitivity_inputs=(
+            "P0", "eta_wallplug", "Q_cool", "C_thermal", "dT_max",
+        ),
+        explanation_short=(
+            "How long the laser can fire continuously before the "
+            "coolant loop reaches its temperature limit. Infinite when "
+            "the cooling capacity matches or exceeds the waste-heat "
+            "rate."
+        ),
+        explanation_full=(
+            "Single-lumped-mass coolant model: the loop has a thermal "
+            "capacity C_thermal and a fixed sink rate Q_cool. When "
+            "Q_waste exceeds Q_cool, the loop temperature rises at a "
+            "rate (Q_waste − Q_cool) / C_thermal; t_sustain is the time "
+            "to reach the dT_max limit. When Q_waste ≤ Q_cool, the loop "
+            "equilibrates at a steady temperature below the limit and "
+            "the run time is unbounded."
+        ),
+        citation="SPEC §3 M10",
+        code_ref="physics/m10_power_thermal.py::compute",
+        derivation_link="validation/derivations/m10_power.md",
+        provenance=(),
+        assumptions=(
+            "Single lumped-mass coolant model; constant Q_waste over "
+            "the engagement (P0 not ramped).",
+        ),
+    ))
+
+    rows.append(MetricEntry(
+        key="duty_cycle_limit",
+        module="M10",
+        display_name="Duty-cycle limit",
+        symbol_latex=r"D_\text{cycle}",
+        unit_si="",
+        formula_latex=(
+            r"D_\text{cycle} = "
+            r"\dfrac{t_\text{sustain}}{t_\text{sustain} + t_\text{recover}}"
+            r"\quad \text{with } t_\text{recover} = "
+            r"C_\text{th} \, \Delta T_\text{max} / Q_\text{cool}"
+        ),
+        formula_text=(
+            "if Q_waste <= Q_cool:   duty_cycle_limit = 1.0\n"
+            "elif Q_cool > 0:\n"
+            "    t_recover = C_thermal * dT_max / Q_cool\n"
+            "    duty_cycle_limit = t_sustain / (t_sustain + t_recover)\n"
+            "else:                   duty_cycle_limit = 0.0\n"
+            "                                  (no active cooling — single-shot)"
+        ),
+        formula_dependencies=("t_sustain",),
+        sensitivity_inputs=(
+            "P0", "eta_wallplug", "Q_cool", "C_thermal", "dT_max",
+        ),
+        explanation_short=(
+            "What fraction of the time the laser can be active over a "
+            "sustained run-recover cycle. 1.0 means no down-time needed; "
+            "smaller values mean cooling has to catch up between shots."
+        ),
+        explanation_full=(
+            "Combines the sustain phase (firing while the loop heats "
+            "up) with the recovery phase (resting while the loop cools "
+            "down) under the same lumped-mass model. With no active "
+            "cooling (Q_cool = 0), duty cycle is zero and the system is "
+            "thermally single-shot. The recovery time uses the same "
+            "ΔT_max and C_thermal as the sustain time so the bookkeeping "
+            "is self-consistent."
+        ),
+        citation="SPEC §3 M10",
+        code_ref="physics/m10_power_thermal.py::compute",
+        derivation_link="validation/derivations/m10_power.md",
+        provenance=(),
+        assumptions=(
+            "Symmetric sustain/recover bookkeeping at the same dT_max.",
+        ),
+    ))
+
+    rows.append(MetricEntry(
+        key="engagements_per_hour",
+        module="M10",
+        display_name="Engagements per hour",
+        symbol_latex=r"N_\text{eng/hr}",
+        unit_si="1/h",
+        formula_latex=(
+            r"N_\text{eng/hr} = "
+            r"\dfrac{3600 \cdot D_\text{cycle}}{t_\text{engagement}}"
+        ),
+        formula_text=(
+            "engagements_per_hour = 3600 * duty_cycle_limit "
+            "/ t_engagement"
+        ),
+        formula_dependencies=("duty_cycle_limit", "tau_BT"),
+        sensitivity_inputs=(
+            "P0", "eta_wallplug", "Q_cool", "C_thermal", "dT_max",
+            # tau_BT is upstream; perturbing t_engagement directly is
+            # not a user input but the engagement time effectively
+            # follows tau_BT. Skip from sensitivity inputs.
+        ),
+        explanation_short=(
+            "How many full engagements the system can complete per hour "
+            "given the cooling-loop duty cycle and the time each "
+            "engagement takes."
+        ),
+        explanation_full=(
+            "Translates the dimensionless duty cycle into an absolute "
+            "throughput rate. For an unbounded-duty system (Q_waste ≤ "
+            "Q_cool), this is simply 3600 / tau_BT — the system is "
+            "limited only by the burn-through time. For a duty-limited "
+            "system, the achievable rate is reduced proportionally."
+        ),
+        citation="SPEC §3 M10",
+        code_ref="physics/m10_power_thermal.py::compute",
+        derivation_link="validation/derivations/m10_power.md",
+        provenance=(),
+        assumptions=(
+            "Engagements are sized at tau_BT; in the field, a real "
+            "engagement may run shorter (tracker breaks lock) or "
+            "longer (multiple aimpoints).",
+        ),
+    ))
+
+    rows.append(MetricEntry(
+        key="engagement_viable",
+        module="M10",
+        display_name="Engagement viable",
+        symbol_latex=r"",
+        unit_si="",
+        is_categorical=True,
+        formula_text=(
+            "engagement_viable = (t_engagement <= t_sustain)\n"
+            "Boolean — True when burn-through finishes before the "
+            "cooling loop hits its dT_max limit."
+        ),
+        formula_dependencies=("tau_BT", "t_sustain"),
+        sensitivity_inputs=(),
+        explanation_short=(
+            "Whether the engagement closes from a thermal-budget "
+            "perspective: yes if the laser can sustain output for the "
+            "burn-through time, no if the cooling loop will saturate "
+            "first."
+        ),
+        explanation_full=(
+            "This boolean is one of two viability gates. The engagement "
+            "tab's verdict chip combines this with the dwell-vs-tau_BT "
+            "comparison from M3/M8 to produce the final "
+            "engageable / marginal / not-viable classification. A 'no' "
+            "here means the laser physically cannot keep firing long "
+            "enough — the operator's lever is bigger cooling capacity "
+            "or shorter burn-through time."
+        ),
+        citation="SPEC §3 M10",
+        code_ref="physics/m10_power_thermal.py::compute",
+        derivation_link="validation/derivations/m10_power.md",
+        provenance=(),
+        assumptions=(),
+    ))
+
+    # =========================================================================
+    # Orchestrator — M6↔M7 fixed-point loop diagnostics
+    # =========================================================================
+
+    rows.append(MetricEntry(
+        key="m67_iteration_count",
+        module="ORC",
+        display_name="M6↔M7 iteration count",
+        symbol_latex=r"N_\text{iter}",
+        unit_si="",
+        formula_latex=(
+            r"N_\text{iter} = \min\!\left(N \;|\; "
+            r"\left|\dfrac{w_\text{total}^{(N)} - w_\text{total}^{(N-1)}}"
+            r"{w_\text{total}^{(N-1)}}\right| < 0.01 \right)"
+        ),
+        formula_text=(
+            "N_iter = first N where |Δw_total / w_total_prev| < 0.01\n"
+            "        with hard cap at N_iter <= 10\n"
+            "        (Picard fixed-point iteration of M6 -> M7 -> M6 ...)"
+        ),
+        formula_dependencies=(),
+        sensitivity_inputs=(
+            "P0", "eta_opt", "M2", "D", "wavelength", "sigma_jit",
+            "R", "V", "RH", "v_perp", "Cn2_ground", "v_HV",
+        ),
+        explanation_short=(
+            "How many passes the M6 (blooming) and M7 (spot size) "
+            "modules took to settle on a self-consistent answer. Low "
+            "values mean the engagement is well-behaved; the cap of 10 "
+            "indicates the loop didn't converge."
+        ),
+        explanation_full=(
+            "M6 needs the spot size to compute blooming, but M7 needs "
+            "the blooming to compute the spot size — Picard iteration "
+            "alternates them until the change between passes drops "
+            "below 1 %. Most engagements settle in 2–4 iterations; "
+            "values near the 10-iteration cap usually mean N_D is at "
+            "the model-validity edge."
+        ),
+        citation="SPEC §4 / orchestrator.py iteration loop",
+        code_ref="physics/orchestrator.py::_iterate_m6_m7",
+        derivation_link="validation/methods/m6_m7_iteration.md",
+        provenance=(ProvenanceFlag.REPLICATED,),
+        assumptions=(
+            "Picard fixed-point iteration; under-relaxation deferred "
+            "to a future revision (the loop converges within 10 "
+            "iterations across the validated input ranges).",
+        ),
+    ))
+
+    rows.append(MetricEntry(
+        key="m67_converged",
+        module="ORC",
+        display_name="M6↔M7 converged",
+        symbol_latex=r"",
+        unit_si="",
+        is_categorical=True,
+        formula_text=(
+            "m67_converged = (N_iter < 10)   AND\n"
+            "                (|delta_w_total| / w_total < 0.01)\n"
+            "Boolean — True when the iteration hit its tolerance "
+            "before the 10-pass cap."
+        ),
+        formula_dependencies=("m67_iteration_count",),
+        sensitivity_inputs=(),
+        explanation_short=(
+            "Whether the M6↔M7 iteration reached its convergence "
+            "tolerance. False is rare and usually accompanied by an "
+            "assumption flag about N_D exceeding the model-validity "
+            "envelope."
+        ),
+        explanation_full=(
+            "The orchestrator sets this False (and adds an "
+            "assumptions_flagged entry) when the loop exhausts its 10-"
+            "iteration budget without seeing the relative change in "
+            "w_total fall below 1 %. The reported S_TB, w_bloom, N_D, "
+            "and w_total values are still the last iterate, but they "
+            "should be read as 'best-effort' under that condition — "
+            "the underlying engineering model is at or beyond its "
+            "validity edge."
+        ),
+        citation="SPEC §4",
+        code_ref="physics/orchestrator.py::_iterate_m6_m7",
+        derivation_link="validation/methods/m6_m7_iteration.md",
+        provenance=(),
+        assumptions=(),
+    ))
+
     rows.append(MetricEntry(
         key="I_avg_aim",
         module="M7",
