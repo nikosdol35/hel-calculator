@@ -1768,6 +1768,10 @@ def render_tab_dri_analyzer(
     result: dict,
     *,
     dri_sweeps: dict[str, list[dict]] | None = None,
+    dri_target_size_sweeps: dict[str, list[dict]] | None = None,
+    dri_cn2_sweeps: dict[str, list[dict]] | None = None,
+    dri_frozen: tuple | None = None,
+    dri_heatmap_runner=None,
 ) -> None:
     """Render the DRI Analyzer tab.
 
@@ -1858,6 +1862,115 @@ def render_tab_dri_analyzer(
                 use_container_width=True,
                 config=PLOTLY_MODEBAR_CONFIG,
             )
+
+    # --- Optional plot DRI-4: range vs target size at NFOV ------------------
+    if dri_target_size_sweeps:
+        from ui import plots
+        from ui.theme import PLOTLY_MODEBAR_CONFIG
+
+        section_header("DRI distance vs target size")
+        explanation(EXPLANATIONS["dri_plot_target_size_intro"])
+        st.plotly_chart(
+            plots.plot_dri_distance_vs_target_size(
+                dri_target_size_sweeps.get("Detection") or [],
+                dri_target_size_sweeps.get("Recognition") or [],
+                dri_target_size_sweeps.get("Identification") or [],
+            ),
+            use_container_width=True,
+            config=PLOTLY_MODEBAR_CONFIG,
+        )
+
+    # --- Optional plot DRI-5: atmospheric transmission vs range -------------
+    if "dri_alpha_per_km" in result:
+        from ui import plots
+        from ui.theme import PLOTLY_MODEBAR_CONFIG
+
+        section_header("Atmospheric transmission")
+        explanation(EXPLANATIONS["dri_plot_atmospheric_transmission_intro"])
+        # Show out to 2× the atmospheric ceiling so the falloff is visible.
+        R_max_km = max(2.0, 2.0 * (result.get("dri_R_atm_m", 0.0) / 1000.0))
+        R_max_km = min(R_max_km, 100.0)
+        st.plotly_chart(
+            plots.plot_dri_atmospheric_transmission(
+                alpha_per_km=result.get("dri_alpha_per_km"),
+                R_max_km=R_max_km,
+            ),
+            use_container_width=True,
+            config=PLOTLY_MODEBAR_CONFIG,
+        )
+
+    # --- Optional plot DRI-6: range vs Cn² ----------------------------------
+    if dri_cn2_sweeps:
+        from ui import plots
+        from ui.theme import PLOTLY_MODEBAR_CONFIG
+
+        section_header("DRI distance vs atmospheric turbulence")
+        explanation(EXPLANATIONS["dri_plot_cn2_intro"])
+        st.plotly_chart(
+            plots.plot_dri_distance_vs_cn2(
+                dri_cn2_sweeps.get("Detection") or [],
+                dri_cn2_sweeps.get("Recognition") or [],
+                dri_cn2_sweeps.get("Identification") or [],
+            ),
+            use_container_width=True,
+            config=PLOTLY_MODEBAR_CONFIG,
+        )
+
+    # --- Optional plot DRI-7: heatmap (compute-on-click) -------------------
+    if dri_frozen is not None and dri_heatmap_runner is not None:
+        from ui import plots
+        from ui.theme import PLOTLY_MODEBAR_CONFIG
+
+        section_header("DRI heatmap — FOV × target size")
+        explanation(EXPLANATIONS["dri_plot_heatmap_intro"])
+
+        button_key = "_dri_heatmap_compute_clicked"
+        if button_key not in st.session_state:
+            st.session_state[button_key] = False
+
+        col_btn, col_note = st.columns([1, 3])
+        with col_btn:
+            if st.button("Compute heatmap", key="_dri_heatmap_btn"):
+                st.session_state[button_key] = True
+        with col_note:
+            st.caption(
+                "Computes a 20 × 20 (FOV × target size) grid at the user's "
+                "current sensor / atmosphere settings. Takes ~0.5 s on the "
+                "first click; cached afterwards."
+            )
+
+        if st.session_state[button_key]:
+            wfov_deg = float(result.get("dri_wfov_deg", 25.0))
+            nfov_deg = float(result.get("dri_nfov_deg", 1.5))
+            n = 20
+            # Log-spaced grids — match the heatmap axis types.
+            fov_grid = tuple(
+                nfov_deg * ((wfov_deg / nfov_deg) ** (i / (n - 1)))
+                for i in range(n)
+            )
+            target_grid = tuple(
+                0.10 * (10.0 ** (i / (n - 1)))   # 0.10 → 1.0 → 10.0 m
+                for i in range(n)
+            )
+            try:
+                grid = dri_heatmap_runner(
+                    dri_frozen, fov_grid, target_grid, "Detection",
+                )
+                # Convert to km for display.
+                grid_km = [
+                    [v / 1000.0 for v in row] for row in grid
+                ]
+                st.plotly_chart(
+                    plots.plot_dri_heatmap_fov_vs_target(
+                        fov_grid_deg=list(fov_grid),
+                        target_grid_m=list(target_grid),
+                        grid_km=grid_km,
+                    ),
+                    use_container_width=True,
+                    config=PLOTLY_MODEBAR_CONFIG,
+                )
+            except Exception as exc:  # pragma: no cover — defensive
+                st.error(f"Heatmap compute failed: {exc!s}")
 
     # --- Diagnostics row ----------------------------------------------------
     section_header("Diagnostics")

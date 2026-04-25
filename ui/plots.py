@@ -2529,13 +2529,241 @@ def plot_dri_distance_vs_fov(
     return fig
 
 
+def plot_dri_distance_vs_target_size(
+    sweep_d: list[dict] | None,
+    sweep_r: list[dict] | None,
+    sweep_i: list[dict] | None,
+) -> go.Figure:
+    """DRI distance (km) vs target critical dimension h (m), three traces.
+
+    Each sweep is the output of ``physics.dri_analyzer.target_size_sweep``
+    for one of D / R / I. The y-axis shows the final range
+    (= min(geom-limited, atmospheric-limited)). x-axis is on a log scale
+    so small UAS (h ≈ 0.2 m) and large vehicles (h ≈ 5 m) both read
+    cleanly.
+    """
+    height = PLOT_HEIGHTS["default"]
+    title = "DRI distance vs target size"
+    xtitle = "Target critical dimension h = √(W·H) (m, log)"
+    ytitle = "DRI range (km)"
+
+    if not sweep_d or not sweep_r or not sweep_i:
+        return _empty_frame(
+            title=title, xtitle=xtitle, ytitle=ytitle,
+            advisory=ADVISORY["infeasible_geometry"], height=height,
+        )
+
+    palette = _active_palette()
+    fig = go.Figure()
+
+    for idx, (sweep, level) in enumerate((
+        (sweep_d, "Detection"),
+        (sweep_r, "Recognition"),
+        (sweep_i, "Identification"),
+    )):
+        sty = _series_style(idx, palette)
+        xs = [float(s["h_target_m"]) for s in sweep]
+        ys = [float(s["R_final_m"]) / 1000.0 for s in sweep]
+        fig.add_trace(go.Scatter(
+            x=xs, y=ys,
+            mode="lines+markers",
+            name=level,
+            line=sty["line"], marker=sty["marker"],
+            hovertemplate=(
+                "h %{x:.2f} m · R %{y:.2f} km<extra></extra>"
+            ),
+        ))
+
+    fig.update_layout(
+        title=title,
+        height=height,
+        hovermode="x unified",
+        legend=dict(
+            orientation="h", yanchor="bottom", y=1.02,
+            xanchor="right", x=1.0,
+        ),
+    )
+    fig.update_xaxes(title_text=xtitle, type="log")
+    fig.update_yaxes(title_text=ytitle, rangemode="tozero")
+    return fig
+
+
+def plot_dri_atmospheric_transmission(
+    *,
+    alpha_per_km: float | None,
+    R_max_km: float = 30.0,
+) -> go.Figure:
+    """Atmospheric transmission τ(R) = exp(-α·R) over a range axis (km).
+
+    A single line on a linear x-axis up to ``R_max_km``. Useful for
+    reading the Koschmieder envelope behind the headline DRI numbers.
+    A horizontal reference line at τ = exp(-1) = 0.368 marks the
+    1/e-attenuation distance.
+    """
+    height = PLOT_HEIGHTS["default"]
+    title = "Atmospheric transmission vs range"
+    xtitle = "Range (km)"
+    ytitle = "Transmission τ"
+
+    if alpha_per_km is None or alpha_per_km <= 0:
+        return _empty_frame(
+            title=title, xtitle=xtitle, ytitle=ytitle,
+            advisory=ADVISORY["vacuum_path"], height=height,
+        )
+
+    palette = _active_palette()
+    n = 100
+    xs = [R_max_km * i / (n - 1) for i in range(n)]
+    ys = [math.exp(-float(alpha_per_km) * x) for x in xs]
+    s0 = _series_style(0, palette)
+
+    fig = go.Figure()
+    fig.add_trace(go.Scatter(
+        x=xs, y=ys,
+        mode="lines",
+        name="Transmission",
+        line=s0["line"],
+        hovertemplate="R %{x:.1f} km · τ %{y:.3f}<extra></extra>",
+    ))
+
+    # 1/e attenuation reference.
+    fig.add_hline(
+        y=1.0 / math.e,
+        line=dict(color=palette["fg.tertiary"], width=1.0, dash="dot"),
+        annotation_text="1/e (37 %)",
+        annotation_position="top right",
+        annotation_font=dict(color=palette["fg.secondary"], size=10),
+    )
+
+    fig.update_layout(
+        title=title,
+        height=height,
+        hovermode="x unified",
+    )
+    fig.update_xaxes(title_text=xtitle)
+    fig.update_yaxes(title_text=ytitle, range=[0.0, 1.0])
+    return fig
+
+
+def plot_dri_distance_vs_cn2(
+    sweep_d: list[dict] | None,
+    sweep_r: list[dict] | None,
+    sweep_i: list[dict] | None,
+) -> go.Figure:
+    """DRI distance (km) vs Cn² (log x-axis), three traces.
+
+    Each sweep entry has a "cn2" key. Plot covers the seven preset
+    Cn² levels at NFOV (default behaviour of ``cn2_sweep``).
+    """
+    height = PLOT_HEIGHTS["default"]
+    title = "DRI distance vs atmospheric turbulence Cn²"
+    xtitle = "Cn² (m^(−2/3), log)"
+    ytitle = "DRI range (km)"
+
+    if not sweep_d or not sweep_r or not sweep_i:
+        return _empty_frame(
+            title=title, xtitle=xtitle, ytitle=ytitle,
+            advisory=ADVISORY["infeasible_geometry"], height=height,
+        )
+
+    palette = _active_palette()
+    fig = go.Figure()
+
+    for idx, (sweep, level) in enumerate((
+        (sweep_d, "Detection"),
+        (sweep_r, "Recognition"),
+        (sweep_i, "Identification"),
+    )):
+        sty = _series_style(idx, palette)
+        xs = [float(s["cn2"]) for s in sweep]
+        ys = [float(s["R_final_m"]) / 1000.0 for s in sweep]
+        fig.add_trace(go.Scatter(
+            x=xs, y=ys,
+            mode="lines+markers",
+            name=level,
+            line=sty["line"], marker=sty["marker"],
+            hovertemplate=(
+                "Cn² %{x:.1e} · R %{y:.2f} km<extra></extra>"
+            ),
+        ))
+
+    fig.update_layout(
+        title=title,
+        height=height,
+        hovermode="x unified",
+        legend=dict(
+            orientation="h", yanchor="bottom", y=1.02,
+            xanchor="right", x=1.0,
+        ),
+    )
+    fig.update_xaxes(title_text=xtitle, type="log")
+    fig.update_yaxes(title_text=ytitle, rangemode="tozero")
+    return fig
+
+
+def plot_dri_heatmap_fov_vs_target(
+    *,
+    fov_grid_deg: list[float] | None,
+    target_grid_m: list[float] | None,
+    grid_km: list[list[float]] | None,
+) -> go.Figure:
+    """2D heatmap of Detection range (km) over (FOV × target size).
+
+    ``grid_km`` is a 2D list with rows = target sizes (largest at top
+    visually) and columns = FOVs. Compute-on-click pattern preserved
+    via the caller — here we just render whatever we are handed. None
+    inputs fall back to the always-render frame.
+    """
+    height = PLOT_HEIGHTS["hero"]
+    title = "Detection range — FOV × target size"
+    xtitle = "Field of view (deg, log)"
+    ytitle = "Target critical dimension (m, log)"
+
+    if not fov_grid_deg or not target_grid_m or not grid_km:
+        return _empty_frame(
+            title=title, xtitle=xtitle, ytitle=ytitle,
+            advisory=ADVISORY["infeasible_geometry"], height=height,
+        )
+
+    palette = _active_palette()
+
+    fig = go.Figure(data=go.Heatmap(
+        x=fov_grid_deg,
+        y=target_grid_m,
+        z=grid_km,
+        zmin=0.0,
+        colorscale=[
+            [0.0, palette["status.error"]],
+            [0.5, palette["status.warn"]],
+            [1.0, palette["status.ok"]],
+        ],
+        hovertemplate=(
+            "FOV %{x:.2f}° · h %{y:.2f} m · R %{z:.1f} km<extra></extra>"
+        ),
+        colorbar=dict(title=dict(text="R (km)")),
+    ))
+
+    fig.update_layout(
+        title=title,
+        height=height,
+        hovermode="closest",
+    )
+    fig.update_xaxes(title_text=xtitle, type="log")
+    fig.update_yaxes(title_text=ytitle, type="log")
+    return fig
+
+
 __all__ = [
     "plot_a_on_target_performance",
     "plot_b_time_to_burnthrough",
     "plot_c_beam_diameter_breakdown",
     "plot_c_spot_tightening_through_trajectory",
     "plot_d_blooming_distortion_number",
+    "plot_dri_atmospheric_transmission",
+    "plot_dri_distance_vs_cn2",
     "plot_dri_distance_vs_fov",
+    "plot_dri_distance_vs_target_size",
+    "plot_dri_heatmap_fov_vs_target",
     "plot_e_engagement_margin_vs_range",
     "plot_g_spot_vs_bucket",
     "plot_h_engagement_profile",

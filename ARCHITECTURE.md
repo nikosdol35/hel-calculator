@@ -85,6 +85,9 @@ hel-calculator/
 │   ├── m9_nohd.py                  ← M9 module
 │   ├── m10_power_thermal.py        ← M10 module
 │   ├── m11_validation.py           ← Self-test runner (invokes pytest)
+│   ├── m_trajectory.py             ← SPEC v2.0 trajectory model (R(t), t_dwell)
+│   ├── operational_envelope.py     ← Plot K helper — 2D operational-envelope sweep
+│   ├── dri_analyzer.py             ← DRI Analyzer (passive sensor, independent of HEL chain)
 │   ├── orchestrator.py             ← Chain coordinator (M1→M10, M6↔M7 iter); called by ui/app.py
 │   └── common.py                   ← Shared helpers (unit conversions, validators)
 │
@@ -103,7 +106,10 @@ hel-calculator/
 │   ├── test_m10_power_thermal.py
 │   ├── test_convention_consistency.py   ← Cross-module structural tests (M7.4)
 │   ├── test_import_rules.py             ← Verifies Layer 1 has no UI imports
-│   └── test_copy_style.py               ← Copy-style lint: forbidden tokens in user-visible ui/ strings (v1.6)
+│   ├── test_copy_style.py               ← Copy-style lint: forbidden tokens in user-visible ui/ strings (v1.6)
+│   ├── test_dri_analyzer.py             ← DRI physics core (sensor-side analysis)
+│   ├── test_plot_dri_fov_sweep.py       ← DRI FOV-sweep plot smoke + structural
+│   └── test_plot_dri_optional.py        ← DRI optional plots (target size, atm transmission, Cn², heatmap)
 │
 ├── ui/                             ← LAYER 3: Streamlit interface
 │   ├── __init__.py
@@ -125,6 +131,8 @@ hel-calculator/
     ├── Plan_v0p8.docx              ← The project plan (read-only reference)
     ├── references.md               ← Bibliography (matches SPEC Appendix B)
     ├── phase3_ui_redesign_plan_2026-04-23.md   ← Phase 3 design document (v1.6 reference)
+    ├── tracker_dwell_plan_2026-04-25.md        ← SPEC v2.0 trajectory campaign
+    ├── dri_analyzer_design.md                  ← DRI Analyzer (sensor-side analysis, independent of HEL chain)
     └── CHANGELOG.md                ← Human-readable version history (optional)
 ```
 
@@ -183,8 +191,9 @@ Every module file exports exactly one public function (`compute`) and may have a
 | M9 | `m9_nohd.py` | `compute(inputs)` | `MPE, NOHD_tophat, NOHD_gausspeak, laser_class, assumptions_flagged` |
 | M10 | `m10_power_thermal.py` | `compute(inputs)` | `P_in, Q_waste, t_sustain, engagement_viable, duty_cycle_limit, engagements_per_hour, assumptions_flagged` |
 | M11 | `m11_validation.py` | `run_validation_suite()` | structured report dict per SPEC M11 (test_id → {status, expected, actual, tolerance, reference, error_message}) |
+| DRI | `dri_analyzer.py` | `compute(inputs)` | `dri_R_detection_m, dri_R_recognition_m, dri_R_identification_m, dri_R_atm_m, binding labels, IFOV decomposition, dri_assumptions_flagged` (independent of HEL chain — see `docs/dri_analyzer_design.md`) |
 
-**Exact input/output keys are specified in SPEC.md §3.** This file keeps the interface surface view; SPEC is the authority on keys.
+**Exact input/output keys are specified in SPEC.md §3** for the HEL physics chain (M1–M11). The DRI Analyzer is documented in `docs/dri_analyzer_design.md` rather than SPEC.md because it is independent sensor-side analysis, not part of the laser-emitter contract. This file keeps the interface surface view; SPEC and the DRI design doc are the authorities on keys.
 
 ### 4.3 The `common.py` helpers
 

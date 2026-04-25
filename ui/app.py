@@ -131,6 +131,36 @@ def run_chain_cached(frozen_inputs: tuple) -> dict:
     return run_full_chain(dict(frozen_inputs))
 
 
+def _resolve_dri_kwargs(base: dict, level: str) -> dict:
+    """Pull the DRI inputs out of a (frozen) user_inputs tuple-as-dict
+    and resolve them into the kwargs ``physics.dri_analyzer`` helpers
+    expect. Shared by every DRI sweep helper."""
+    from physics import dri_analyzer
+    target_preset = base["dri_target_preset"]
+    if target_preset == "Custom":
+        h_target = float(base.get("dri_target_h_m", 1.0))
+    else:
+        h_target = dri_analyzer.target_critical_dim(target_preset)
+    cn2 = dri_analyzer.CN2_PRESETS[base["dri_cn2_preset"]]
+    n_cycles_50 = float(base[{
+        "Detection": "dri_n_cycles_D",
+        "Recognition": "dri_n_cycles_R",
+        "Identification": "dri_n_cycles_I",
+    }[level]])
+    return dict(
+        h_target=h_target,
+        n_pixels_h=int(base["dri_n_pixels_h"]),
+        band=base["dri_band"],
+        cn2=cn2,
+        V_km=float(base["dri_visibility_km"]),
+        f_mm=float(base["dri_focal_length_mm"]),
+        f_number=float(base["dri_f_number"]),
+        C0=float(base.get("dri_C0", 0.30)),
+        probability=float(base.get("dri_probability", 0.50)),
+        n_cycles_50=n_cycles_50,
+    )
+
+
 @st.cache_data(max_entries=10, show_spinner=False)
 def run_dri_fov_sweep_cached(
     frozen_inputs: tuple,
@@ -151,33 +181,78 @@ def run_dri_fov_sweep_cached(
     wfov = float(base["dri_wfov_deg"])
     if wfov <= nfov:
         return []
-    # Resolve the target h_target the same way compute() does.
-    target_preset = base["dri_target_preset"]
-    if target_preset == "Custom":
-        h_target = float(base.get("dri_target_h_m", 1.0))
-    else:
-        h_target = dri_analyzer.target_critical_dim(target_preset)
-    cn2 = dri_analyzer.CN2_PRESETS[base["dri_cn2_preset"]]
-    n_cycles_50 = float(base[{
-        "Detection": "dri_n_cycles_D",
-        "Recognition": "dri_n_cycles_R",
-        "Identification": "dri_n_cycles_I",
-    }[level]])
     return dri_analyzer.fov_sweep(
         level=level,
         fov_low_deg=nfov,
         fov_high_deg=wfov,
         n_points=n_points,
-        h_target=h_target,
-        n_pixels_h=int(base["dri_n_pixels_h"]),
-        band=base["dri_band"],
-        cn2=cn2,
-        V_km=float(base["dri_visibility_km"]),
-        f_mm=float(base["dri_focal_length_mm"]),
-        f_number=float(base["dri_f_number"]),
-        C0=float(base.get("dri_C0", 0.30)),
-        probability=float(base.get("dri_probability", 0.50)),
-        n_cycles_50=n_cycles_50,
+        **_resolve_dri_kwargs(base, level),
+    )
+
+
+@st.cache_data(max_entries=10, show_spinner=False)
+def run_dri_target_size_sweep_cached(
+    frozen_inputs: tuple,
+    level: str,
+    sizes_m: tuple,
+) -> list[dict]:
+    """Cache wrapper: DRI range vs target critical dimension at NFOV.
+
+    Drops the swept ``h_target`` from the resolved kwargs (the kernel
+    iterates the size argument). Holds FOV at NFOV.
+    """
+    from physics import dri_analyzer
+    base = dict(frozen_inputs)
+    kwargs = _resolve_dri_kwargs(base, level)
+    kwargs.pop("h_target")
+    return dri_analyzer.target_size_sweep(
+        level=level,
+        sizes_m=tuple(float(s) for s in sizes_m),
+        fov_h_deg=float(base["dri_nfov_deg"]),
+        **kwargs,
+    )
+
+
+@st.cache_data(max_entries=10, show_spinner=False)
+def run_dri_cn2_sweep_cached(
+    frozen_inputs: tuple,
+    level: str,
+) -> list[dict]:
+    """Cache wrapper: DRI range across the seven preset Cn² levels at NFOV."""
+    from physics import dri_analyzer
+    base = dict(frozen_inputs)
+    kwargs = _resolve_dri_kwargs(base, level)
+    kwargs.pop("cn2")
+    return dri_analyzer.cn2_sweep(
+        level=level,
+        cn2_values=list(dri_analyzer.CN2_PRESETS.values()),
+        fov_h_deg=float(base["dri_nfov_deg"]),
+        **kwargs,
+    )
+
+
+@st.cache_data(max_entries=4, show_spinner="Computing DRI heatmap…")
+def run_dri_heatmap_cached(
+    frozen_inputs: tuple,
+    fov_grid_deg: tuple,
+    target_grid_m: tuple,
+    level: str = "Detection",
+) -> list[list[float]]:
+    """Cache wrapper: 2D heatmap of R_final over (FOV × target size).
+
+    20×20 = 400 evaluations; <500 ms total (each cell is closed-form
+    plus a 3-step path-length fixed-point). Compute-on-click pattern
+    preserved for UX consistency with the HEL Plot K.
+    """
+    from physics import dri_analyzer
+    base = dict(frozen_inputs)
+    kwargs = _resolve_dri_kwargs(base, level)
+    kwargs.pop("h_target")
+    return dri_analyzer.heatmap(
+        fov_grid_deg=list(fov_grid_deg),
+        target_grid_m=list(target_grid_m),
+        level=level,
+        **kwargs,
     )
 
 
@@ -582,18 +657,42 @@ try:
 except (KeyError, ValueError):
     dri_result = {}
 
-# DRI FOV sweeps for the three required plots (Detection / Recognition
-# / Identification). Each sweep is ~30 closed-form evaluations + a
-# 3-step path-length fixed-point — well under 100 ms total. Cached at
-# the @st.cache_data layer so re-renders on the same inputs are free.
+# DRI sweeps for the three required FOV plots + the four optional
+# plots. Each individual sweep is cheap (~30-100 closed-form evaluations
+# + a 3-step path-length fixed-point — well under 100 ms total).
+# Cached at the @st.cache_data layer so re-renders on the same inputs
+# are free.
 dri_sweeps: dict[str, list[dict]] = {}
+dri_target_size_sweeps: dict[str, list[dict]] = {}
+dri_cn2_sweeps: dict[str, list[dict]] = {}
 if dri_result:
     dri_frozen = _freeze(user_inputs)
+    # Required FOV sweeps (PR 3).
     for _level in ("Detection", "Recognition", "Identification"):
         try:
             dri_sweeps[_level] = run_dri_fov_sweep_cached(dri_frozen, _level)
         except (KeyError, ValueError):
             dri_sweeps[_level] = []
+    # Optional target-size sweep (Plot DRI-4) — log-spaced sizes from
+    # 0.1 m (small drone) to 10 m (large vehicle). 18 points.
+    _target_sizes = tuple(
+        0.10 * (10.0 ** (i / 9.0)) for i in range(19)
+    )  # 19 points covering 0.10 → 10 m
+    for _level in ("Detection", "Recognition", "Identification"):
+        try:
+            dri_target_size_sweeps[_level] = run_dri_target_size_sweep_cached(
+                dri_frozen, _level, _target_sizes,
+            )
+        except (KeyError, ValueError):
+            dri_target_size_sweeps[_level] = []
+    # Optional Cn² sweep (Plot DRI-6) — across the seven preset levels.
+    for _level in ("Detection", "Recognition", "Identification"):
+        try:
+            dri_cn2_sweeps[_level] = run_dri_cn2_sweep_cached(
+                dri_frozen, _level,
+            )
+        except (KeyError, ValueError):
+            dri_cn2_sweeps[_level] = []
 
 # Merge user_inputs into the result so the output sections can read
 # ``result['M2']`` and ``result['sigma_jit']`` without changing the
@@ -672,6 +771,13 @@ if "math" in tabs:
 
 if "dri_analyzer" in tabs:
     with tabs["dri_analyzer"]:
-        outputs.render_tab_dri_analyzer(merged, dri_sweeps=dri_sweeps)
+        outputs.render_tab_dri_analyzer(
+            merged,
+            dri_sweeps=dri_sweeps,
+            dri_target_size_sweeps=dri_target_size_sweeps,
+            dri_cn2_sweeps=dri_cn2_sweeps,
+            dri_frozen=_freeze(user_inputs) if dri_result else None,
+            dri_heatmap_runner=run_dri_heatmap_cached,
+        )
 
 _render_footer()
