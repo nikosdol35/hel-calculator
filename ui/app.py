@@ -181,6 +181,8 @@ _URL_STRING_KEYS = frozenset({
     "cn2_model", "material", "backside_BC",
     # SPEC v2.0 §3 M3 — engagement_geometry is a string enum.
     "engagement_geometry",
+    # DRI Analyzer string-valued inputs (independent of HEL physics).
+    "dri_band", "dri_cn2_preset", "dri_target_preset",
 })
 
 
@@ -519,12 +521,25 @@ except ValueError:
     # its content and shows an inline advisory where the plots would go.
     sweep = None
 
+# --- DRI Analyzer compute -------------------------------------------------
+# Independent of the HEL chain. Runs against the dri_* keys collected
+# by ui/panels.py sections 7–9. Failures here fall back to "no DRI
+# block" rather than killing the whole page — the DRI tab handles the
+# missing-keys case with a friendly notice.
+from physics import dri_analyzer  # local import — module is independent
+try:
+    dri_result = dri_analyzer.compute(user_inputs)
+except (KeyError, ValueError):
+    dri_result = {}
+
 # Merge user_inputs into the result so the output sections can read
 # ``result['M2']`` and ``result['sigma_jit']`` without changing the
 # ARCH §6.4 signature. User-input keys are disjoint from module-output
 # keys (spot checked: P0 / M2 / D / eta_opt / ... vs w0 / zR / I_peak /
-# PIB / ...) except for ``wavelength`` which is idempotent.
-merged = {**user_inputs, **result}
+# PIB / ...) except for ``wavelength`` which is idempotent. DRI inputs
+# and outputs are namespaced under the ``dri_`` prefix, so they don't
+# collide with HEL keys either.
+merged = {**user_inputs, **result, **dri_result}
 
 # Surface any URL-decode flags onto the assumptions roll-up.
 if url_flags:
@@ -591,5 +606,9 @@ if "diagnostics" in tabs:
 if "math" in tabs:
     with tabs["math"]:
         outputs.render_tab_math(merged)
+
+if "dri_analyzer" in tabs:
+    with tabs["dri_analyzer"]:
+        outputs.render_tab_dri_analyzer(merged)
 
 _render_footer()

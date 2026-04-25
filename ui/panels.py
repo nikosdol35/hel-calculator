@@ -454,17 +454,221 @@ def section_6_system_resources(initial: dict | None = None) -> dict:
 
 
 # ---------------------------------------------------------------------------
+# DRI Analyzer sections — Sensor, Atmosphere, Target & Criteria.
+#
+# Independent of the HEL physics chain. All keys are prefixed ``dri_``
+# so they cannot collide with HEL inputs. Default-collapsed expanders
+# so a HEL-only user sees the same sidebar they had before.
+# ---------------------------------------------------------------------------
+
+
+def section_7_dri_sensor(initial: dict | None = None) -> dict:
+    """DRI sensor inputs: resolution, FOVs, focal length, f-number."""
+    from physics.dri_analyzer import (  # local import — keeps panels.py
+        WAVELENGTH_BANDS,                # cheap to load when DRI is disabled
+    )
+    _ = WAVELENGTH_BANDS  # imported for downstream sections; see _atmosphere
+    with st.sidebar.expander(SECTION_LABELS["dri_sensor"], expanded=False):
+        n_pixels_h = st.number_input(
+            _labelled("dri_n_pixels_h"),
+            min_value=320, max_value=8192,
+            value=int(_initial(initial, "dri_n_pixels_h", 1920)),
+            step=160, key="dri_n_pixels_h",
+            help=input_tooltip("dri_n_pixels_h"),
+        )
+        n_pixels_v = st.number_input(
+            _labelled("dri_n_pixels_v"),
+            min_value=240, max_value=8192,
+            value=int(_initial(initial, "dri_n_pixels_v", 1080)),
+            step=120, key="dri_n_pixels_v",
+            help=input_tooltip("dri_n_pixels_v"),
+        )
+        nfov_deg = st.number_input(
+            _labelled("dri_nfov_deg"),
+            min_value=0.05, max_value=60.0,
+            value=float(_initial(initial, "dri_nfov_deg", 1.5)),
+            step=0.1, key="dri_nfov_deg",
+            help=input_tooltip("dri_nfov_deg"),
+        )
+        wfov_deg = st.number_input(
+            _labelled("dri_wfov_deg"),
+            min_value=1.0, max_value=120.0,
+            value=float(_initial(initial, "dri_wfov_deg", 25.0)),
+            step=1.0, key="dri_wfov_deg",
+            help=input_tooltip("dri_wfov_deg"),
+        )
+        focal_length_mm = st.number_input(
+            _labelled("dri_focal_length_mm"),
+            min_value=5.0, max_value=5000.0,
+            value=float(_initial(initial, "dri_focal_length_mm", 200.0)),
+            step=10.0, key="dri_focal_length_mm",
+            help=input_tooltip("dri_focal_length_mm"),
+        )
+        f_number = st.number_input(
+            _labelled("dri_f_number"),
+            min_value=1.0, max_value=22.0,
+            value=float(_initial(initial, "dri_f_number", 2.8)),
+            step=0.1, key="dri_f_number",
+            help=input_tooltip("dri_f_number"),
+        )
+    return {
+        "dri_n_pixels_h": int(n_pixels_h),
+        "dri_n_pixels_v": int(n_pixels_v),
+        "dri_nfov_deg": float(nfov_deg),
+        "dri_wfov_deg": float(wfov_deg),
+        "dri_focal_length_mm": float(focal_length_mm),
+        "dri_f_number": float(f_number),
+    }
+
+
+def section_8_dri_atmosphere(initial: dict | None = None) -> dict:
+    """DRI atmosphere inputs: wavelength band, Cn² preset, visibility, C₀."""
+    from physics.dri_analyzer import CN2_PRESETS, WAVELENGTH_BANDS
+
+    band_options = list(WAVELENGTH_BANDS.keys())
+    cn2_options = list(CN2_PRESETS.keys())
+
+    initial_band = _initial(initial, "dri_band", band_options[0])
+    if initial_band not in band_options:
+        initial_band = band_options[0]
+    initial_cn2 = _initial(initial, "dri_cn2_preset", "Moderate (canonical mid-altitude)")
+    if initial_cn2 not in cn2_options:
+        initial_cn2 = cn2_options[3]  # "Moderate" — index 3
+
+    with st.sidebar.expander(SECTION_LABELS["dri_atmosphere"], expanded=False):
+        band = st.selectbox(
+            input_label("dri_band"),
+            options=band_options,
+            index=band_options.index(initial_band),
+            key="dri_band",
+            help=input_tooltip("dri_band"),
+        )
+        cn2_preset = st.selectbox(
+            input_label("dri_cn2_preset"),
+            options=cn2_options,
+            index=cn2_options.index(initial_cn2),
+            key="dri_cn2_preset",
+            help=input_tooltip("dri_cn2_preset"),
+        )
+        visibility_km = st.number_input(
+            _labelled("dri_visibility_km"),
+            min_value=0.5, max_value=100.0,
+            value=float(_initial(initial, "dri_visibility_km", 23.0)),
+            step=1.0, key="dri_visibility_km",
+            help=input_tooltip("dri_visibility_km"),
+        )
+        C0 = st.number_input(
+            input_label("dri_C0"),
+            min_value=0.05, max_value=1.00,
+            value=float(_initial(initial, "dri_C0", 0.30)),
+            step=0.05, key="dri_C0",
+            help=input_tooltip("dri_C0"),
+        )
+    return {
+        "dri_band": str(band),
+        "dri_cn2_preset": str(cn2_preset),
+        "dri_visibility_km": float(visibility_km),
+        "dri_C0": float(C0),
+    }
+
+
+def section_9_dri_target(initial: dict | None = None) -> dict:
+    """DRI target & criteria: target preset (or custom h), probability,
+    Johnson cycles overrides."""
+    from physics.dri_analyzer import TARGET_PRESETS
+
+    target_options = list(TARGET_PRESETS.keys()) + ["Custom"]
+    initial_target = _initial(initial, "dri_target_preset", "NATO standard")
+    if initial_target not in target_options:
+        initial_target = "NATO standard"
+
+    prob_options = ("50 %", "80 %", "95 %")
+    prob_to_float = {"50 %": 0.50, "80 %": 0.80, "95 %": 0.95}
+    initial_prob_float = float(_initial(initial, "dri_probability", 0.50))
+    initial_prob_label = (
+        "50 %" if initial_prob_float == 0.50 else
+        "80 %" if initial_prob_float == 0.80 else
+        "95 %" if initial_prob_float == 0.95 else
+        "50 %"
+    )
+
+    with st.sidebar.expander(SECTION_LABELS["dri_target"], expanded=False):
+        target_preset = st.selectbox(
+            input_label("dri_target_preset"),
+            options=target_options,
+            index=target_options.index(initial_target),
+            key="dri_target_preset",
+            help=input_tooltip("dri_target_preset"),
+        )
+        if target_preset == "Custom":
+            target_h_m = st.number_input(
+                _labelled("dri_target_h_m"),
+                min_value=0.05, max_value=50.0,
+                value=float(_initial(initial, "dri_target_h_m", 1.0)),
+                step=0.1, key="dri_target_h_m",
+                help=input_tooltip("dri_target_h_m"),
+            )
+        else:
+            target_h_m = None  # Not used; compute() reads the preset directly.
+
+        probability_label = st.selectbox(
+            input_label("dri_probability"),
+            options=prob_options,
+            index=prob_options.index(initial_prob_label),
+            key="dri_probability",
+            help=input_tooltip("dri_probability"),
+        )
+        probability = prob_to_float[probability_label]
+
+        st.caption("Johnson cycles (N₅₀) — override defaults if needed:")
+        n_cycles_D = st.number_input(
+            input_label("dri_n_cycles_D"),
+            min_value=0.1, max_value=30.0,
+            value=float(_initial(initial, "dri_n_cycles_D", 1.0)),
+            step=0.1, key="dri_n_cycles_D",
+            help=input_tooltip("dri_n_cycles_D"),
+        )
+        n_cycles_R = st.number_input(
+            input_label("dri_n_cycles_R"),
+            min_value=0.1, max_value=30.0,
+            value=float(_initial(initial, "dri_n_cycles_R", 4.0)),
+            step=0.5, key="dri_n_cycles_R",
+            help=input_tooltip("dri_n_cycles_R"),
+        )
+        n_cycles_I = st.number_input(
+            input_label("dri_n_cycles_I"),
+            min_value=0.1, max_value=30.0,
+            value=float(_initial(initial, "dri_n_cycles_I", 8.0)),
+            step=0.5, key="dri_n_cycles_I",
+            help=input_tooltip("dri_n_cycles_I"),
+        )
+
+    out: dict = {
+        "dri_target_preset": str(target_preset),
+        "dri_probability": float(probability),
+        "dri_n_cycles_D": float(n_cycles_D),
+        "dri_n_cycles_R": float(n_cycles_R),
+        "dri_n_cycles_I": float(n_cycles_I),
+    }
+    if target_h_m is not None:
+        out["dri_target_h_m"] = float(target_h_m)
+    return out
+
+
+# ---------------------------------------------------------------------------
 # Aggregator.
 # ---------------------------------------------------------------------------
 
 
 def collect_all(initial: dict | None = None) -> dict:
-    """Render all six sidebar sections and return the merged ``user_inputs`` dict.
+    """Render all six HEL sidebar sections plus the three DRI sections,
+    returning the merged ``user_inputs`` dict.
 
     ``initial`` is the URL-decoded prefill dict from ``ui/app.py``'s
     session-state latch. When ``None``, each section falls back to its
     SPEC §5.1 default. Section dicts have disjoint key spaces by
-    contract, so merge order does not lose any field.
+    contract (DRI inputs use the ``dri_`` prefix), so merge order does
+    not lose any field.
     """
     merged: dict = {}
     merged.update(section_1_laser_source(initial))
@@ -473,4 +677,8 @@ def collect_all(initial: dict | None = None) -> dict:
     merged.update(section_4_atmosphere(initial))
     merged.update(section_5_target_aimpoint(initial))
     merged.update(section_6_system_resources(initial))
+    # DRI Analyzer (independent of HEL chain) — three new collapsible sections.
+    merged.update(section_7_dri_sensor(initial))
+    merged.update(section_8_dri_atmosphere(initial))
+    merged.update(section_9_dri_target(initial))
     return merged

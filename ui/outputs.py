@@ -106,6 +106,16 @@ _DISPLAY_SCALE: dict[str, float] = {
     "w_jit":    1e2,
     "w_bloom":  1e2,
     "w_total":  1e2,
+    # DRI Analyzer — distances SI m → display km
+    "dri_R_detection_m":      1e-3,
+    "dri_R_recognition_m":    1e-3,
+    "dri_R_identification_m": 1e-3,
+    "dri_R_atm_m":            1e-3,
+    # DRI Analyzer — angles SI rad → display µrad
+    "dri_ifov_pixel_rad": 1e6,
+    "dri_theta_diff_rad": 1e6,
+    "dri_theta_turb_rad": 1e6,
+    "dri_ifov_eff_rad":   1e6,
     # Time (s), Margin (%), dimensionless ratios — pass-through (scale=1.0).
 }
 
@@ -1747,3 +1757,115 @@ def _render_worked_example() -> None:
             )
         if lines:
             st.markdown("\n".join(lines))
+
+
+# =============================================================================
+# DRI Analyzer tab — independent of the HEL physics chain
+# =============================================================================
+
+
+def render_tab_dri_analyzer(result: dict) -> None:
+    """Render the DRI Analyzer tab.
+
+    Reads:
+        - The DRI inputs from the merged result dict (sidebar sections 7–9).
+        - The DRI compute outputs (dri_R_detection_m / _recognition_m /
+          _identification_m, binding labels, atmospheric / optical
+          diagnostics, assumptions_flagged).
+    Writes:
+        - A 3-card headline row of D / R / I ranges at NFOV.
+        - A verdict chip naming the limiting term per level.
+        - A small diagnostics row (atmospheric ceiling, IFOV components).
+        - The methodology / assumptions panel.
+
+    PR 3 will wire the three FOV-sweep plots; PR 4 the four optional
+    plots + design doc.
+    """
+    from ui.components import status_chip
+
+    # If compute() didn't run (e.g. validation error upstream), the DRI
+    # keys won't be in the result. Fall back to a friendly notice.
+    if "dri_R_detection_m" not in result:
+        st.warning(
+            "DRI analysis not available — check the DRI sensor / "
+            "atmosphere / target sections in the sidebar for invalid inputs."
+        )
+        return
+
+    section_header("DRI ranges at narrow field of view")
+    explanation(EXPLANATIONS["dri_intro"])
+
+    R_d = result["dri_R_detection_m"]
+    R_r = result["dri_R_recognition_m"]
+    R_i = result["dri_R_identification_m"]
+
+    c1, c2, c3 = st.columns(3)
+    with c1:
+        _card("dri_R_detection_m", R_d)
+    with c2:
+        _card("dri_R_recognition_m", R_r)
+    with c3:
+        _card("dri_R_identification_m", R_i)
+
+    # --- Verdict chip — which limit is binding per level? -------------------
+    binding_d = result.get("dri_binding_detection")
+    binding_r = result.get("dri_binding_recognition")
+    binding_i = result.get("dri_binding_identification")
+
+    atm_count = sum(b == "atmosphere" for b in (binding_d, binding_r, binding_i))
+    if atm_count == 3:
+        chip_text = "All three ranges atmosphere-limited"
+        chip_severity = "warn"
+    elif atm_count == 0:
+        chip_text = "All three ranges geometry-limited"
+        chip_severity = "ok"
+    else:
+        # Mixed — call out which level(s) hit atmosphere.
+        levels_atm = []
+        if binding_d == "atmosphere":
+            levels_atm.append("Detection")
+        if binding_r == "atmosphere":
+            levels_atm.append("Recognition")
+        if binding_i == "atmosphere":
+            levels_atm.append("Identification")
+        chip_text = "Atmosphere-limited at " + ", ".join(levels_atm)
+        chip_severity = "info"
+    status_chip(chip_text, chip_severity)
+
+    # --- Diagnostics row ----------------------------------------------------
+    section_header("Diagnostics")
+    explanation(EXPLANATIONS["dri_methodology"])
+
+    R_atm = result.get("dri_R_atm_m")
+    alpha = result.get("dri_alpha_per_km")
+    h_target = result.get("dri_h_target_m")
+
+    c1, c2, c3 = st.columns(3)
+    with c1:
+        _card("dri_R_atm_m", R_atm, size="md")
+    with c2:
+        _card("dri_alpha_per_km", alpha, size="md")
+    with c3:
+        _card("dri_h_target_m", h_target, size="md")
+
+    # IFOV decomposition row
+    ifov_pix = result.get("dri_ifov_pixel_rad")
+    theta_diff = result.get("dri_theta_diff_rad")
+    theta_turb = result.get("dri_theta_turb_rad")
+    ifov_eff = result.get("dri_ifov_eff_rad")
+    c1, c2, c3, c4 = st.columns(4)
+    with c1:
+        _card("dri_ifov_pixel_rad", ifov_pix, size="md")
+    with c2:
+        _card("dri_theta_diff_rad", theta_diff, size="md")
+    with c3:
+        _card("dri_theta_turb_rad", theta_turb, size="md")
+    with c4:
+        _card("dri_ifov_eff_rad", ifov_eff, size="md")
+
+    # --- Assumption flags ---------------------------------------------------
+    flags = result.get("dri_assumptions_flagged", [])
+    if flags:
+        with st.expander("Assumptions flagged", expanded=False):
+            for flag in flags:
+                st.write(f"- {flag}")
