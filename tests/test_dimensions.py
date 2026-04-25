@@ -124,7 +124,10 @@ def test_m3_horizontal_linear_in_range_flat_geometry(canonical_inputs):
 
 
 def test_m3_dwell_inverse_in_target_speed(canonical_inputs):
-    """available_dwell = 2R·tan(FOV/2)/v_tgt → 2·v_tgt halves dwell."""
+    """v1.x backward-compat: available_dwell = 2R·tan(FOV/2)/v_tgt
+    → 2·v_tgt halves dwell. Guards the legacy single-point path that
+    callers without ``engagement_geometry`` still hit (golden tests
+    used to live here pre-v2.0)."""
     base = m3_geometry.compute(canonical_inputs)
     scaled = m3_geometry.compute({**canonical_inputs, "v_tgt": 2.0 * canonical_inputs["v_tgt"]})
     assert scaled["available_dwell"] == pytest.approx(
@@ -133,12 +136,102 @@ def test_m3_dwell_inverse_in_target_speed(canonical_inputs):
 
 
 def test_m3_dwell_linear_in_range(canonical_inputs):
-    """available_dwell = 2R·tan(FOV/2)/v_tgt → 2·R doubles dwell."""
+    """v1.x backward-compat: available_dwell = 2R·tan(FOV/2)/v_tgt
+    → 2·R doubles dwell."""
     base = m3_geometry.compute(canonical_inputs)
     scaled = m3_geometry.compute({**canonical_inputs, "R": 2.0 * canonical_inputs["R"]})
     assert scaled["available_dwell"] == pytest.approx(
         2.0 * base["available_dwell"], rel=1e-9,
     )
+
+
+# ---------------------------------------------------------------------------
+# M3 — v2.0 trajectory dwell formulas (SPEC v2.0 §3 M3).
+# Closed-form scaling on the new trajectory model:
+#   head-on:  t_dwell = (R_detect − R_min) / v_tgt
+#   lateral:  t_dwell = √(R_detect² − R_min²) / v_tgt
+# Each scaling test holds tightly because both formulas are exact in
+# closed form; tolerance is 1e-9 (round-off only).
+# ---------------------------------------------------------------------------
+
+def _v2_inputs(canonical_inputs, **overrides) -> dict:
+    """Build a v2.0 canonical-inputs dict by stripping v1.x R / v_perp
+    and adding the trajectory keys. Tests overlay `overrides` for the
+    one variable being scaled."""
+    base = {k: v for k, v in canonical_inputs.items() if k not in ("R", "v_perp")}
+    base.update({
+        "R_detect": 1500.0, "R_min": 100.0,
+        "engagement_geometry": "head_on",
+    })
+    base.update(overrides)
+    return base
+
+
+def test_m3_v2_head_on_dwell_inverse_in_target_speed(canonical_inputs):
+    """v2.0 head-on: t_dwell = (R_detect − R_min) / v_tgt → 2·v_tgt
+    halves the dwell exactly."""
+    inputs = _v2_inputs(canonical_inputs, v_tgt=20.0)
+    base = m3_geometry.compute(inputs)
+    scaled = m3_geometry.compute({**inputs, "v_tgt": 40.0})
+    assert scaled["available_dwell"] == pytest.approx(
+        0.5 * base["available_dwell"], rel=1e-9,
+    )
+
+
+def test_m3_v2_head_on_dwell_linear_in_R_detect_minus_R_min(canonical_inputs):
+    """v2.0 head-on: t_dwell scales linearly in (R_detect − R_min).
+    Doubling that delta doubles the dwell."""
+    inputs = _v2_inputs(canonical_inputs, R_detect=1100.0, R_min=100.0)
+    base = m3_geometry.compute(inputs)            # delta = 1000 m
+    scaled = m3_geometry.compute({**inputs, "R_detect": 2100.0})  # delta = 2000 m
+    assert scaled["available_dwell"] == pytest.approx(
+        2.0 * base["available_dwell"], rel=1e-9,
+    )
+
+
+def test_m3_v2_lateral_dwell_inverse_in_target_speed(canonical_inputs):
+    """v2.0 lateral: t_dwell = √(R_detect² − R_min²) / v_tgt → 2·v_tgt
+    halves the dwell exactly."""
+    inputs = _v2_inputs(
+        canonical_inputs,
+        engagement_geometry="lateral",
+        R_detect=2000.0, R_min=200.0, v_tgt=20.0,
+    )
+    base = m3_geometry.compute(inputs)
+    scaled = m3_geometry.compute({**inputs, "v_tgt": 40.0})
+    assert scaled["available_dwell"] == pytest.approx(
+        0.5 * base["available_dwell"], rel=1e-9,
+    )
+
+
+def test_m3_v2_lateral_dwell_scales_with_axial_distance(canonical_inputs):
+    """v2.0 lateral: t_dwell = x_0 / v_tgt where x_0 = √(R_detect² − R_min²).
+    Setting the inputs so that x_0 doubles between two cases doubles
+    the dwell. Use R_min = 0 so x_0 = R_detect; then 2·R_detect → 2·t_dwell."""
+    inputs = _v2_inputs(
+        canonical_inputs,
+        engagement_geometry="lateral",
+        R_detect=1000.0, R_min=10.0, v_tgt=20.0,  # R_min=10 ≪ R_detect → x_0 ≈ R_detect
+    )
+    base = m3_geometry.compute(inputs)
+    scaled = m3_geometry.compute({**inputs, "R_detect": 2000.0})
+    assert scaled["available_dwell"] == pytest.approx(
+        2.0 * base["available_dwell"], rel=1e-3,  # R_min/R_detect ≈ 1% slack
+    )
+
+
+def test_m3_v2_R_at_dwell_end_equals_R_min(canonical_inputs):
+    """v2.0 contract: R_at_dwell_end == R_min for any moving target,
+    independent of geometry. The "engagement-end range" is the
+    standoff for both head-on and lateral by construction."""
+    head_on = m3_geometry.compute(_v2_inputs(canonical_inputs))
+    lateral = m3_geometry.compute(_v2_inputs(
+        canonical_inputs,
+        engagement_geometry="lateral",
+        R_detect=2000.0, R_min=200.0,
+    ))
+    assert head_on["R_at_dwell_end"] == pytest.approx(100.0, rel=1e-9)
+    assert lateral["R_at_dwell_end"] == pytest.approx(200.0, rel=1e-9)
 
 
 # ---------------------------------------------------------------------------

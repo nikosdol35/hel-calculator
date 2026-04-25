@@ -490,6 +490,10 @@ def test_pr4_walkthrough_steps_cover_every_metric():
         # example walkthrough rewrite for the v2.0 contract lands in
         # PRs 5-6.
         "R_at_dwell_end", "R_at_kill",
+        # SPEC v2.0 trajectory maxima added in PR 12; these are
+        # summary scalars over the trajectory time series and the
+        # walkthrough's per-step structure doesn't fit them naturally.
+        "I_peak_max", "I_avg_aim_max",
     }
     missing_from_walkthrough = expected - referenced
     assert not missing_from_walkthrough, (
@@ -574,12 +578,18 @@ def test_categorical_metrics_count_and_keys():
 
 
 def test_complete_metric_count():
-    """After PR 3, MATH_CONTENT must cover all 45 unique orchestrator
-    output keys (41 numeric + 4 categorical) per the plan §2 inventory.
+    """MATH_CONTENT must cover every scalar orchestrator output key.
 
-    Catches both under-coverage (a key the orchestrator emits with no
-    math-tab record) and ahead-of-schedule drift (an extra record
-    that doesn't match a real output)."""
+    Catches both under-coverage (a scalar key the orchestrator emits
+    with no math-tab record) and ahead-of-schedule drift (an extra
+    record that doesn't match a real output).
+
+    SPEC v2.0 trajectory_* keys are excluded — they are time-series
+    arrays for plotting (not single-value displayable metrics) and
+    don't fit the per-row MATH_CONTENT schema. Their summarised
+    scalar maxima (``I_peak_max``, ``I_avg_aim_max``) are covered by
+    dedicated entries.
+    """
     from physics.orchestrator import run_full_chain
     from tests.golden.scenarios import C_UAS_1500M
     from ui.math_content import MATH_CONTENT
@@ -588,6 +598,9 @@ def test_complete_metric_count():
     # Drop the by_module / assumptions_flagged auxiliaries — they
     # aren't displayable metrics.
     output_keys = set(res.keys()) - {"by_module", "assumptions_flagged"}
+    # Trajectory_* keys are per-sample time series (plot data, not
+    # scalar metrics).
+    output_keys = {k for k in output_keys if not k.startswith("trajectory_")}
 
     math_keys = set(MATH_CONTENT.keys())
 
@@ -595,8 +608,8 @@ def test_complete_metric_count():
     extra_in_math = math_keys - output_keys
 
     assert not missing_in_math, (
-        f"Orchestrator emits {len(missing_in_math)} key(s) with no "
-        f"math-tab record: {missing_in_math}"
+        f"Orchestrator emits {len(missing_in_math)} scalar key(s) with "
+        f"no math-tab record: {missing_in_math}"
     )
     assert not extra_in_math, (
         f"MATH_CONTENT has {len(extra_in_math)} key(s) the orchestrator "

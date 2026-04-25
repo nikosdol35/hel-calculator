@@ -737,7 +737,12 @@ def test_plot_c_spot_tightening_handles_v1_result():
     from physics.orchestrator import run_full_chain
     from tests.golden.scenarios import C_UAS_1500M
     from ui.plots import plot_c_spot_tightening_through_trajectory
-    result = run_full_chain(C_UAS_1500M)  # v1 — no trajectory_R
+    # Strip the v2 keys so the orchestrator dispatches to its v1.x
+    # backward-compat single-point chain.
+    v1_inputs = dict(C_UAS_1500M)
+    for k in ("R_detect", "R_min", "engagement_geometry"):
+        v1_inputs.pop(k, None)
+    result = run_full_chain(v1_inputs)  # v1 — no trajectory_R
     fig = plot_c_spot_tightening_through_trajectory(
         result, d_aim=0.05,
     )

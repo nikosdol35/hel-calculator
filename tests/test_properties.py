@@ -285,8 +285,8 @@ def test_m10_duty_in_unit_interval(P0, eta, Q_cool, C, dT, t_eng):
     v_perp=st.floats(min_value=0.0, max_value=30.0),
 )
 def test_m3_dwell_nonnegative(H_e, R, H_t, v_tgt, v_perp):
-    """available_dwell ≥ 0 whenever the geometry is feasible
-    (R ≥ |H_t − H_e|); infeasible → ValueError."""
+    """v1.x backward-compat: available_dwell ≥ 0 whenever the geometry
+    is feasible (R ≥ |H_t − H_e|); infeasible → ValueError."""
     try:
         out = m3_geometry.compute({
             "H_e": H_e, "R": R, "H_t": H_t, "v_tgt": v_tgt, "v_perp": v_perp,
@@ -297,6 +297,72 @@ def test_m3_dwell_nonnegative(H_e, R, H_t, v_tgt, v_perp):
     assert out["R_slant"] == R
     assert out["R_h"] >= 0.0
     assert out["available_dwell"] >= 0.0
+
+
+# ---------------------------------------------------------------------------
+# M3 v2.0 — trajectory dwell ≥ 0 across both geometries (SPEC v2.0 §3 M3).
+# Hypothesis fuzzes (R_detect, R_min, v_tgt, geometry) over the
+# validator-accepted region; t_dwell must come out non-negative for
+# every feasible draw, and a ValueError is the only legitimate failure
+# mode for infeasible draws.
+# ---------------------------------------------------------------------------
+
+@DERANDOMIZED
+@given(
+    H_e=st.floats(min_value=0.0, max_value=3000.0),
+    H_t=st.floats(min_value=0.0, max_value=5000.0),
+    R_detect=st.floats(min_value=50.0, max_value=50_000.0),
+    R_min=st.floats(min_value=10.0, max_value=5_000.0),
+    v_tgt=st.floats(min_value=0.0, max_value=100.0),
+    geometry=st.sampled_from(["head_on", "lateral"]),
+)
+def test_m3_v2_dwell_nonnegative(H_e, H_t, R_detect, R_min, v_tgt, geometry):
+    """v2.0 trajectory dwell is non-negative for every validator-accepted
+    (R_detect, R_min, v_tgt, geometry). Infeasible geometries (R_detect
+    < R_min, R_detect < |H_t − H_e|, etc.) raise ValueError, which is
+    the correct response."""
+    try:
+        out = m3_geometry.compute({
+            "H_e": H_e, "H_t": H_t, "R_detect": R_detect, "R_min": R_min,
+            "v_tgt": v_tgt, "engagement_geometry": geometry,
+        })
+    except ValueError:
+        # Validator rejection is the correct failure mode; property holds.
+        return
+    assert out["R_slant"] == R_detect
+    assert out["R_h"] >= 0.0
+    assert out["available_dwell"] >= 0.0
+    assert out["R_at_dwell_end"] >= 0.0
+
+
+@DERANDOMIZED
+@given(
+    R_detect=st.floats(min_value=200.0, max_value=20_000.0),
+    R_min=st.floats(min_value=10.0, max_value=2_000.0),
+    v_tgt=st.floats(min_value=0.5, max_value=100.0),
+    geometry=st.sampled_from(["head_on", "lateral"]),
+)
+def test_m3_v2_dwell_zero_only_when_R_detect_equals_R_min(
+    R_detect, R_min, v_tgt, geometry,
+):
+    """Dwell goes to zero only at the degenerate R_detect = R_min
+    boundary. For strictly R_detect > R_min and v_tgt > 0, the dwell
+    is strictly positive — a regression guard against silent zero-dwell
+    bugs that would make every engagement fail."""
+    if R_detect <= R_min:
+        return  # validator rejects; covered elsewhere
+    if v_tgt < m_trajectory_module().STATIONARY_THRESHOLD_MPS:
+        return  # stationary edge case has its own dwell value
+    dwell = m_trajectory_module().available_dwell(
+        R_detect, R_min, v_tgt, geometry,
+    )
+    assert dwell > 0.0
+
+
+def m_trajectory_module():
+    """Lazy import wrapper — keeps module-level imports clean."""
+    from physics import m_trajectory
+    return m_trajectory
 
 
 # ---------------------------------------------------------------------------

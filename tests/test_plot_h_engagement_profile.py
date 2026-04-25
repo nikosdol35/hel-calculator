@@ -25,12 +25,27 @@ from tests.golden.scenarios import C_UAS_1500M
 
 def _v2_head_on_inputs() -> dict:
     inputs = dict(C_UAS_1500M)
-    inputs.pop("R")
-    inputs.pop("v_perp")
+    inputs.pop("R", None)        # may not be present in pure-v2 fixtures
+    inputs.pop("v_perp", None)
     inputs.update({
         "R_detect": 1500, "R_min": 100,
         "engagement_geometry": "head_on",
     })
+    return inputs
+
+
+def _v1_inputs() -> dict:
+    """Build a pure-v1.x input dict by stripping the SPEC v2.0 trajectory
+    keys from the canonical scenario. The orchestrator dispatches on the
+    presence of ``engagement_geometry``; removing it forces the legacy
+    single-point chain so the v1-fallback paths in the plot constructors
+    and the trajectory-series suppression in the orchestrator can be
+    exercised."""
+    inputs = dict(C_UAS_1500M)
+    for key in ("R_detect", "R_min", "engagement_geometry"):
+        inputs.pop(key, None)
+    inputs.setdefault("R", 1500)
+    inputs.setdefault("v_perp", 3)
     return inputs
 
 
@@ -104,7 +119,7 @@ def test_orchestrator_v2_emits_pde_trajectory_keys():
 def test_orchestrator_v1_does_not_emit_pde_trajectory_keys():
     """v1.x mode skips trajectory recording — the new keys are
     absent."""
-    result = run_full_chain(C_UAS_1500M)
+    result = run_full_chain(_v1_inputs())
     assert "trajectory_t_pde" not in result
     assert "trajectory_T_surface" not in result
     assert "trajectory_E_cumulative" not in result
@@ -147,7 +162,7 @@ def test_plot_h_v1_result_renders_empty_frame():
     always-render frame with the infeasible-geometry advisory."""
     from ui.plots import plot_h_engagement_profile
 
-    result = run_full_chain(C_UAS_1500M)  # v1 mode
+    result = run_full_chain(_v1_inputs())  # v1 mode
     fig = plot_h_engagement_profile(result)
     assert len(fig.data) == 0  # empty-frame fallback
 

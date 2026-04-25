@@ -1475,6 +1475,101 @@ def _entries() -> dict[str, MetricEntry]:
     ))
 
     rows.append(MetricEntry(
+        key="I_peak_max",
+        module="M7",
+        display_name="Peak irradiance (trajectory max)",
+        symbol_latex=r"I_\text{peak}^\text{max}",
+        unit_si="W/m^2",
+        formula_latex=(
+            r"I_\text{peak}^\text{max} = "
+            r"\max_{t \in [0,\,t_\text{dwell}]} I_\text{peak}\bigl(R(t)\bigr)"
+        ),
+        formula_text=(
+            "I_peak_max = max over t in [0, t_dwell] of I_peak(R(t))   "
+            "(SPEC v2.0 — peak on-target irradiance taken across the "
+            "trajectory sub-samples; reported alongside the time series "
+            "trajectory_I_peak.)"
+        ),
+        formula_dependencies=("I_peak",),
+        sensitivity_inputs=(
+            "P0", "eta_opt", "M2", "D", "wavelength", "sigma_jit",
+            "R_detect", "R_min", "v_tgt", "engagement_geometry",
+            "V", "RH", "Cn2_ground", "v_HV",
+        ),
+        explanation_short=(
+            "The hottest spot the target ever sees during the engagement "
+            "— the peak across the trajectory rather than at a single "
+            "range. Tells the operator the worst-case material loading."
+        ),
+        explanation_full=(
+            "Tracker-supported engagements have a moving slant range; "
+            "I_peak rises as the target closes (smaller spot, higher "
+            "Strehl from less turbulence path) and falls again on a "
+            "lateral pass past closest approach. I_peak_max is the "
+            "maximum of the per-sample I_peak over the engagement "
+            "window. For a head-on closure that ends at R_min, the max "
+            "occurs at R_min by construction; for a lateral pass it "
+            "occurs at closest approach."
+        ),
+        citation="SPEC v2.0 §3 M7 (post-trajectory rework)",
+        code_ref="physics/orchestrator.py::_run_v2_trajectory",
+        derivation_link="docs/tracker_dwell_plan_2026-04-25.md",
+        provenance=(),
+        assumptions=(
+            "Maximum is taken across the orchestrator's trajectory "
+            "sub-sample schedule (~50 ms cadence per SPEC v2.0 §4); "
+            "the true continuous-time peak is interpolated to within "
+            "~1 % of the sample-based maximum.",
+        ),
+    ))
+
+    rows.append(MetricEntry(
+        key="I_avg_aim_max",
+        module="M7",
+        display_name="Average aim-bucket irradiance (trajectory max)",
+        symbol_latex=r"I_\text{avg,aim}^\text{max}",
+        unit_si="W/m^2",
+        formula_latex=(
+            r"I_\text{avg,aim}^\text{max} = "
+            r"\max_{t \in [0,\,t_\text{dwell}]} I_\text{avg,aim}\bigl(R(t)\bigr)"
+        ),
+        formula_text=(
+            "I_avg_aim_max = max over t in [0, t_dwell] of I_avg_aim(R(t))   "
+            "(SPEC v2.0 — peak average-in-bucket irradiance across the "
+            "trajectory sub-samples; this is the value the M8 PDE "
+            "boundary flux peaks at.)"
+        ),
+        formula_dependencies=("I_avg_aim",),
+        sensitivity_inputs=(
+            "P0", "eta_opt", "M2", "D", "wavelength", "sigma_jit",
+            "R_detect", "R_min", "v_tgt", "engagement_geometry",
+            "d_aim", "V", "RH",
+        ),
+        explanation_short=(
+            "Maximum bucket-averaged irradiance during the engagement. "
+            "The M8 burn-through PDE's input flux peaks at this value, "
+            "so it sets the worst-case heating rate."
+        ),
+        explanation_full=(
+            "I_avg_aim is the power inside the user's aim bucket "
+            "divided by the bucket area (a uniform-flux idealisation "
+            "for the M8 input). Its trajectory maximum is the peak the "
+            "M8 PDE boundary condition reaches as the target closes; "
+            "for a head-on engagement that's at R_min, for a lateral "
+            "pass it's at closest approach."
+        ),
+        citation="SPEC v2.0 §3 M7 (post-trajectory rework)",
+        code_ref="physics/orchestrator.py::_run_v2_trajectory",
+        derivation_link="docs/tracker_dwell_plan_2026-04-25.md",
+        provenance=(),
+        assumptions=(
+            "Computed by the orchestrator as max of the trajectory "
+            "I_avg_aim sub-sample series; same ~1 % interpolation "
+            "caveat as I_peak_max.",
+        ),
+    ))
+
+    rows.append(MetricEntry(
         key="failure_mode",
         module="M8",
         display_name="Failure mode",
