@@ -76,6 +76,9 @@ TAB_LABELS: dict[str, str] = {
     "safety":         "Safety",
     "atmosphere":     "Atmosphere",
     "diagnostics":    "Diagnostics",
+    # PR 1 of the math-tab plan (docs/math_tab_plan_2026-04-25.md). Tab is
+    # the rightmost so it reads as "results, then the receipts behind them."
+    "math":           "How it's calculated",
 }
 
 
@@ -837,6 +840,15 @@ EXPLANATIONS: dict[str, str] = {
         "that range less than 86 % of the energy is hitting the part of "
         "the target that matters, and the engagement is wasting power on "
         "the surroundings."
+    ),
+    "math_intro": (
+        "Every number this tool prints has a formula behind it, a citation "
+        "behind that formula, and an assumption set you should know about. "
+        "This tab shows them all in one place: each metric, its formula in "
+        "textbook notation, its value for your current run, and a "
+        "plain-language explanation. Toggle to Full view for the substituted "
+        "values, the literature citation, the line of code that computes it, "
+        "and any flagged assumptions."
     ),
 }
 
