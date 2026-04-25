@@ -87,10 +87,16 @@ def _serialize_for_json(result: dict) -> dict:
     - engagement_viable: kept as bool
     - by_module and assumptions_flagged: dropped (too noisy for regression;
       covered by dedicated tests)
+    - SPEC v2.0 trajectory_* tuples: dropped (per-sample time series that
+      bloat the JSON without adding regression value; the scalar
+      trajectory summaries — R_at_kill, I_peak_max, I_avg_aim_max — are
+      kept and pin the outcome)
     """
     snap: dict = {}
     for k, v in result.items():
         if k in ("by_module", "assumptions_flagged"):
+            continue
+        if k.startswith("trajectory_"):
             continue
         if isinstance(v, float):
             if math.isinf(v):

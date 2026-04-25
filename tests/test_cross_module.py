@@ -299,3 +299,105 @@ def test_orchestrator_by_module_namespace_populated(canonical_inputs):
     assert by_mod["m1"]["theta_diff"] == result["theta_diff"]
     assert by_mod["m7"]["w_total"] == result["w_total"]
     assert by_mod["m9"]["NOHD_tophat"] == result["NOHD_tophat"]
+
+
+# ---------------------------------------------------------------------------
+# v2.0 — trajectory consistency between m_trajectory, M3, and the
+# orchestrator. The closed-form helper, the M3 module, and the full-chain
+# trajectory loop must all agree on the engagement-window timing and the
+# engagement-end range.
+# ---------------------------------------------------------------------------
+
+from physics import m_trajectory  # noqa: E402  (kept beside the v2.0 cross-module section)
+
+
+def _v2_canonical(canonical_inputs: dict, **overrides) -> dict:
+    """Strip v1.x R / v_perp from canonical_inputs and overlay v2.0
+    trajectory keys. Tests that need a single override (e.g. a different
+    geometry) pass it as a kwarg."""
+    base = {k: v for k, v in canonical_inputs.items() if k not in ("R", "v_perp")}
+    base.update({
+        "R_detect": 1500.0, "R_min": 100.0,
+        "engagement_geometry": "head_on",
+    })
+    base.update(overrides)
+    return base
+
+
+def test_v2_m3_dwell_matches_m_trajectory_head_on(canonical_inputs):
+    """M3.available_dwell == m_trajectory.available_dwell for head-on.
+    M3 delegates the formula; this guards against divergence if either
+    side is edited in the future."""
+    inputs = _v2_canonical(canonical_inputs, R_detect=2000.0, R_min=300.0, v_tgt=15.0)
+    m3_dwell = m3_geometry.compute(inputs)["available_dwell"]
+    closed_form = m_trajectory.available_dwell(2000.0, 300.0, 15.0, "head_on")
+    assert m3_dwell == pytest.approx(closed_form, rel=1e-12)
+
+
+def test_v2_m3_dwell_matches_m_trajectory_lateral(canonical_inputs):
+    """Same identity for lateral geometry."""
+    inputs = _v2_canonical(
+        canonical_inputs,
+        engagement_geometry="lateral",
+        R_detect=3000.0, R_min=400.0, v_tgt=25.0,
+    )
+    m3_dwell = m3_geometry.compute(inputs)["available_dwell"]
+    closed_form = m_trajectory.available_dwell(3000.0, 400.0, 25.0, "lateral")
+    assert m3_dwell == pytest.approx(closed_form, rel=1e-12)
+
+
+def test_v2_orchestrator_dwell_matches_m_trajectory(canonical_inputs):
+    """The full-chain trajectory loop must use the same t_dwell as the
+    closed-form helper. Catches integration bugs where the loop builds
+    its sample schedule from a wrong dwell."""
+    inputs = _v2_canonical(canonical_inputs, R_detect=1500.0, R_min=100.0, v_tgt=20.0)
+    result = orchestrator.run_full_chain(inputs)
+    expected = m_trajectory.available_dwell(1500.0, 100.0, 20.0, "head_on")
+    assert result["available_dwell"] == pytest.approx(expected, rel=1e-12)
+
+
+def test_v2_orchestrator_R_at_dwell_end_matches_R_min(canonical_inputs):
+    """R_at_dwell_end == R_min for any moving v2.0 engagement, both
+    geometries. Cross-checks the M3 constant pass-through against the
+    full-chain merged result."""
+    head_on = orchestrator.run_full_chain(_v2_canonical(canonical_inputs))
+    lateral = orchestrator.run_full_chain(_v2_canonical(
+        canonical_inputs,
+        engagement_geometry="lateral",
+        R_detect=2000.0, R_min=200.0,
+    ))
+    assert head_on["R_at_dwell_end"] == pytest.approx(100.0, rel=1e-9)
+    assert lateral["R_at_dwell_end"] == pytest.approx(200.0, rel=1e-9)
+
+
+def test_v2_R_at_kill_within_engagement_window(canonical_inputs):
+    """For any successful kill, R_min ≤ R_at_kill ≤ R_detect — the
+    burn-through occurred somewhere inside the trajectory. Catches
+    bugs in the M8 kill-range bookkeeping (e.g. units off, kill range
+    leaking the previous sample's R)."""
+    inputs = _v2_canonical(canonical_inputs, R_detect=1500.0, R_min=100.0, v_tgt=20.0)
+    result = orchestrator.run_full_chain(inputs)
+    # CFRP at 3 kW / 1.5 km easy kill — assert the bookkeeping if a
+    # kill occurred. (failure_mode is the canonical kill flag.)
+    if result.get("failure_mode") not in (
+        None, "engagement_ended_at_R_min", "no_burn_through",
+    ):
+        assert result["R_at_kill"] is not None
+        assert 100.0 <= result["R_at_kill"] <= 1500.0
+
+
+def test_v2_trajectory_R_endpoints_consistent(canonical_inputs):
+    """trajectory_R_of_t at t=0 must equal R_detect; at t=t_dwell must
+    equal R_min (for moving targets). Cross-checks the closed-form
+    callable against the orchestrator's stated engagement window."""
+    R_d, R_m, v = 2000.0, 300.0, 25.0
+    R_of_t = m_trajectory.trajectory_R_of_t(R_d, R_m, v, "head_on")
+    t_dwell = m_trajectory.available_dwell(R_d, R_m, v, "head_on")
+    assert R_of_t(0.0) == pytest.approx(R_d, rel=1e-12)
+    assert R_of_t(t_dwell) == pytest.approx(R_m, rel=1e-9)
+
+    # Lateral: at t=0, R = R_detect; at t=t_dwell, R = R_min (closest approach).
+    R_of_t_lat = m_trajectory.trajectory_R_of_t(R_d, R_m, v, "lateral")
+    t_dwell_lat = m_trajectory.available_dwell(R_d, R_m, v, "lateral")
+    assert R_of_t_lat(0.0) == pytest.approx(R_d, rel=1e-12)
+    assert R_of_t_lat(t_dwell_lat) == pytest.approx(R_m, rel=1e-9)

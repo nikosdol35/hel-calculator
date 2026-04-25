@@ -72,7 +72,12 @@ def test_plot_j_useful_zone_when_kill_happens():
 def test_plot_j_v1_result_empty_frame():
     """v1.x result lacks trajectory series → empty frame."""
     from ui.plots import plot_j_cumulative_energy_diagnostic
-    result = run_full_chain(C_UAS_1500M)
+    # Strip v2 keys to force v1.x single-point mode through the
+    # orchestrator's dispatch.
+    v1_inputs = dict(C_UAS_1500M)
+    for k in ("R_detect", "R_min", "engagement_geometry"):
+        v1_inputs.pop(k, None)
+    result = run_full_chain(v1_inputs)
     fig = plot_j_cumulative_energy_diagnostic(result)
     assert len(fig.data) == 0
 

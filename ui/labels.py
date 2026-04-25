@@ -350,6 +350,16 @@ OUTPUT_LABELS: dict[str, LabelEntry] = {
         "tooltip": "On-axis peak irradiance at the target plane, including Strehl reduction.",
         "unit":    "W/cm²",
     },
+    "I_peak_max": {
+        "label":   "Peak irradiance (trajectory max)",
+        "tooltip": "Maximum on-axis peak irradiance reached at any point during the engagement trajectory.",
+        "unit":    "W/cm²",
+    },
+    "I_avg_aim_max": {
+        "label":   "Average aim irradiance (trajectory max)",
+        "tooltip": "Maximum bucket-averaged irradiance reached during the engagement; the M8 PDE boundary flux peaks at this value.",
+        "unit":    "W/cm²",
+    },
     "PIB": {
         "label":   "Power in the bucket",
         "tooltip": "Fraction of total power that falls inside the aimpoint radius.",

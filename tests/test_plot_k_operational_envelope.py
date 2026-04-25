@@ -79,7 +79,13 @@ def test_compute_envelope_axes_shape():
 def test_compute_envelope_v1_inputs_rejected():
     """The envelope is v2-only; passing a v1.x input set without
     engagement_geometry must raise KeyError."""
-    inputs_v1 = dict(C_UAS_1500M)  # has R, v_perp; no engagement_geometry
+    # C_UAS_1500M now carries both v1.x (R, v_perp) and v2.0
+    # (R_detect, R_min, engagement_geometry) keys for backward-compat;
+    # explicitly drop the v2 keys so this test exercises the v1-mode
+    # rejection path.
+    inputs_v1 = dict(C_UAS_1500M)
+    for key in ("R_detect", "R_min", "engagement_geometry"):
+        inputs_v1.pop(key, None)
     with pytest.raises(KeyError, match="engagement_geometry"):
         compute_operational_envelope(inputs_v1, n_R=3, n_v=3)
 
