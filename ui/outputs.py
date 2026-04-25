@@ -1033,3 +1033,274 @@ def render_tab_diagnostics(result: dict) -> None:
             tooltip="Whether the blooming–focusing loop reached its tolerance.",
             size="md",
         )
+
+
+# =============================================================================
+# How it's calculated tab — math, formulas, traceable values
+# =============================================================================
+# Per docs/math_tab_plan_2026-04-25.md. PR 1 ships the skeleton + glossary +
+# M1/M2/M3 entries (9 metrics). PRs 2-3 fill out the remaining 32 numeric
+# entries plus the 4 categorical verdicts; PR 4 adds constants + worked
+# example; PR 5 adds Markdown export.
+#
+# Architecture: module sections are anchored markdown headers (NOT
+# st.expander) because per-metric Full views nest a single st.expander
+# inside, and Streamlit forbids nested expanders.
+
+_MATH_VIEW_KEY = "_math_view_mode"
+_MATH_SEARCH_KEY = "_math_search"
+
+
+def _format_value_for_math_tab(key: str, value: float | int | str | None,
+                                unit: str) -> str:
+    """Render a value cell for the math tab (Simple-view value column).
+
+    Reuses the existing _scale / format_value chain so the math tab and
+    the metric cards can never disagree on what number is displayed.
+    """
+    from ui.components import format_value
+    if value is None:
+        return "—"
+    if isinstance(value, str):
+        return value
+    if isinstance(value, bool):
+        return "yes" if value else "no"
+    scaled = _scale(key, float(value))
+    return format_value(scaled, unit)
+
+
+def _substitute_formula_values(entry, result: dict) -> str | None:
+    """Build the 'with current values' substituted-formula string for the
+    Full view. Returns None when substitution doesn't make sense
+    (categorical metrics, solver-based metrics)."""
+    from ui.math_content import MetricEntry
+    if not isinstance(entry, MetricEntry):
+        return None
+    if entry.is_categorical or entry.is_solver_based:
+        return None
+    if entry.formula_text is None:
+        return None
+    # PR 1: render a simple "with values" line by listing each input + its
+    # SI numeric value. PR 2 adds proper symbolic substitution into the
+    # LaTeX expression.
+    parts = []
+    for dep in entry.formula_dependencies:
+        v = result.get(dep)
+        if v is None or isinstance(v, (str, bool)):
+            parts.append(f"{dep} = (n/a)")
+        else:
+            parts.append(f"{dep} = {float(v):.4g}")
+    for inp in entry.sensitivity_inputs:
+        v = result.get(inp)
+        if v is None or isinstance(v, (str, bool)):
+            continue
+        parts.append(f"{inp} = {float(v):.4g}")
+    if not parts:
+        return None
+    return " · ".join(parts)
+
+
+def _render_provenance_badges(entry) -> None:
+    """Render the trust/origin badges next to a metric in Full view."""
+    from ui.math_content import ProvenanceFlag
+    if not entry.provenance:
+        return
+    chips: list[str] = []
+    for flag in entry.provenance:
+        if flag is ProvenanceFlag.CLAUDE_71_INVARIANT:
+            chips.append(":material/verified: Audit-pinned formula")
+        elif flag is ProvenanceFlag.HIGH_UNCERTAINTY:
+            chips.append(":material/warning: HIGH UNCERTAINTY value")
+        elif flag is ProvenanceFlag.REPLICATED:
+            chips.append(":material/science: Independently replicated")
+    if chips:
+        st.caption(" · ".join(chips))
+
+
+def _render_metric_row(entry, result: dict, *, view_mode: str) -> None:
+    """Render one metric (one row). Layout per plan §3:
+
+    Simple view:
+       1. Bold display name + symbol + (unit) on the left, value on the
+          right of the same row.
+       2. LaTeX formula below.
+       3. "What it means" plain-language sentence below.
+
+    Full view (when expander opens):
+       4. Substituted formula with this run's input values.
+       5. Citation, code reference, derivation link.
+       6. Depends-on intermediates list.
+       7. Provenance badges (audit-pinned / HIGH UNCERTAINTY / replicated).
+       8. Assumptions list.
+
+    Categorical and solver-based metrics skip the LaTeX block and use
+    prose-style formula content instead.
+    """
+    # Display unit comes from the same source the per-tab metric cards
+    # use — eliminates any chance of math tab vs card disagreement.
+    display_unit = output_unit(entry.key)
+    si_value = result.get(entry.key)
+    rendered_value = _format_value_for_math_tab(
+        entry.key, si_value, display_unit,
+    )
+
+    # Row header — display name + value side by side.
+    h1, h2 = st.columns([3, 1])
+    with h1:
+        unit_suffix = f" · {display_unit}" if display_unit else ""
+        st.markdown(
+            f"**{entry.display_name}** · `{entry.key}`{unit_suffix}"
+        )
+    with h2:
+        st.markdown(
+            f"<div style='text-align:right; font-variant-numeric: "
+            f"tabular-nums; font-weight:600;'>{rendered_value}</div>",
+            unsafe_allow_html=True,
+        )
+
+    # Formula block.
+    if entry.is_categorical:
+        st.caption("Categorical (verdict) output — see rule below.")
+    elif entry.formula_latex is not None:
+        st.latex(entry.formula_latex)
+
+    # "What it means" plain-language one-liner.
+    if entry.explanation_short:
+        st.markdown(entry.explanation_short)
+
+    # Full-view expander.
+    if view_mode == "Full":
+        with st.expander("Show full derivation", expanded=False):
+            # Substituted formula with this run's values.
+            sub = _substitute_formula_values(entry, result)
+            if sub:
+                st.markdown(f"**With this run's values:** {sub}")
+
+            # Expert explanation.
+            if entry.explanation_full:
+                st.markdown(f"**Why this formula:** {entry.explanation_full}")
+
+            # Citation chain.
+            if entry.citation:
+                st.markdown(f"**Citation:** {entry.citation}")
+            if entry.code_ref:
+                st.markdown(f"**Implemented at:** `{entry.code_ref}`")
+            if entry.derivation_link:
+                st.markdown(f"**Full derivation:** `{entry.derivation_link}`")
+
+            # Symbolic dependency chain.
+            if entry.formula_dependencies:
+                deps = ", ".join(f"`{d}`" for d in entry.formula_dependencies)
+                st.markdown(f"**Depends on:** {deps}")
+
+            # Provenance badges.
+            _render_provenance_badges(entry)
+
+            # Assumptions.
+            if entry.assumptions:
+                st.markdown("**Assumptions:**")
+                for a in entry.assumptions:
+                    st.markdown(f"- {a}")
+
+
+def _matches_search(entry, query: str) -> bool:
+    """Filter helper — returns True when the user's free-text query matches
+    any of the metric's searchable fields. Case-insensitive substring
+    match across display_name, key, formula_text, explanation_short."""
+    if not query:
+        return True
+    q = query.lower().strip()
+    haystack = " ".join((
+        entry.display_name,
+        entry.key,
+        entry.formula_text or "",
+        entry.explanation_short or "",
+        entry.explanation_full or "",
+    )).lower()
+    return q in haystack
+
+
+def render_tab_math(result: dict) -> None:
+    """Render the "How it's calculated" tab.
+
+    Sections:
+      1. Header + explanation
+      2. View-mode toggle (Simple / Full)
+      3. Search filter
+      4. Quick-jump navigation
+      5. Glossary expander (top-level)
+      6. Per-module sections (anchored markdown headers; PR 1 ships M1-M3)
+      7. (Stubs for PR 2-5 — empty in PR 1.)
+
+    The user's current run feeds every "Value" cell so the math tab and
+    the per-tab metric cards can never disagree on a number.
+    """
+    from ui.glossary import GLOSSARY
+    from ui.math_content import MATH_CONTENT, MODULE_ORDER, MODULE_TITLES
+
+    section_header("How it's calculated")
+    explanation(EXPLANATIONS["math_intro"])
+
+    # --- View mode + search ----------------------------------------------
+    c1, c2 = st.columns([1, 3])
+    with c1:
+        view_mode = st.radio(
+            "View",
+            options=("Simple", "Full"),
+            horizontal=True,
+            index=0,
+            key=_MATH_VIEW_KEY,
+            help=(
+                "Simple shows formula, value, and a one-sentence "
+                "explanation. Full adds substituted values, citations, "
+                "code references, and assumptions."
+            ),
+        )
+    with c2:
+        search_query = st.text_input(
+            "Search",
+            placeholder="Filter by metric name, symbol, or term…",
+            key=_MATH_SEARCH_KEY,
+        )
+
+    # --- Quick-jump --------------------------------------------------------
+    quick_targets: list[str] = ["[Glossary](#glossary)"]
+    for module_id in MODULE_ORDER:
+        # Only list modules that actually have entries in MATH_CONTENT
+        # (PR 1 only ships M1-M3, the rest will appear as PR 2-3 land).
+        if any(e.module == module_id for e in MATH_CONTENT.values()):
+            anchor = module_id.lower()
+            quick_targets.append(f"[{module_id}](#{anchor})")
+    st.markdown(" · ".join(quick_targets))
+
+    # --- Glossary ---------------------------------------------------------
+    st.markdown("<a id='glossary'></a>", unsafe_allow_html=True)
+    with st.expander(f"Glossary ({len(GLOSSARY)} terms)", expanded=False):
+        st.caption(
+            "Concept-level definitions. Each entry explains the *concept* "
+            "(what is 'diffraction'? what is 'Strehl'?) — separate from "
+            "the per-metric 'What it means' below, which explains what "
+            "that specific number tells you about the engagement."
+        )
+        for term, definition in GLOSSARY.items():
+            st.markdown(f"**{term}** — {definition}")
+
+    # --- Per-module sections ----------------------------------------------
+    for module_id in MODULE_ORDER:
+        module_entries = [
+            e for e in MATH_CONTENT.values() if e.module == module_id
+        ]
+        if not module_entries:
+            continue
+        # Filter by search.
+        visible = [e for e in module_entries if _matches_search(e, search_query)]
+        if not visible:
+            continue
+
+        anchor = module_id.lower()
+        st.markdown(f"<a id='{anchor}'></a>", unsafe_allow_html=True)
+        st.markdown(f"### {module_id} — {MODULE_TITLES[module_id]}")
+
+        for entry in visible:
+            _render_metric_row(entry, result, view_mode=view_mode)
+            st.divider()

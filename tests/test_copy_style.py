@@ -64,6 +64,18 @@ SCANNED_FILES: tuple[Path, ...] = (
     _UI_DIR / "components.py",
     _UI_DIR / "plots.py",
     _UI_DIR / "presets.py",
+    # Math-tab plan PR 1 (docs/math_tab_plan_2026-04-25.md): the
+    # glossary holds concept-level definitions and is plain-language
+    # copy, so it goes through the same forbidden-token gate as the
+    # other surfaces. ``math_content.py`` is deliberately NOT scanned —
+    # its ``citation`` and ``derivation_link`` fields are designed to
+    # hold "SPEC §" references and module tags ("M1", "M7"), which
+    # are exactly the tokens this scanner forbids elsewhere. The math
+    # tab is the one user-facing surface where those citations are a
+    # feature, not a leak. Glossary entries do still need to be
+    # plain-language; ``test_math_tab.py::test_glossary_no_spec_section_citations``
+    # adds a per-entry SPEC-citation guard targeted there.
+    _UI_DIR / "glossary.py",
 )
 
 
@@ -252,6 +264,9 @@ def test_scan_list_covers_phase3_pr6_surface() -> None:
         "app.py", "auth.py", "panels.py",
         "outputs.py", "components.py", "plots.py",
         "presets.py",
+        # Math-tab PR 1 — glossary only; math_content.py is exempted
+        # because its citation field is intentionally citation-heavy.
+        "glossary.py",
     }
     actual_names = {p.name for p in SCANNED_FILES}
     assert expected_names == actual_names, (

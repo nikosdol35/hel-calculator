@@ -500,9 +500,8 @@ st.session_state[_LAST_RUN_AT] = time.time()
 # ``ui/theme.py`` (150 ms ease-out; clamped to 50 ms under
 # prefers-reduced-motion).
 # ---------------------------------------------------------------------------
-tab_overview, tab_engagement, tab_target, tab_safety, tab_atmos, tab_diag = (
-    st.tabs(list(TAB_LABELS.values()))
-)
+(tab_overview, tab_engagement, tab_target, tab_safety,
+ tab_atmos, tab_diag, tab_math) = st.tabs(list(TAB_LABELS.values()))
 
 with tab_overview:
     outputs.render_tab_overview(merged)
@@ -525,5 +524,8 @@ with tab_atmos:
 
 with tab_diag:
     outputs.render_tab_diagnostics(merged)
+
+with tab_math:
+    outputs.render_tab_math(merged)
 
 _render_footer()
