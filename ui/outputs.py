@@ -1258,9 +1258,36 @@ def _render_metric_row(entry, result: dict, *, view_mode: str) -> None:
             unsafe_allow_html=True,
         )
 
+    # Iteration banner (for M6↔M7 post-iteration values).
+    if entry.is_iterated:
+        iter_count = result.get("m67_iteration_count")
+        iter_text = (
+            f"this run: {int(iter_count)} iterations"
+            if isinstance(iter_count, (int, float))
+            else "iteration count unknown"
+        )
+        st.caption(
+            f"Computed via the blooming–focusing self-consistency "
+            f"iteration ({iter_text} to 1 % tolerance)."
+        )
+
     # Formula block.
     if entry.is_categorical:
-        st.caption("Categorical (verdict) output — see rule below.")
+        # Verdict / classification — render the prose rule as a
+        # mono-spaced code block rather than LaTeX. The plan §6.3
+        # mockup shows this layout; it reads as "this is a rule, not
+        # an equation".
+        st.caption("Categorical (verdict) output — set by the rule below.")
+        if entry.formula_text:
+            st.code(entry.formula_text, language="text")
+    elif entry.is_solver_based:
+        # Multi-line formula (PDE + boundary conditions + stop rule).
+        # Render the LaTeX header line if present, then the full
+        # text recipe in a code block.
+        if entry.formula_latex is not None:
+            st.latex(entry.formula_latex)
+        if entry.formula_text:
+            st.code(entry.formula_text, language="text")
     elif entry.formula_latex is not None:
         st.latex(entry.formula_latex)
 
