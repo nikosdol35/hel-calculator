@@ -25,19 +25,18 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 
 
-# Worked-example scenario — c_uas preset with R = 1 km. All other
-# values match the canonical c_uas_short_range scenario in
-# tests/golden/scenarios.py (which sits at 1.5 km), so a reader can
-# cross-check any single number against the golden by adjusting only
-# the slant range.
+# Worked-example scenario — c_uas preset, head-on engagement
+# starting at R_detect = 1500 m, closing to R_min = 100 m at v_tgt =
+# 20 m/s (= 70 s engagement window). SPEC v2.0 §3 M3 trajectory model.
 WORKED_EXAMPLE_INPUTS: dict = {
     # Panel A — Laser source
     "P0": 3000, "M2": 1.2, "D": 0.10, "wavelength": 1.07e-6,
     # Panel B — Beam director
     "eta_opt": 0.85, "sigma_jit": 10e-6,
-    # Panel C — Engagement geometry (1 km — user-chosen worked-example
-    # range; the golden c_uas scenario sits at 1.5 km)
-    "H_e": 2, "R": 1000, "H_t": 200, "v_tgt": 20, "v_perp": 3,
+    # Panel C — Engagement geometry (SPEC v2.0 trajectory contract —
+    # head-on closing from 1.5 km to 100 m at 20 m/s)
+    "H_e": 2, "R_detect": 1500, "R_min": 100, "H_t": 200,
+    "v_tgt": 20, "engagement_geometry": "head_on",
     # Panel D — Atmosphere
     "V": 23, "RH": 0.60, "T_ambient": 300, "P_atm": 101325,
     "cn2_model": "HV_5_7", "Cn2_value": 1e-14,

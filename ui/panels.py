@@ -154,8 +154,34 @@ def section_2_beam_director(initial: dict | None = None) -> dict:
 
 
 def section_3_engagement_geometry(initial: dict | None = None) -> dict:
-    """Engagement-geometry inputs: altitudes, range, target + wind speed."""
+    """Engagement-geometry inputs (SPEC v2.0 §3 M3 contract).
+
+    The director is assumed to track the target; the engagement-window
+    duration follows the target's threat trajectory from initial
+    detection at R_detect down to the user-defined standoff range
+    R_min. Two trajectory geometries supported:
+
+      * head-on: target closes along the line of sight at v_tgt
+      * lateral: target flies a perpendicular pass with closest-
+        approach distance R_min at speed v_tgt
+    """
+    geometry_options = ("head-on closing", "lateral pass")
+    geometry_keys = ("head_on", "lateral")
+    initial_geometry = _initial(initial, "engagement_geometry", "head_on")
+    initial_idx = 0 if initial_geometry == "head_on" else 1
+
     with st.sidebar.expander(SECTION_LABELS["engagement_geometry"], expanded=True):
+        engagement_geometry_label = st.selectbox(
+            input_label("engagement_geometry"),
+            options=geometry_options,
+            index=initial_idx,
+            key="engagement_geometry_select",
+            help=input_tooltip("engagement_geometry"),
+        )
+        engagement_geometry = geometry_keys[
+            geometry_options.index(engagement_geometry_label)
+        ]
+
         H_e = st.number_input(
             _labelled("H_e"),
             min_value=0.0, max_value=3000.0,
@@ -163,12 +189,19 @@ def section_3_engagement_geometry(initial: dict | None = None) -> dict:
             step=1.0, key="H_e",
             help=input_tooltip("H_e"),
         )
-        R = st.number_input(
-            _labelled("R"),
+        R_detect = st.number_input(
+            _labelled("R_detect"),
             min_value=50.0, max_value=50000.0,
-            value=float(_initial(initial, "R", 1500.0)),
-            step=50.0, key="R",
-            help=input_tooltip("R"),
+            value=float(_initial(initial, "R_detect", 1500.0)),
+            step=50.0, key="R_detect",
+            help=input_tooltip("R_detect"),
+        )
+        R_min = st.number_input(
+            _labelled("R_min"),
+            min_value=10.0, max_value=5000.0,
+            value=float(_initial(initial, "R_min", 100.0)),
+            step=10.0, key="R_min",
+            help=input_tooltip("R_min"),
         )
         H_t = st.number_input(
             _labelled("H_t"),
@@ -184,16 +217,13 @@ def section_3_engagement_geometry(initial: dict | None = None) -> dict:
             step=1.0, key="v_tgt",
             help=input_tooltip("v_tgt"),
         )
-        v_perp = st.number_input(
-            _labelled("v_perp"),
-            min_value=0.0, max_value=30.0,
-            value=float(_initial(initial, "v_perp", 3.0)),
-            step=0.5, key="v_perp",
-            help=input_tooltip("v_perp"),
-        )
     return {
-        "H_e": H_e, "R": R, "H_t": H_t,
-        "v_tgt": v_tgt, "v_perp": v_perp,
+        "H_e": H_e,
+        "R_detect": R_detect,
+        "R_min": R_min,
+        "H_t": H_t,
+        "v_tgt": v_tgt,
+        "engagement_geometry": engagement_geometry,
     }
 
 
