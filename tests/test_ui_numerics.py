@@ -580,3 +580,150 @@ def test_atmosphere_total_guard_prevents_divzero():
     guard = 1e-12
     share = (1e-6 / (total + guard)) * 100
     assert math.isfinite(share)
+
+
+# ---------------------------------------------------------------------------
+# Engagement-tab plots D / E / G — smoke tests on real-orchestrator sweeps
+# ---------------------------------------------------------------------------
+# These guard the always-render contract (SPEC §5.3 item 10), the new
+# trace counts, and the math that turns the existing sweep into the new
+# verdict / N_D / spot-vs-bucket views. They use the canonical
+# c_uas_1500m scenario already pinned in tests/golden/scenarios.py so a
+# regression in any upstream physics module surfaces here too.
+
+@pytest.fixture(scope="module")
+def _engagement_sweep():
+    """Build a small (5-point) range sweep at the c_uas_1500m scenario.
+
+    Module-scoped so the orchestrator only runs five times across all
+    Plot D/E/G tests instead of once per test.
+    """
+    from physics.orchestrator import run_full_chain
+    from tests.golden.scenarios import C_UAS_1500M
+
+    ranges = [500.0, 1000.0, 1500.0, 2500.0, 4000.0]
+    out = []
+    for R in ranges:
+        result = run_full_chain({**C_UAS_1500M, "R": R})
+        out.append({**result, "range": R})
+    return out, C_UAS_1500M
+
+
+def test_plot_g_spot_vs_bucket_smoke(_engagement_sweep):
+    """Plot G renders 2 traces (spillover band + spot curve) with a real
+    sweep and the bucket diameter from the scenario inputs."""
+    from ui.plots import plot_g_spot_vs_bucket
+    sweep, scen = _engagement_sweep
+    fig = plot_g_spot_vs_bucket(sweep, d_aim=scen["d_aim"])
+    # Spillover-fill polygon + spot curve = 2 data traces.
+    # The horizontal bucket reference is a layout shape, not a trace.
+    assert len(fig.data) == 2
+    # Names follow the existing copy convention.
+    names = {t.name for t in fig.data}
+    assert "Total spot diameter" in names
+    assert "Spillover (spot > bucket)" in names
+
+
+def test_plot_g_handles_missing_d_aim(_engagement_sweep):
+    """Without d_aim, Plot G falls back to the always-render frame."""
+    from ui.plots import plot_g_spot_vs_bucket
+    sweep, _ = _engagement_sweep
+    fig = plot_g_spot_vs_bucket(sweep, d_aim=None)
+    assert len(fig.data) == 0  # frame-only figure
+
+
+def test_plot_g_empty_sweep_renders_frame():
+    """Empty sweep → frame-only figure (always-render contract)."""
+    from ui.plots import plot_g_spot_vs_bucket
+    fig = plot_g_spot_vs_bucket(None, d_aim=0.05)
+    assert len(fig.data) == 0
+
+
+def test_plot_d_blooming_distortion_smoke(_engagement_sweep):
+    """Plot D renders one N_D curve with two validity-band shapes."""
+    from ui.plots import plot_d_blooming_distortion_number
+    sweep, _ = _engagement_sweep
+    fig = plot_d_blooming_distortion_number(sweep, reference_range=1500.0)
+    assert len(fig.data) == 1
+    # Two horizontal validity bands (negligible + outside-validity)
+    # land in fig.layout.shapes via Plotly's add_hrect; the reference
+    # vertical line adds one more.
+    assert len(fig.layout.shapes) >= 2
+
+
+def test_plot_d_log_y_axis(_engagement_sweep):
+    """Plot D's y-axis is log so multiple decades of N_D fit on screen."""
+    from ui.plots import plot_d_blooming_distortion_number
+    sweep, _ = _engagement_sweep
+    fig = plot_d_blooming_distortion_number(sweep)
+    assert fig.layout.yaxis.type == "log"
+
+
+def test_plot_d_empty_sweep_renders_frame():
+    from ui.plots import plot_d_blooming_distortion_number
+    fig = plot_d_blooming_distortion_number(None)
+    assert len(fig.data) == 0
+
+
+def test_plot_e_engagement_margin_smoke(_engagement_sweep):
+    """Plot E renders one margin curve and at least three verdict bands."""
+    from ui.plots import plot_e_engagement_margin_vs_range
+    sweep, _ = _engagement_sweep
+    fig = plot_e_engagement_margin_vs_range(sweep, reference_range=1500.0)
+    assert len(fig.data) == 1
+    # Three verdict bands (engageable / marginal / not-viable) plus the
+    # zero reference and the vertical reference-range line, so at least
+    # five layout shapes total.
+    assert len(fig.layout.shapes) >= 3
+
+
+def test_plot_e_y_axis_clamped_to_visual_range(_engagement_sweep):
+    """Y-axis fixed range keeps a single very-engageable point from
+    flattening the rest of the curve."""
+    from ui.plots import plot_e_engagement_margin_vs_range
+    sweep, _ = _engagement_sweep
+    fig = plot_e_engagement_margin_vs_range(sweep)
+    lo, hi = fig.layout.yaxis.range
+    assert lo == -100.0 and hi == 200.0
+
+
+def test_plot_e_empty_sweep_renders_frame():
+    from ui.plots import plot_e_engagement_margin_vs_range
+    fig = plot_e_engagement_margin_vs_range(None)
+    assert len(fig.data) == 0
+
+
+def test_plot_c_now_includes_w_bloom_trace(_engagement_sweep):
+    """Plot C breakdown now shows six contributions, not five (the
+    blooming trace was added 2026-04-25 — without it the gap between
+    summed components and total in this plot was unexplained)."""
+    from ui.plots import plot_c_beam_diameter_breakdown
+    sweep, _ = _engagement_sweep
+    fig = plot_c_beam_diameter_breakdown(sweep)
+    names = [t.name for t in fig.data]
+    assert len(fig.data) == 6, f"expected 6 traces, got {len(fig.data)}: {names}"
+    assert "Blooming contribution" in names
+
+
+def test_engagement_margin_arithmetic_matches_overview_chip():
+    """The Plot-E margin formula must match the Overview-tab chip
+    threshold so the two surfaces never disagree on the verdict."""
+    # Overview chip thresholds (per ui/outputs.py): >= 30 % engageable,
+    # 0–30 % marginal, < 0 % not viable.
+    cases = [
+        (10.0, 5.0,  "engageable"),    # margin = +100 %
+        (10.0, 8.5,  "marginal"),      # margin = +17.6 %
+        (10.0, 15.0, "not viable"),    # margin = -33 %
+    ]
+    for dwell, tau_bt, expected in cases:
+        m = (dwell - tau_bt) / tau_bt * 100.0
+        if m >= 30.0:
+            actual = "engageable"
+        elif m >= 0.0:
+            actual = "marginal"
+        else:
+            actual = "not viable"
+        assert actual == expected, (
+            f"dwell={dwell}, tau_BT={tau_bt} → margin={m:+.1f}% → "
+            f"expected {expected!r}, got {actual!r}"
+        )

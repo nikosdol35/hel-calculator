@@ -490,7 +490,7 @@ def plot_c_beam_diameter_breakdown(
 ) -> go.Figure:
     """Spot-diameter contributions vs slant range.
 
-    Five curves (all 1/e² diameters in cm):
+    Six curves (all 1/e² diameters in cm):
 
       * Total spot diameter — solid data-series A.
       * Diffraction-limited diameter (pure Gaussian, M²=1) — gray
@@ -499,6 +499,13 @@ def plot_c_beam_diameter_breakdown(
         series B (teal / dash / square).
       * Turbulence contribution — data-series C (purple / dot /
         diamond).
+      * Blooming contribution — status-warn hue (amber-orange) /
+        dash-dot / triangle-up marker. The contribution is non-zero
+        only when N_D ≥ 5 (M6 sets w_bloom = 0 below the Smith cutoff
+        per SPEC §3 M6); on samples in the negligible regime the trace
+        sits at zero. Without this trace the gap between summed
+        components and the total in this plot is unexplained whenever
+        blooming engages.
       * Jitter contribution — a supporting reference trace in the
         reference hue so it does not compete with the three primary
         dual-encoded series.
@@ -528,6 +535,7 @@ def plot_c_beam_diameter_breakdown(
     d_diff = _d_cm("w_diff")
     d_turb = _d_cm("w_turb")
     d_jit = _d_cm("w_jit")
+    d_bloom = _d_cm("w_bloom")
 
     # Diffraction-pure diameter: 2·w0·sqrt(1 + (L/z_R)²). When w0 or z_R
     # is missing on a sample, the diameter falls back to NaN and that
@@ -595,6 +603,22 @@ def plot_c_beam_diameter_breakdown(
             mode="lines+markers",
             name="Turbulence contribution",
             line=s2["line"], marker=s2["marker"],
+            hovertemplate="%{y:.3g} cm<extra></extra>",
+        )
+    )
+    # Blooming contribution. Uses the status-warn hue because w_bloom > 0
+    # is itself the SPEC §10.4 HIGH-UNCERTAINTY regime; the dual-encoded
+    # data.a/b/c slots are reserved for the diffraction / M² / turbulence
+    # diagnostic triad. dashdot + triangle-up keeps it visually separable
+    # from the three primary series and the gray reference traces.
+    fig.add_trace(
+        go.Scatter(
+            x=x_km, y=d_bloom,
+            mode="lines+markers",
+            name="Blooming contribution",
+            line=dict(color=palette["status.warn"], width=1.8, dash="dashdot"),
+            marker=dict(symbol="triangle-up", size=6,
+                        color=palette["status.warn"]),
             hovertemplate="%{y:.3g} cm<extra></extra>",
         )
     )
@@ -1225,10 +1249,377 @@ def plot_atmosphere_transmission_vs_range(
     return fig
 
 
+# ---------------------------------------------------------------------------
+# Plot G — Spot diameter vs aimpoint bucket diameter (go/no-go visual).
+# ---------------------------------------------------------------------------
+
+def plot_g_spot_vs_bucket(
+    sweep: list[dict] | None,
+    *,
+    d_aim: float | None,
+) -> go.Figure:
+    """At-a-glance: is the 1/e² spot still inside the aimpoint bucket?
+
+    A single ``d_total = 2·w_total`` curve (cm) is plotted against slant
+    range (km) with a horizontal reference at the bucket diameter
+    ``d_aim`` (also cm). The region where ``d_total > d_aim`` is shaded
+    in the status-warn hue to flag substantial spillover (≤ 86 % of
+    energy is inside the bucket once the 1/e² diameter exceeds the
+    bucket diameter, so the warn band coincides with the regime where
+    PIB drops below the Gaussian-on-its-1/e² fraction).
+
+    This plot answers the cognitive question Plot C does NOT — Plot C
+    is a diagnostic ("which broadening term dominates?") while this
+    plot is a verdict ("does the energy land in the bucket?"). They
+    deliberately overlap on `w_total` but answer different things.
+
+    Renders a frame with the "infeasible geometry" advisory when
+    ``sweep`` is None/empty or ``d_aim`` is missing/non-positive.
+    """
+    height = PLOT_HEIGHTS["default"]
+    xtitle = "Slant range (km)"
+    ytitle = "1/e² spot diameter (cm)"
+    title = "Spot vs bucket vs slant range"
+
+    if not sweep or d_aim is None or not (d_aim > 0):
+        return _empty_frame(
+            title=title, xtitle=xtitle, ytitle=ytitle,
+            advisory=ADVISORY["infeasible_geometry"], height=height,
+        )
+
+    palette = _active_palette()
+    x_km = _x_km(sweep)
+    d_total_cm = [
+        2.0 * float(s.get("w_total", math.nan)) * 100.0 for s in sweep
+    ]
+    d_aim_cm = d_aim * 100.0
+
+    if _all_nan(d_total_cm):
+        return _empty_frame(
+            title=title, xtitle=xtitle, ytitle=ytitle,
+            advisory=ADVISORY["infeasible_geometry"], height=height,
+        )
+
+    # PIB at each sample feeds the hover line. Missing / non-finite
+    # entries fall back to NaN so the unified hover still draws.
+    pib = [float(s.get("PIB_fraction", math.nan)) for s in sweep]
+
+    fig = go.Figure()
+
+    # Spillover shading — closed polygon between d_aim_cm (lower) and
+    # d_total_cm (upper) wherever d_total > d_aim. The fill is laid
+    # before the data trace so the curve and bucket reference draw on
+    # top of the band.
+    upper: list[float] = []
+    lower: list[float] = []
+    for d in d_total_cm:
+        if isinstance(d, float) and math.isfinite(d) and d > d_aim_cm:
+            upper.append(d)
+            lower.append(d_aim_cm)
+        else:
+            upper.append(math.nan)
+            lower.append(math.nan)
+    warn_rgba = _hex_to_rgba(palette["status.warn"], alpha=0.18)
+    fig.add_trace(
+        go.Scatter(
+            x=x_km + x_km[::-1],
+            y=upper + lower[::-1],
+            fill="toself",
+            fillcolor=warn_rgba,
+            line=dict(color="rgba(0,0,0,0)"),
+            hoverinfo="skip",
+            name="Spillover (spot > bucket)",
+            showlegend=True,
+        )
+    )
+
+    # Bucket-diameter reference — horizontal dashed line.
+    fig.add_hline(
+        y=d_aim_cm,
+        line=dict(color=palette["data.reference"], width=1.5, dash="dash"),
+        annotation_text=f"Bucket diameter ({d_aim_cm:.1f} cm)",
+        annotation_position="top right",
+        annotation_font=dict(color=palette["fg.secondary"], size=11),
+    )
+
+    # Spot-diameter curve.
+    s0 = _series_style(0, palette)
+    fig.add_trace(
+        go.Scatter(
+            x=x_km, y=d_total_cm,
+            mode="lines+markers",
+            name="Total spot diameter",
+            line=s0["line"], marker=s0["marker"],
+            customdata=pib,
+            hovertemplate=(
+                "Range %{x:.2f} km · spot %{y:.1f} cm · "
+                "PIB %{customdata:.1%}<extra></extra>"
+            ),
+        )
+    )
+
+    fig.update_layout(
+        title=title,
+        hovermode="x unified",
+        height=height,
+    )
+    fig.update_xaxes(title_text=xtitle)
+    fig.update_yaxes(title_text=ytitle)
+    return fig
+
+
+# ---------------------------------------------------------------------------
+# Plot D — Thermal-blooming distortion number N_D vs slant range.
+# ---------------------------------------------------------------------------
+
+def plot_d_blooming_distortion_number(
+    sweep: list[dict] | None,
+    *,
+    reference_range: float | None = None,
+) -> go.Figure:
+    """Visualize ``N_D`` vs slant range with SPEC §10.4 validity bands.
+
+    The Gebhardt distortion number ``N_D`` drives ``w_bloom`` but is
+    invisible elsewhere in the UI. Here it is plotted on a log y-axis
+    with three color-coded bands:
+
+      * ``N_D < 5`` (status-ok) — blooming negligible; M6 sets w_bloom=0
+        per SPEC §3 M6 Smith Strehl cutoff.
+      * ``5 ≤ N_D ≤ 30`` (no shade) — valid scaling regime; the engineering
+        broadening multiplier (0.3 per SPEC §10.4) applies.
+      * ``N_D > 30`` (status-error) — outside the M6 model validity range
+        per SPEC §10.4 HIGH UNCERTAINTY; the value still computes but
+        any downstream w_bloom should be read as "model has failed".
+
+    A vertical dashed reference line marks the user's reference range
+    (where the engagement-tab metric cards are computed).
+
+    Renders a frame with the "infeasible geometry" advisory when
+    ``sweep`` is None/empty.
+    """
+    height = PLOT_HEIGHTS["default"]
+    xtitle = "Slant range (km)"
+    ytitle = "Thermal-blooming N_D (—)"
+    title = "Blooming distortion number vs slant range"
+
+    if not sweep:
+        return _empty_frame(
+            title=title, xtitle=xtitle, ytitle=ytitle,
+            advisory=ADVISORY["infeasible_geometry"], height=height,
+        )
+
+    palette = _active_palette()
+    x_km = _x_km(sweep)
+    n_d = _log_safe(_get(sweep, "N_D"))
+
+    if _all_nan(n_d):
+        return _empty_frame(
+            title=title, xtitle=xtitle, ytitle=ytitle,
+            advisory=ADVISORY["infeasible_geometry"], height=height,
+        )
+
+    # Determine the y-axis floor / ceiling so the validity bands always
+    # render even when the data sits in just one band. The 0.1 floor is
+    # well below the Smith cutoff (5); the 100 ceiling is above the model
+    # validity boundary (30) — both extend by ~half a decade past the
+    # SPEC §3 M6 thresholds for visual breathing room.
+    finite = [v for v in n_d if math.isfinite(v)]
+    y_min = max(0.1, min(finite) * 0.5) if finite else 0.1
+    y_max = max(100.0, max(finite) * 1.5) if finite else 100.0
+
+    fig = go.Figure()
+
+    # Validity bands — drawn as horizontal rectangles spanning the full
+    # x-axis. Plotly's add_hrect places them behind the data traces.
+    ok_rgba = _hex_to_rgba(palette["status.ok"], alpha=0.10)
+    err_rgba = _hex_to_rgba(palette["status.error"], alpha=0.10)
+    fig.add_hrect(
+        y0=y_min, y1=5.0,
+        fillcolor=ok_rgba, line_width=0,
+        annotation_text="Negligible (N_D < 5)",
+        annotation_position="bottom left",
+        annotation_font=dict(color=palette["fg.secondary"], size=10),
+    )
+    fig.add_hrect(
+        y0=30.0, y1=y_max,
+        fillcolor=err_rgba, line_width=0,
+        annotation_text="Outside model validity",
+        annotation_position="top left",
+        annotation_font=dict(color=palette["fg.secondary"], size=10),
+    )
+
+    # Reference range — vertical dashed line.
+    if reference_range is not None and reference_range > 0:
+        fig.add_vline(
+            x=reference_range / 1000.0,
+            line=dict(color=palette["data.reference"], width=1.2, dash="dash"),
+            annotation_text="Reference range",
+            annotation_position="top right",
+            annotation_font=dict(color=palette["fg.secondary"], size=11),
+        )
+
+    # The N_D curve itself.
+    s0 = _series_style(0, palette)
+    fig.add_trace(
+        go.Scatter(
+            x=x_km, y=n_d,
+            mode="lines+markers",
+            name="N_D",
+            line=s0["line"], marker=s0["marker"],
+            hovertemplate="Range %{x:.2f} km · N_D %{y:.3g}<extra></extra>",
+        )
+    )
+
+    fig.update_layout(
+        title=title,
+        hovermode="x unified",
+        height=height,
+    )
+    fig.update_xaxes(title_text=xtitle)
+    fig.update_yaxes(title_text=ytitle, type="log",
+                     range=[math.log10(y_min), math.log10(y_max)])
+    return fig
+
+
+# ---------------------------------------------------------------------------
+# Plot E — Engagement-viability margin vs slant range.
+# ---------------------------------------------------------------------------
+
+def plot_e_engagement_margin_vs_range(
+    sweep: list[dict] | None,
+    *,
+    reference_range: float | None = None,
+) -> go.Figure:
+    """Engagement-viability margin curve with verdict bands.
+
+    Margin is ``(available_dwell − tau_BT) / tau_BT × 100`` (percent),
+    the same quantity the Overview-tab verdict chip displays. Three
+    color-coded bands:
+
+      * ``margin ≥ +30 %`` (status-ok) — engageable
+      * ``0 % ≤ margin < +30 %`` (status-warn) — marginal
+      * ``margin < 0 %`` (status-error) — not viable (dwell too short)
+
+    Plotted on a linear y-axis clamped to ``[-100 %, +200 %]`` so a
+    single very-engageable sample does not flatten the rest of the
+    curve; values outside the clamp are pinned at the limit so the
+    curve still terminates inside the plot.
+
+    Renders the "no burn-through" advisory when every ``tau_BT`` sample
+    is non-finite (no finite margin can be computed). When the entire
+    sweep is in the ``status.error`` band, the curve stays in red — no
+    special-case rewrite is needed since the band shading already
+    reads the verdict.
+    """
+    height = PLOT_HEIGHTS["default"]
+    xtitle = "Slant range (km)"
+    ytitle = "Engagement margin (%)"
+    title = "Engagement margin vs slant range"
+    Y_FLOOR, Y_CEIL = -100.0, 200.0
+
+    if not sweep:
+        return _empty_frame(
+            title=title, xtitle=xtitle, ytitle=ytitle,
+            advisory=ADVISORY["infeasible_geometry"], height=height,
+        )
+
+    palette = _active_palette()
+    x_km = _x_km(sweep)
+    tau_bt = _get(sweep, "tau_BT")
+    dwell = _get(sweep, "available_dwell")
+
+    margin: list[float] = []
+    verdict: list[str] = []
+    for tbt, dw in zip(tau_bt, dwell):
+        if (math.isfinite(tbt) and tbt > 0 and math.isfinite(dw)):
+            m = 100.0 * (dw - tbt) / tbt
+            margin.append(max(Y_FLOOR, min(Y_CEIL, m)))
+            if m >= 30.0:
+                verdict.append("engageable")
+            elif m >= 0.0:
+                verdict.append("marginal")
+            else:
+                verdict.append("not viable")
+        else:
+            margin.append(math.nan)
+            verdict.append("—")
+
+    if _all_nan(margin):
+        return _empty_frame(
+            title=title, xtitle=xtitle, ytitle=ytitle,
+            advisory=ADVISORY["no_burnthrough"], height=height,
+        )
+
+    fig = go.Figure()
+
+    # Verdict bands.
+    ok_rgba = _hex_to_rgba(palette["status.ok"], alpha=0.12)
+    warn_rgba = _hex_to_rgba(palette["status.warn"], alpha=0.12)
+    err_rgba = _hex_to_rgba(palette["status.error"], alpha=0.12)
+    fig.add_hrect(y0=30.0, y1=Y_CEIL,
+                  fillcolor=ok_rgba, line_width=0,
+                  annotation_text="Engageable (≥ 30 %)",
+                  annotation_position="top left",
+                  annotation_font=dict(color=palette["fg.secondary"], size=10))
+    fig.add_hrect(y0=0.0, y1=30.0,
+                  fillcolor=warn_rgba, line_width=0,
+                  annotation_text="Marginal (0–30 %)",
+                  annotation_position="top left",
+                  annotation_font=dict(color=palette["fg.secondary"], size=10))
+    fig.add_hrect(y0=Y_FLOOR, y1=0.0,
+                  fillcolor=err_rgba, line_width=0,
+                  annotation_text="Not viable (< 0 %)",
+                  annotation_position="bottom left",
+                  annotation_font=dict(color=palette["fg.secondary"], size=10))
+
+    # Zero-line and reference-range markers.
+    fig.add_hline(
+        y=0.0,
+        line=dict(color=palette["data.reference"], width=1.2, dash="dash"),
+    )
+    if reference_range is not None and reference_range > 0:
+        fig.add_vline(
+            x=reference_range / 1000.0,
+            line=dict(color=palette["data.reference"], width=1.2, dash="dash"),
+            annotation_text="Reference range",
+            annotation_position="top right",
+            annotation_font=dict(color=palette["fg.secondary"], size=11),
+        )
+
+    # Margin curve. Use series-B styling (teal / dash / square) so this
+    # plot reads as a Plot-B sibling.
+    s1 = _series_style(1, palette)
+    fig.add_trace(
+        go.Scatter(
+            x=x_km, y=margin,
+            mode="lines+markers",
+            name="Engagement margin",
+            line=s1["line"], marker=s1["marker"],
+            customdata=verdict,
+            hovertemplate=(
+                "Range %{x:.2f} km · margin %{y:+.0f}% · "
+                "%{customdata}<extra></extra>"
+            ),
+        )
+    )
+
+    fig.update_layout(
+        title=title,
+        hovermode="x unified",
+        height=height,
+    )
+    fig.update_xaxes(title_text=xtitle)
+    fig.update_yaxes(title_text=ytitle, range=[Y_FLOOR, Y_CEIL])
+    return fig
+
+
 __all__ = [
     "plot_a_on_target_performance",
     "plot_b_time_to_burnthrough",
     "plot_c_beam_diameter_breakdown",
+    "plot_d_blooming_distortion_number",
+    "plot_e_engagement_margin_vs_range",
+    "plot_g_spot_vs_bucket",
     "plot_overview_dwell_vs_burnthrough",
     "plot_target_temperature_envelope",
     "plot_target_material_comparison",

@@ -806,12 +806,37 @@ EXPLANATIONS: dict[str, str] = {
         "it rises above, the dwell runs out first."
     ),
     "plot_c_intro": (
-        "This chart decomposes the beam spot at the target into its four "
+        "This chart decomposes the beam spot at the target into its five "
         "physical contributors: diffraction (an ideal beam spreads too), "
         "beam-quality excess (imperfect optics), turbulence (atmosphere), "
+        "thermal blooming (the beam heats the air it passes through), "
         "and jitter (mount shake). At short range the diffraction floor "
-        "dominates; at long range turbulence and jitter grow fastest and "
-        "usually decide the total."
+        "dominates; at long range turbulence and jitter grow fastest, "
+        "with blooming kicking in once the on-path power density is high."
+    ),
+    "plot_d_intro": (
+        "This chart shows the thermal-blooming distortion number across "
+        "range. Below the green band the air doesn't heat enough to bend "
+        "the beam appreciably. Inside the unshaded middle band, blooming "
+        "scaling is well-understood. The red band marks where the model "
+        "stops being trustworthy — if the curve enters it, the spot-size "
+        "and Strehl numbers above are best-effort engineering estimates."
+    ),
+    "plot_e_intro": (
+        "This chart turns the time budget from the burn-through plot into "
+        "a pass-or-fail margin at every range. Green means the dwell window "
+        "comfortably exceeds the burn-through time; amber means it just "
+        "barely covers it (small disturbance and the engagement fails); "
+        "red means the target moves through the field before the laser "
+        "can finish the job."
+    ),
+    "plot_g_intro": (
+        "This chart compares the beam's 1/e² spot diameter at the target "
+        "to the aimpoint bucket the user is shooting for. The amber band "
+        "marks where the spot has grown larger than the bucket — beyond "
+        "that range less than 86 % of the energy is hitting the part of "
+        "the target that matters, and the engagement is wasting power on "
+        "the surroundings."
     ),
 }
 

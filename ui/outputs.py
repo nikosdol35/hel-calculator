@@ -533,11 +533,23 @@ def render_tab_engagement(
     )
     log_y = scale_choice == "log"
 
-    # Always render all three frames — when sweep is None/empty, each
+    # Always render every frame — when sweep is None/empty, each
     # constructor returns a frame-only figure with a centered advisory
     # (SPEC §5.3 item 10: no silent plot skip on infeasible geometry).
     # An ``explanation(..., variant="plot")`` sits under each chart so
     # a non-specialist viewer reads what the curves mean in two sentences.
+    #
+    # Reading order: a verdict-shaped go/no-go (G) above the diagnostic
+    # stack; on-target performance (A) and time budget (B) next; the
+    # margin reframing of B (E) immediately after; then the broadening
+    # diagnostics (C → D).
+    d_aim_si = result.get("d_aim")
+    st.plotly_chart(
+        plots.plot_g_spot_vs_bucket(sweep, d_aim=d_aim_si),
+        use_container_width=True,
+        config=PLOTLY_MODEBAR_CONFIG,
+    )
+    explanation(EXPLANATIONS["plot_g_intro"], variant="plot")
     st.plotly_chart(
         plots.plot_a_on_target_performance(sweep, log_y=log_y),
         use_container_width=True,
@@ -551,11 +563,27 @@ def render_tab_engagement(
     )
     explanation(EXPLANATIONS["plot_b_intro"], variant="plot")
     st.plotly_chart(
+        plots.plot_e_engagement_margin_vs_range(
+            sweep, reference_range=reference_range,
+        ),
+        use_container_width=True,
+        config=PLOTLY_MODEBAR_CONFIG,
+    )
+    explanation(EXPLANATIONS["plot_e_intro"], variant="plot")
+    st.plotly_chart(
         plots.plot_c_beam_diameter_breakdown(sweep),
         use_container_width=True,
         config=PLOTLY_MODEBAR_CONFIG,
     )
     explanation(EXPLANATIONS["plot_c_intro"], variant="plot")
+    st.plotly_chart(
+        plots.plot_d_blooming_distortion_number(
+            sweep, reference_range=reference_range,
+        ),
+        use_container_width=True,
+        config=PLOTLY_MODEBAR_CONFIG,
+    )
+    explanation(EXPLANATIONS["plot_d_intro"], variant="plot")
 
 
 # =============================================================================
