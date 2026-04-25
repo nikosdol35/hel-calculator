@@ -240,7 +240,117 @@ def apply_to_session_state(session_state, preset_key: str) -> bool:
     return True
 
 
+# ---------------------------------------------------------------------------
+# DRI Analyzer sensor presets (multipage PR 2, 2026-04-26).
+# ---------------------------------------------------------------------------
+# Independent of the HEL preset registry above. Each preset is a dict
+# whose keys match the DRI input session-state keys exactly — DRI inputs
+# are already in display units (deg, mm, px) so no SI → display
+# conversion layer is needed; the values written to session_state ARE
+# the widget values directly.
+
+_EO_DAYTIME_SURVEILLANCE: dict = {
+    # Mid-tier security camera with a long-zoom lens. Daylight, clear
+    # weather, person-class target.
+    "dri_n_pixels_h": 1920, "dri_n_pixels_v": 1080,
+    "dri_nfov_deg":   1.5,  "dri_wfov_deg":   25.0,
+    "dri_focal_length_mm": 200.0, "dri_f_number": 2.8,
+    "dri_band":       "Visible",
+    "dri_cn2_preset": "Moderate (canonical mid-altitude)",
+    "dri_visibility_km": 23.0, "dri_C0": 0.30,
+    "dri_target_preset": "Person standing",
+    "dri_probability": 0.50,
+    "dri_n_cycles_D": 1.0, "dri_n_cycles_R": 4.0, "dri_n_cycles_I": 8.0,
+}
+
+_EO_LONG_RANGE_SURVEILLANCE: dict = {
+    # 4K sensor on a 600 mm telephoto. Counter-vehicle / overwatch
+    # configuration with a sub-degree NFOV.
+    "dri_n_pixels_h": 3840, "dri_n_pixels_v": 2160,
+    "dri_nfov_deg":   0.5,  "dri_wfov_deg":   10.0,
+    "dri_focal_length_mm": 600.0, "dri_f_number": 4.0,
+    "dri_band":       "Visible",
+    "dri_cn2_preset": "Moderate (canonical mid-altitude)",
+    "dri_visibility_km": 30.0, "dri_C0": 0.30,
+    "dri_target_preset": "Car / sedan",
+    "dri_probability": 0.50,
+    "dri_n_cycles_D": 1.0, "dri_n_cycles_R": 4.0, "dri_n_cycles_I": 8.0,
+}
+
+_SWIR_NIGHT_VISION: dict = {
+    # SWIR (1.55 µm) sensor, eye-safe NIR illuminator-assisted. Lower
+    # contrast, dawn / overcast turbulence regime.
+    "dri_n_pixels_h": 1280, "dri_n_pixels_v": 1024,
+    "dri_nfov_deg":   2.0,  "dri_wfov_deg":   20.0,
+    "dri_focal_length_mm": 150.0, "dri_f_number": 2.8,
+    "dri_band":       "SWIR",
+    "dri_cn2_preset": "Weak (overcast / dawn)",
+    "dri_visibility_km": 15.0, "dri_C0": 0.40,
+    "dri_target_preset": "Person standing",
+    "dri_probability": 0.50,
+    "dri_n_cycles_D": 1.0, "dri_n_cycles_R": 4.0, "dri_n_cycles_I": 8.0,
+}
+
+_MWIR_THERMAL_IMAGER: dict = {
+    # 640x512 MWIR cooled-array thermal imager. Tuned for small-UAS
+    # (Group-1) detection — the canonical C-UAS thermal use case.
+    "dri_n_pixels_h": 640,  "dri_n_pixels_v": 512,
+    "dri_nfov_deg":   2.0,  "dri_wfov_deg":   18.0,
+    "dri_focal_length_mm": 100.0, "dri_f_number": 4.0,
+    "dri_band":       "MWIR",
+    "dri_cn2_preset": "Moderate (canonical mid-altitude)",
+    "dri_visibility_km": 23.0, "dri_C0": 0.50,
+    "dri_target_preset": "DJI Mavic 4 (Group-1 UAS)",
+    "dri_probability": 0.50,
+    "dri_n_cycles_D": 1.0, "dri_n_cycles_R": 4.0, "dri_n_cycles_I": 8.0,
+}
+
+_LWIR_THERMAL_IMAGER: dict = {
+    # 640x480 LWIR uncooled microbolometer. Wider WFOV, person-class
+    # target — common ground-surveillance / vehicle-mounted scope.
+    "dri_n_pixels_h": 640,  "dri_n_pixels_v": 480,
+    "dri_nfov_deg":   2.5,  "dri_wfov_deg":   24.0,
+    "dri_focal_length_mm": 75.0, "dri_f_number": 1.4,
+    "dri_band":       "LWIR",
+    "dri_cn2_preset": "Moderate (canonical mid-altitude)",
+    "dri_visibility_km": 23.0, "dri_C0": 0.50,
+    "dri_target_preset": "Person standing",
+    "dri_probability": 0.50,
+    "dri_n_cycles_D": 1.0, "dri_n_cycles_R": 4.0, "dri_n_cycles_I": 8.0,
+}
+
+DRI_PRESET_PARAMETERS: dict[str, dict] = {
+    "eo_daytime_surveillance":    _EO_DAYTIME_SURVEILLANCE,
+    "eo_long_range_surveillance": _EO_LONG_RANGE_SURVEILLANCE,
+    "swir_night_vision":          _SWIR_NIGHT_VISION,
+    "mwir_thermal_imager":        _MWIR_THERMAL_IMAGER,
+    "lwir_thermal_imager":        _LWIR_THERMAL_IMAGER,
+}
+
+
+def apply_dri_preset_to_session_state(session_state, preset_key: str) -> bool:
+    """Mirror of ``apply_to_session_state`` for DRI presets.
+
+    DRI inputs are already in display units (deg, mm, px) so this
+    function writes preset values straight into ``session_state``
+    without the SI → widget unit-conversion layer that the HEL preset
+    pathway uses. Returns ``True`` when a known preset is applied,
+    ``False`` for the ``"custom"`` sentinel (or any unknown key) so
+    the caller can keep the user's current widget edits.
+    """
+    if preset_key == "custom":
+        return False
+    preset = DRI_PRESET_PARAMETERS.get(preset_key)
+    if preset is None:
+        return False
+    for widget_key, value in preset.items():
+        session_state[widget_key] = value
+    return True
+
+
 __all__ = [
     "PRESET_PARAMETERS",
+    "DRI_PRESET_PARAMETERS",
     "apply_to_session_state",
+    "apply_dri_preset_to_session_state",
 ]

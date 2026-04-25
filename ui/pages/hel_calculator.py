@@ -1,34 +1,29 @@
-"""HEL Calculator page (multipage refactor PR 1).
+"""HEL Calculator page (multipage refactor PR 2).
 
-This file holds the full HEL Engineering Calculator workflow: the
-six-section sidebar, preset dropdown, Run / Share / Validate buttons,
-the cached orchestrator chain, the seven-tab results stack, and the
-"Last run" indicator.
+The HEL Engineering Calculator workflow: a six-section sidebar
+(laser source, beam director, engagement geometry, atmosphere,
+target & aimpoint, system resources), a preset dropdown, Run / Share
+/ Validate buttons, the cached orchestrator chain, and the seven-tab
+results stack with the "Last run" indicator.
 
-It is dispatched by ``ui/app.py`` via Streamlit's ``st.navigation`` /
-``st.Page`` API. The entry script (``ui/app.py``) handles all of the
-shell concerns:
+Dispatched by ``ui/app.py`` via Streamlit's ``st.navigation`` /
+``st.Page`` API. The entry script handles the four shell concerns
+(``sys.path`` shim, ``st.set_page_config``, theme bootstrap, auth
+gate) before this script runs.
 
-* ``sys.path`` shim
-* ``st.set_page_config(...)``
-* Theme bootstrap
-* Auth gate (``ui/auth.require_login``)
-
-By the time this page script runs, those have all completed; we are
-free to render widgets directly.
-
-In this PR (1) the DRI Analyzer still lives as a tab inside this
-page so the user-visible behaviour is identical to before the
-refactor. PR 2 of the multipage campaign moves DRI to its own
-sibling page (``ui/pages/dri_analyzer.py``) and removes the DRI tab,
-the DRI sidebar sections, and all DRI-specific helpers from this
-file.
+PR 2 cleanup vs PR 1: the DRI Analyzer used to ship as a tab on
+this page; it is now its own sibling page
+(``ui/pages/dri_analyzer.py``). Removed from this file:
+    * DRI sidebar sections (``collect_all`` → ``collect_hel``)
+    * DRI compute call + DRI sweep helpers
+    * DRI tab dispatch
+    * ``dri_*`` keys from the URL-decode allow-list
 
 References:
-    docs/dri_analyzer_design.md — DRI module contract.
     ui/app.py — multipage entry script.
-    ui/panels.py — sidebar input sections.
-    ui/outputs.py — render_tab_* renderers.
+    ui/pages/dri_analyzer.py — DRI page (sibling).
+    ui/panels.py — ``collect_hel`` returns the six HEL sections only.
+    ui/outputs.py — ``render_tab_*`` renderers.
 """
 from __future__ import annotations
 
@@ -84,131 +79,6 @@ def run_chain_cached(frozen_inputs: tuple) -> dict:
     return run_full_chain(dict(frozen_inputs))
 
 
-def _resolve_dri_kwargs(base: dict, level: str) -> dict:
-    """Pull the DRI inputs out of a (frozen) user_inputs tuple-as-dict
-    and resolve them into the kwargs ``physics.dri_analyzer`` helpers
-    expect. Shared by every DRI sweep helper."""
-    from physics import dri_analyzer
-    target_preset = base["dri_target_preset"]
-    if target_preset == "Custom":
-        h_target = float(base.get("dri_target_h_m", 1.0))
-    else:
-        h_target = dri_analyzer.target_critical_dim(target_preset)
-    cn2 = dri_analyzer.CN2_PRESETS[base["dri_cn2_preset"]]
-    n_cycles_50 = float(base[{
-        "Detection": "dri_n_cycles_D",
-        "Recognition": "dri_n_cycles_R",
-        "Identification": "dri_n_cycles_I",
-    }[level]])
-    return dict(
-        h_target=h_target,
-        n_pixels_h=int(base["dri_n_pixels_h"]),
-        band=base["dri_band"],
-        cn2=cn2,
-        V_km=float(base["dri_visibility_km"]),
-        f_mm=float(base["dri_focal_length_mm"]),
-        f_number=float(base["dri_f_number"]),
-        C0=float(base.get("dri_C0", 0.30)),
-        probability=float(base.get("dri_probability", 0.50)),
-        n_cycles_50=n_cycles_50,
-    )
-
-
-@st.cache_data(max_entries=10, show_spinner=False)
-def run_dri_fov_sweep_cached(
-    frozen_inputs: tuple,
-    level: str,
-    n_points: int = 30,
-) -> list[dict]:
-    """Cache wrapper: DRI FOV-sweep evaluation NFOV → WFOV.
-
-    Pulls NFOV / WFOV / sensor / atmosphere / target keys from the
-    frozen `user_inputs` tuple and produces a list of dicts (one per
-    FOV grid point) ready for ``plot_dri_distance_vs_fov``. Cheap —
-    each cell is closed-form arithmetic + a 3-step path-length
-    fixed-point iteration; ~30 cells finish in <50 ms.
-    """
-    from physics import dri_analyzer
-    base = dict(frozen_inputs)
-    nfov = float(base["dri_nfov_deg"])
-    wfov = float(base["dri_wfov_deg"])
-    if wfov <= nfov:
-        return []
-    return dri_analyzer.fov_sweep(
-        level=level,
-        fov_low_deg=nfov,
-        fov_high_deg=wfov,
-        n_points=n_points,
-        **_resolve_dri_kwargs(base, level),
-    )
-
-
-@st.cache_data(max_entries=10, show_spinner=False)
-def run_dri_target_size_sweep_cached(
-    frozen_inputs: tuple,
-    level: str,
-    sizes_m: tuple,
-) -> list[dict]:
-    """Cache wrapper: DRI range vs target critical dimension at NFOV.
-
-    Drops the swept ``h_target`` from the resolved kwargs (the kernel
-    iterates the size argument). Holds FOV at NFOV.
-    """
-    from physics import dri_analyzer
-    base = dict(frozen_inputs)
-    kwargs = _resolve_dri_kwargs(base, level)
-    kwargs.pop("h_target")
-    return dri_analyzer.target_size_sweep(
-        level=level,
-        sizes_m=tuple(float(s) for s in sizes_m),
-        fov_h_deg=float(base["dri_nfov_deg"]),
-        **kwargs,
-    )
-
-
-@st.cache_data(max_entries=10, show_spinner=False)
-def run_dri_cn2_sweep_cached(
-    frozen_inputs: tuple,
-    level: str,
-) -> list[dict]:
-    """Cache wrapper: DRI range across the seven preset Cn² levels at NFOV."""
-    from physics import dri_analyzer
-    base = dict(frozen_inputs)
-    kwargs = _resolve_dri_kwargs(base, level)
-    kwargs.pop("cn2")
-    return dri_analyzer.cn2_sweep(
-        level=level,
-        cn2_values=list(dri_analyzer.CN2_PRESETS.values()),
-        fov_h_deg=float(base["dri_nfov_deg"]),
-        **kwargs,
-    )
-
-
-@st.cache_data(max_entries=4, show_spinner="Computing DRI heatmap…")
-def run_dri_heatmap_cached(
-    frozen_inputs: tuple,
-    fov_grid_deg: tuple,
-    target_grid_m: tuple,
-    level: str = "Detection",
-) -> list[list[float]]:
-    """Cache wrapper: 2D heatmap of R_final over (FOV × target size).
-
-    20×20 = 400 evaluations; <500 ms total (each cell is closed-form
-    plus a 3-step path-length fixed-point). Compute-on-click pattern
-    preserved for UX consistency with the HEL Plot K.
-    """
-    from physics import dri_analyzer
-    base = dict(frozen_inputs)
-    kwargs = _resolve_dri_kwargs(base, level)
-    kwargs.pop("h_target")
-    return dri_analyzer.heatmap(
-        fov_grid_deg=list(fov_grid_deg),
-        target_grid_m=list(target_grid_m),
-        level=level,
-        **kwargs,
-    )
-
-
 @st.cache_data(max_entries=10, show_spinner=False)
 def run_sweep_cached(frozen_inputs: tuple, ranges_m: tuple) -> list[dict]:
     """Cache wrapper: orchestrator evaluation at N slant-range samples.
@@ -259,17 +129,18 @@ _URL_STRING_KEYS = frozenset({
     "cn2_model", "material", "backside_BC",
     # SPEC v2.0 §3 M3 — engagement_geometry is a string enum.
     "engagement_geometry",
-    # DRI Analyzer string-valued inputs (independent of HEL physics).
-    "dri_band", "dri_cn2_preset", "dri_target_preset",
 })
 
 
 def _decode_url_params_once() -> None:
-    """Read ``st.query_params`` into ``session_state[_URL_PREFILL_KEY]``.
+    """Read HEL ``st.query_params`` into ``session_state[_URL_PREFILL_KEY]``.
 
     Fires exactly once per session — the ``_URL_DECODE_LATCH`` guard
     prevents subsequent Streamlit reruns (triggered by any widget edit)
     from re-applying stale URL values on top of the user's edits.
+
+    DRI keys (``dri_*``) are skipped — the DRI page has its own
+    page-scoped decode (``_url_decoded_dri``) that handles those.
     """
     if st.session_state.get(_URL_DECODE_LATCH):
         return
@@ -277,6 +148,8 @@ def _decode_url_params_once() -> None:
     prefill: dict[str, Any] = {}
     flags: list[str] = []
     for key, value in st.query_params.items():
+        if key.startswith("dri_"):
+            continue                          # belongs to the DRI page
         if key in _URL_STRING_KEYS:
             prefill[key] = value
             continue
@@ -409,7 +282,7 @@ with st.sidebar:
         help=PRESET_PICKER_HELP,
     )
 
-user_inputs = panels.collect_all(initial=prefill or None)
+user_inputs = panels.collect_hel(initial=prefill or None)
 
 with st.sidebar:
     st.markdown("---")
@@ -600,66 +473,12 @@ except ValueError:
     # its content and shows an inline advisory where the plots would go.
     sweep = None
 
-# --- DRI Analyzer compute -------------------------------------------------
-# Independent of the HEL chain. Runs against the dri_* keys collected
-# by ui/panels.py sections 7–9. Failures here fall back to "no DRI
-# block" rather than killing the whole page — the DRI tab handles the
-# missing-keys case with a friendly notice.
-#
-# Note (multipage PR 1): DRI still lives as a tab inside this page in
-# this PR. PR 2 of the campaign moves DRI to its own page and removes
-# this block.
-from physics import dri_analyzer  # local import — module is independent
-try:
-    dri_result = dri_analyzer.compute(user_inputs)
-except (KeyError, ValueError):
-    dri_result = {}
-
-# DRI sweeps for the three required FOV plots + the four optional
-# plots. Each individual sweep is cheap (~30-100 closed-form evaluations
-# + a 3-step path-length fixed-point — well under 100 ms total).
-# Cached at the @st.cache_data layer so re-renders on the same inputs
-# are free.
-dri_sweeps: dict[str, list[dict]] = {}
-dri_target_size_sweeps: dict[str, list[dict]] = {}
-dri_cn2_sweeps: dict[str, list[dict]] = {}
-if dri_result:
-    dri_frozen = _freeze(user_inputs)
-    # Required FOV sweeps (DRI PR 3).
-    for _level in ("Detection", "Recognition", "Identification"):
-        try:
-            dri_sweeps[_level] = run_dri_fov_sweep_cached(dri_frozen, _level)
-        except (KeyError, ValueError):
-            dri_sweeps[_level] = []
-    # Optional target-size sweep (Plot DRI-4) — log-spaced sizes from
-    # 0.1 m (small drone) to 10 m (large vehicle). 19 points.
-    _target_sizes = tuple(
-        0.10 * (10.0 ** (i / 9.0)) for i in range(19)
-    )  # 19 points covering 0.10 → 10 m
-    for _level in ("Detection", "Recognition", "Identification"):
-        try:
-            dri_target_size_sweeps[_level] = run_dri_target_size_sweep_cached(
-                dri_frozen, _level, _target_sizes,
-            )
-        except (KeyError, ValueError):
-            dri_target_size_sweeps[_level] = []
-    # Optional Cn² sweep (Plot DRI-6) — across the seven preset levels.
-    for _level in ("Detection", "Recognition", "Identification"):
-        try:
-            dri_cn2_sweeps[_level] = run_dri_cn2_sweep_cached(
-                dri_frozen, _level,
-            )
-        except (KeyError, ValueError):
-            dri_cn2_sweeps[_level] = []
-
 # Merge user_inputs into the result so the output sections can read
 # ``result['M2']`` and ``result['sigma_jit']`` without changing the
 # ARCH §6.4 signature. User-input keys are disjoint from module-output
 # keys (spot checked: P0 / M2 / D / eta_opt / ... vs w0 / zR / I_peak /
-# PIB / ...) except for ``wavelength`` which is idempotent. DRI inputs
-# and outputs are namespaced under the ``dri_`` prefix, so they don't
-# collide with HEL keys either.
-merged = {**user_inputs, **result, **dri_result}
+# PIB / ...) except for ``wavelength`` which is idempotent.
+merged = {**user_inputs, **result}
 
 # Surface any URL-decode flags onto the assumptions roll-up.
 if url_flags:
@@ -726,16 +545,5 @@ if "diagnostics" in tabs:
 if "math" in tabs:
     with tabs["math"]:
         outputs.render_tab_math(merged)
-
-if "dri_analyzer" in tabs:
-    with tabs["dri_analyzer"]:
-        outputs.render_tab_dri_analyzer(
-            merged,
-            dri_sweeps=dri_sweeps,
-            dri_target_size_sweeps=dri_target_size_sweeps,
-            dri_cn2_sweeps=dri_cn2_sweeps,
-            dri_frozen=_freeze(user_inputs) if dri_result else None,
-            dri_heatmap_runner=run_dri_heatmap_cached,
-        )
 
 _render_footer()
