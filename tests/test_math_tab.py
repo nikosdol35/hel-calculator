@@ -121,8 +121,12 @@ def test_pr1_modules_present():
         "theta_diff", "w0", "zR", "I_exit",
         # M2 — power link (1)
         "P_exit",
-        # M3 — geometry (4)
+        # M3 — geometry (4 from PR 1, +1 from tracker-dwell-PR3 = 5)
         "R_slant", "R_h", "elevation_angle", "available_dwell",
+        # R_at_dwell_end — added in tracker-dwell PR 3 alongside the
+        # M3 contract update (SPEC v2.0); lives logically with the
+        # other M3 entries.
+        "R_at_dwell_end",
     }
     actual = set(MATH_CONTENT.keys())
     assert expected_pr1_keys.issubset(actual), (
@@ -193,6 +197,9 @@ def test_sensitivity_inputs_only_user_inputs():
         "d_aim", "material", "thickness", "A_lambda",
         "eta_wallplug", "Q_cool", "C_thermal", "dT_max", "t_exp",
         "backside_BC",
+        # SPEC v2.0 §3 M3 — tracker-supported trajectory inputs.
+        # Migrated from tracker-dwell PR 3 onwards.
+        "R_detect", "R_min", "engagement_geometry",
     }
     for key, entry in MATH_CONTENT.items():
         for sens in entry.sensitivity_inputs:
@@ -475,9 +482,11 @@ def test_pr4_walkthrough_steps_cover_every_metric():
 
     # Every MATH_CONTENT key except the m67 iteration diagnostics
     # (which the walkthrough mentions as part of step 6's narrative
-    # rather than as an explicit metric).
+    # rather than as an explicit metric) and R_at_dwell_end (added in
+    # tracker-dwell PR 3; the walkthrough rewrite for the v2.0 contract
+    # lands in the trajectory-loop PRs 5-6).
     expected = set(MATH_CONTENT.keys()) - {
-        "m67_iteration_count", "m67_converged",
+        "m67_iteration_count", "m67_converged", "R_at_dwell_end",
     }
     missing_from_walkthrough = expected - referenced
     assert not missing_from_walkthrough, (
