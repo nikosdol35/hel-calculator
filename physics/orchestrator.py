@@ -287,6 +287,10 @@ def _run_v2_trajectory(
         "T_ambient": user_inputs["T_ambient"],
         "t_dwell": t_dwell,
         "R_of_t": R_of_t,
+        # PR 8 — record T_surface(t) and E_cumulative(t) for Plot H
+        # (engagement-profile timeline). Cheap (~80 sample points)
+        # and only allocated when v2 trajectory mode is active.
+        "record_trajectory": True,
         **(
             {"A_lambda": user_inputs["A_lambda"]}
             if user_inputs.get("A_lambda") is not None else {}

@@ -548,6 +548,17 @@ def render_tab_engagement(
     # margin reframing of B (E) immediately after; then the broadening
     # diagnostics (C → D).
     d_aim_si = result.get("d_aim")
+    # SPEC v2.0 §8.3 — Plot H (engagement-profile timeline) sits
+    # at the top of the tab as the headline visualisation. Falls
+    # back to the empty-frame advisory when the result lacks the
+    # trajectory series (v1.x mode).
+    if "trajectory_t_pde" in result:
+        st.plotly_chart(
+            plots.plot_h_engagement_profile(result),
+            use_container_width=True,
+            config=PLOTLY_MODEBAR_CONFIG,
+        )
+        explanation(EXPLANATIONS["plot_h_intro"], variant="plot")
     st.plotly_chart(
         plots.plot_g_spot_vs_bucket(sweep, d_aim=d_aim_si),
         use_container_width=True,
