@@ -275,9 +275,14 @@ def test_m8_numerics_energy_conservation_pre_failure(monkeypatch):
     # Al with 10 kW/m² absorbed cannot melt — must hit timeout.
     assert result["failure_mode"] == "no_failure_before_timeout"
 
-    # E_delivered identity (absorbed flux × time).
+    # E_delivered identity. SPEC v2.0 changed E_delivered from the
+    # closed-form `absorbed_flux * tau_BT` identity (exact for constant
+    # flux) to a Riemann-sum accumulator inside the PDE step loop —
+    # this lets the same code path support time-varying I_aim(t) under
+    # the trajectory model. For constant flux the Riemann sum carries
+    # 1-2 ulp of accumulated rounding; tolerance relaxed accordingly.
     absorbed_per_m2 = 0.1 * 1.0e5 * result["tau_BT"]
-    assert result["E_delivered"] == pytest.approx(absorbed_per_m2, rel=1e-12)
+    assert result["E_delivered"] == pytest.approx(absorbed_per_m2, rel=1e-9)
 
     # Total-energy balance.
     T_s = result["T_surface_peak"]

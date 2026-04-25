@@ -11,7 +11,19 @@ and material-specific failure criteria:
     foam (EPP):         T_s ≥ T_decomp sustained for ≥ 0.05 s
                         → mode='decomposition'
   - LiPo:               T_s ≥ T_vent (= 420 K) → mode='vent'
-  - otherwise:          mode='no_failure_before_timeout' at t = 60 s
+  - timeout:            mode='no_failure_before_timeout' at t = 60 s
+  - SPEC v2.0:          mode='engagement_ended_at_R_min' if t_dwell
+                        elapses without failure (tracker-supported case)
+
+SPEC v2.0 §3 M8: ``I_aim`` extended from scalar to callable ``I_aim(t)``
+returning the delivered irradiance at engagement-time t. The orchestrator
+builds this callable from the trajectory R(t) and the M4-M7 sub-sampling
+chain. Scalar callers continue to work — wrapped internally in
+``lambda t: scalar``. New optional input ``t_dwell`` stops the
+integration when the engagement window ends; when not provided the
+solver uses ``_SIM_TIMEOUT_S`` (60 s) as before. New optional input
+``R_of_t`` returns the slant range at engagement-time; when given,
+``R_at_kill`` is reported in the output dict.
 
 Numerical method per SPEC §3 M8: explicit finite-difference with
 Δx = min(50 µm, thickness/20), Δt = 0.4·Δx²·ρ·c_p/k (safety factor 0.4),
@@ -24,6 +36,7 @@ Steen & Mazumder, *Laser Material Processing* (4 ed., 2010) Ch. 5–6.
 """
 
 import math
+from typing import Callable
 
 import numpy as np
 
@@ -51,7 +64,12 @@ def compute(inputs: dict) -> dict:
     mode per SPEC §3 M8.
 
     Inputs (required keys):
-      - I_aim (W/m²): delivered irradiance (from M7)
+      - I_aim (W/m² or Callable[[float], float]): delivered irradiance.
+        SPEC v2.0: may be either a scalar (constant flux during the
+        integration — v1.x behaviour) or a callable returning the
+        flux at engagement-time t. The orchestrator wraps the
+        trajectory + upstream-chain computation in a callable so
+        time-varying flux flows through M8 transparently.
       - material (str): enum — one of MATERIALS
       - thickness (m): 0.0001 – 0.020
       - wavelength (m): for default A_λ table lookup (from M1)
@@ -62,16 +80,28 @@ def compute(inputs: dict) -> dict:
       - A_lambda (—): user override; 0.05 – 0.99. If absent or None,
         M8 looks up from the SPEC §3 M8 table and flags the default
         as SPEC §10.2 HIGH UNCERTAINTY.
+      - t_dwell (s): SPEC v2.0. Engagement window from M3. When given,
+        the solver stops at ``t ≥ t_dwell`` if T_fail hasn't been
+        reached; the result reports
+        ``failure_mode = 'engagement_ended_at_R_min'``. When absent,
+        the solver uses _SIM_TIMEOUT_S (60 s) as the timeout, matching
+        v1.x.
+      - R_of_t (Callable[[float], float]): SPEC v2.0. Trajectory range
+        at engagement-time. When given, ``R_at_kill`` is reported in
+        the output dict (None otherwise).
 
     Outputs:
-      - tau_BT (s): time-to-failure (or = _SIM_TIMEOUT_S on timeout)
+      - tau_BT (s): time-to-failure (or = window-end on no-kill)
       - T_surface_peak (K): peak surface temperature observed
       - E_delivered (J/m²): total absorbed energy per unit area at
         failure (SPEC §3 M8 Outputs table writes unit as J; M8 reports
         per unit area since the module sees only irradiance, not a spot
         area. The UI multiplies by π·R_aim² to get total energy.)
       - failure_mode (str): 'melt' | 'decomposition' | 'vent' |
-        'no_failure_before_timeout'
+        'no_failure_before_timeout' | 'engagement_ended_at_R_min'
+      - R_at_kill (float | None): SPEC v2.0. Slant range at moment of
+        failure, evaluated by R_of_t(tau_BT) when R_of_t is supplied;
+        None otherwise.
       - assumptions_flagged (list[str])
 
     Equations (SPEC §3 M8):
@@ -101,12 +131,42 @@ def compute(inputs: dict) -> dict:
     L_f = props["L_f"]
     failure_mode_target = props["failure_mode"]
 
-    I_aim = inputs["I_aim"]
+    # SPEC v2.0 — I_aim may be a scalar (v1.x) or a callable (v2.0).
+    # Wrap scalar in lambda so the inner loop is uniform.
+    I_aim_in = inputs["I_aim"]
+    if callable(I_aim_in):
+        I_aim_of_t: Callable[[float], float] = I_aim_in
+        I_aim_was_callable = True
+    else:
+        I_aim_scalar = float(I_aim_in)
+
+        def _constant_flux(_t: float, _v: float = I_aim_scalar) -> float:
+            return _v
+
+        I_aim_of_t = _constant_flux
+        I_aim_was_callable = False
+
     thickness = inputs["thickness"]
     wavelength = inputs["wavelength"]
     backside_BC = inputs["backside_BC"]
     v_tgt = inputs["v_tgt"]
     T_amb = inputs["T_ambient"]
+
+    # SPEC v2.0 — engagement window and trajectory hooks (optional).
+    t_dwell_in = inputs.get("t_dwell")
+    if t_dwell_in is not None:
+        t_dwell = float(t_dwell_in)
+        if t_dwell <= 0:
+            raise ValueError(
+                f"t_dwell must be > 0 s, got {t_dwell}"
+            )
+    else:
+        t_dwell = None  # use _SIM_TIMEOUT_S as fallback
+
+    R_of_t_in = inputs.get("R_of_t")
+    R_of_t: Callable[[float], float] | None = (
+        R_of_t_in if callable(R_of_t_in) else None
+    )
 
     assumptions_flagged: list[str] = []
 
@@ -148,14 +208,25 @@ def compute(inputs: dict) -> dict:
     failure_mode: str | None = None
     tau_BT: float | None = None
 
-    absorbed_flux = A_lambda * I_aim           # W/m² into surface at T_s=T_amb peak
+    # SPEC v2.0: absorbed_flux now varies with t through I_aim_of_t(t).
+    # The cumulative absorbed-energy integral becomes a Riemann sum
+    # (E_cumulative_absorbed) accumulated each step, since the simple
+    # absorbed_flux * tau_BT identity from v1.x assumes constant flux.
     r = alpha_diff * dt / (dx * dx)            # Fourier number per step, ≤ safety
     two_dx_over_k = 2.0 * dx / k
 
-    max_steps = int(_SIM_TIMEOUT_S / dt) + 1
+    # Window-end: SPEC v2.0 t_dwell stop, falling back to _SIM_TIMEOUT_S
+    # for v1.x callers (no t_dwell supplied).
+    t_max = t_dwell if t_dwell is not None else _SIM_TIMEOUT_S
+    max_steps = int(t_max / dt) + 1
+
+    E_cumulative_absorbed = 0.0  # J/m² absorbed integrated over the run
 
     for _step in range(max_steps):
         T_s = float(T[0])
+
+        # SPEC v2.0 — flux at current engagement time.
+        absorbed_flux = A_lambda * I_aim_of_t(t)
 
         # Losses at the current surface temperature
         conv_loss = h_conv * (T_s - T_amb)
@@ -219,19 +290,48 @@ def compute(inputs: dict) -> dict:
         T = T_new
         t += dt
 
+        # Accumulate absorbed energy (Riemann sum) — replaces the v1.x
+        # `absorbed_flux * tau_BT` identity which assumed constant flux.
+        E_cumulative_absorbed += max(absorbed_flux, 0.0) * dt
+
         if T[0] > T_surface_peak:
             T_surface_peak = float(T[0])
 
     if failure_mode is None:
-        failure_mode = "no_failure_before_timeout"
+        # No failure within the budget. Pick the right "no kill" verdict
+        # depending on whether we ran out of t_dwell (v2.0 engagement
+        # window) or _SIM_TIMEOUT_S (v1.x fallback).
+        if t_dwell is not None:
+            failure_mode = "engagement_ended_at_R_min"
+            assumptions_flagged.append(
+                f"engagement window of {t_dwell:.3g} s elapsed without "
+                f"reaching T_fail — target reached the engagement-end "
+                f"range (SPEC v2.0 §3 M8)"
+            )
+        else:
+            failure_mode = "no_failure_before_timeout"
+            assumptions_flagged.append(
+                f"simulation reached {_SIM_TIMEOUT_S:.0f} s timeout "
+                f"without failure — engagement not viable at this flux "
+                f"/ material / thickness combination (SPEC §3 M8 "
+                f"timeout criterion)"
+            )
         tau_BT = t
-        assumptions_flagged.append(
-            f"simulation reached {_SIM_TIMEOUT_S:.0f} s timeout without "
-            f"failure — engagement not viable at this flux / material / "
-            f"thickness combination (SPEC §3 M8 timeout criterion)"
-        )
 
-    E_delivered = absorbed_flux * tau_BT
+    E_delivered = E_cumulative_absorbed
+
+    # SPEC v2.0 — R_at_kill from the trajectory at tau_BT, when R_of_t
+    # is supplied. None for v1.x callers and for "no kill" verdicts
+    # (the run stopped without a failure event, so there is no kill
+    # range to report).
+    R_at_kill: float | None
+    if R_of_t is not None and failure_mode in ("melt", "decomposition", "vent"):
+        # A kill verdict guarantees tau_BT was set inside the loop —
+        # narrow the type for mypy.
+        assert tau_BT is not None
+        R_at_kill = float(R_of_t(tau_BT))
+    else:
+        R_at_kill = None
 
     assumptions_flagged.append(
         f"1-D transient conduction: Δx = {dx*1e6:.1f} µm, "
@@ -250,11 +350,19 @@ def compute(inputs: dict) -> dict:
             "correlation"
         )
 
+    if I_aim_was_callable:
+        assumptions_flagged.append(
+            "SPEC v2.0: I_aim time-varying through engagement (callable); "
+            "absorbed-energy integral evaluated as Riemann sum over PDE "
+            "timesteps"
+        )
+
     return {
         "tau_BT": tau_BT,
         "T_surface_peak": T_surface_peak,
         "E_delivered": E_delivered,
         "failure_mode": failure_mode,
+        "R_at_kill": R_at_kill,
         "assumptions_flagged": assumptions_flagged,
     }
 
@@ -305,7 +413,10 @@ def _validate_inputs(inputs: dict) -> None:
     if missing:
         raise ValueError(f"M8 missing required inputs: {missing}")
 
-    validate_positive(inputs["I_aim"], "I_aim")
+    # SPEC v2.0: I_aim may be a positive scalar (v1.x) or a callable
+    # (v2.0 trajectory mode). Validate scalar-shape only when scalar.
+    if not callable(inputs["I_aim"]):
+        validate_positive(inputs["I_aim"], "I_aim")
     validate_enum(inputs["material"], "material", list(MATERIALS))
     validate_range(inputs["thickness"], "thickness", 1.0e-4, 2.0e-2)
     validate_range(inputs["wavelength"], "wavelength", 0.5e-6, 5.0e-6)

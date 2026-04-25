@@ -1427,6 +1427,54 @@ def _entries() -> dict[str, MetricEntry]:
     ))
 
     rows.append(MetricEntry(
+        key="R_at_kill",
+        module="M8",
+        display_name="Slant range at kill",
+        symbol_latex=r"R_\text{kill}",
+        unit_si="m",
+        is_solver_based=True,
+        formula_latex=r"R_\text{kill} = R(t = \tau_\text{BT})",
+        formula_text=(
+            "R_at_kill = R(tau_BT)   "
+            "(SPEC v2.0 — slant range at the moment T_surface first "
+            "reaches T_fail; evaluated by the orchestrator's R(t) "
+            "callable at the kill timestep)"
+        ),
+        formula_dependencies=("tau_BT",),
+        sensitivity_inputs=(
+            "P0", "eta_opt", "M2", "D", "wavelength", "sigma_jit",
+            "R_detect", "R_min", "v_tgt",
+            "V", "RH", "v_perp", "Cn2_ground", "v_HV",
+            "d_aim", "thickness", "T_ambient",
+        ),
+        explanation_short=(
+            "How far the target was from the laser at the moment "
+            "burn-through happened. None when no kill happened within "
+            "the engagement window. Tells the operator at what range "
+            "the engagement actually closed."
+        ),
+        explanation_full=(
+            "Tracker-supported engagements have a varying slant range "
+            "during the burn-through integration; this output reports "
+            "the range at the kill instant rather than at detection. "
+            "For a head-on engagement that closes near the standoff "
+            "range, R_at_kill ≈ R_min. For an engagement that closes "
+            "well before the target reaches the standoff, R_at_kill is "
+            "noticeably larger than R_min — telling the operator the "
+            "engagement had margin to spare."
+        ),
+        citation="SPEC v2.0 §3 M8",
+        code_ref="physics/m8_burnthrough.py::compute",
+        derivation_link="docs/tracker_dwell_plan_2026-04-25.md",
+        provenance=(),
+        assumptions=(
+            "R_at_kill is None when failure_mode is 'no_failure_before_"
+            "timeout' or 'engagement_ended_at_R_min' — there is no kill "
+            "moment to report.",
+        ),
+    ))
+
+    rows.append(MetricEntry(
         key="failure_mode",
         module="M8",
         display_name="Failure mode",

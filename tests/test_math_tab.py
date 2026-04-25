@@ -486,7 +486,11 @@ def test_pr4_walkthrough_steps_cover_every_metric():
     # tracker-dwell PR 3; the walkthrough rewrite for the v2.0 contract
     # lands in the trajectory-loop PRs 5-6).
     expected = set(MATH_CONTENT.keys()) - {
-        "m67_iteration_count", "m67_converged", "R_at_dwell_end",
+        "m67_iteration_count", "m67_converged",
+        # SPEC v2.0 keys added in tracker-dwell PRs 3-4; the worked
+        # example walkthrough rewrite for the v2.0 contract lands in
+        # PRs 5-6.
+        "R_at_dwell_end", "R_at_kill",
     }
     missing_from_walkthrough = expected - referenced
     assert not missing_from_walkthrough, (
@@ -523,7 +527,12 @@ def test_solver_based_metrics_flagged():
     to fit the heat PDE into a single LaTeX cell."""
     from ui.math_content import MATH_CONTENT
 
-    expected_solver_keys = {"tau_BT", "T_surface_peak", "E_delivered"}
+    expected_solver_keys = {
+        "tau_BT", "T_surface_peak", "E_delivered",
+        # SPEC v2.0 added R_at_kill in tracker-dwell PR 4; it derives
+        # from the M8 PDE solver (R(t) evaluated at tau_BT).
+        "R_at_kill",
+    }
     actual_solver_keys = {
         k for k, e in MATH_CONTENT.items() if e.is_solver_based
     }
