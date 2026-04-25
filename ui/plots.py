@@ -1996,6 +1996,17 @@ def plot_j_cumulative_energy_diagnostic(
     )
     fig.update_xaxes(title_text=xtitle)
     fig.update_yaxes(title_text=ytitle)
+
+    # Auto-zoom the time axis when the kill happens early in the
+    # engagement window. Same heuristic as Plot H so the two figures
+    # stack cleanly above one another.
+    t_axis_max = float(t_pde[-1]) if t_pde else 0.0
+    if (useful_end_t is not None
+            and t_axis_max > 0
+            and useful_end_t < 0.3 * t_axis_max):
+        zoom_to = max(useful_end_t * 1.5, 30.0, useful_end_t + 5.0)
+        zoom_to = min(zoom_to, t_axis_max)
+        fig.update_xaxes(range=[0.0, zoom_to])
     return fig
 
 
@@ -2335,20 +2346,32 @@ def plot_h_engagement_profile(result: dict | None) -> go.Figure:
     )
 
     # Kill-moment vertical dashed line on every panel.
+    # Annotation goes on row 1 only — passing annotation_text=None to
+    # add_vline on rows 2-4 makes Plotly render the placeholder string
+    # "new text" rather than suppressing the annotation, so we split
+    # the call into "row 1 with annotation" + "rows 2-4 line-only".
     if kill_t is not None:
         kill_label = (
             f"Kill at t = {kill_t:.2f} s"
             + (f", R = {R_at_kill:.0f} m" if R_at_kill is not None else "")
         )
-        for row_idx in (1, 2, 3, 4):
+        kill_line = dict(
+            color=palette["status.ok"], width=1.5, dash="dash",
+        )
+        fig.add_vline(
+            x=kill_t,
+            line=kill_line,
+            annotation_text=kill_label,
+            annotation_position="top right",
+            annotation_font=dict(
+                color=palette["fg.secondary"], size=11,
+            ),
+            row=1, col=1,
+        )
+        for row_idx in (2, 3, 4):
             fig.add_vline(
                 x=kill_t,
-                line=dict(color=palette["status.ok"], width=1.5, dash="dash"),
-                annotation_text=kill_label if row_idx == 1 else None,
-                annotation_position="top right" if row_idx == 1 else None,
-                annotation_font=dict(
-                    color=palette["fg.secondary"], size=11,
-                ) if row_idx == 1 else None,
+                line=kill_line,
                 row=row_idx, col=1,
             )
 
@@ -2365,6 +2388,21 @@ def plot_h_engagement_profile(result: dict | None) -> go.Figure:
     # Panel 1 log y so 100 m and 5 km both read cleanly.
     fig.update_yaxes(type="log", row=1, col=1)
     fig.update_xaxes(title_text="Engagement time (s)", row=4, col=1)
+
+    # Auto-zoom the time axis when the kill happens early in the
+    # engagement window. With a fast burn-through (~8 s in a 290 s
+    # window), 97 % of the panel area would otherwise be empty
+    # post-kill trajectory. Show out to 1.5×kill_t (or 30 s,
+    # whichever is larger) so the kill region reads cleanly while
+    # still leaving a margin of post-kill context. When there's no
+    # kill, fall back to the full trajectory window.
+    t_axis_max = max(t_traj[-1] if t_traj else 0.0, t_pde[-1] if t_pde else 0.0)
+    if (kill_t is not None
+            and t_axis_max > 0
+            and kill_t < 0.3 * t_axis_max):
+        zoom_to = max(kill_t * 1.5, 30.0, kill_t + 5.0)
+        zoom_to = min(zoom_to, t_axis_max)
+        fig.update_xaxes(range=[0.0, zoom_to])
     return fig
 
 

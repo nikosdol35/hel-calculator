@@ -219,6 +219,10 @@ def _run_v2_trajectory(
     samples_tau_atm: list[float] = []
     samples_r0_sph: list[float] = []
     samples_w_turb: list[float] = []
+    first_out4: dict = {}
+    first_out5: dict = {}
+    first_out6: dict = {}
+    first_out7: dict = {}
     last_out4: dict = {}
     last_out5: dict = {}
     last_out6: dict = {}
@@ -232,7 +236,7 @@ def _run_v2_trajectory(
     warm_S_TB = 1.0
     warm_w_bloom = 0.0
 
-    for t_i in sample_times:
+    for sample_idx, t_i in enumerate(sample_times):
         R_now = float(R_of_t(t_i))
         out4_i = m4_atmosphere.compute(
             _inputs_for_m4_at_R(user_inputs, R_now)
@@ -249,6 +253,11 @@ def _run_v2_trajectory(
         )
         warm_S_TB = out6_i["S_TB"]
         warm_w_bloom = out6_i["w_bloom"]
+        if sample_idx == 0:
+            first_out4 = out4_i
+            first_out5 = out5_i
+            first_out6 = out6_i
+            first_out7 = out7_i
         last_out4 = out4_i
         last_out5 = out5_i
         last_out6 = out6_i
@@ -301,22 +310,24 @@ def _run_v2_trajectory(
         _inputs_for_m10(user_inputs, out8, out3),
     )
 
-    # Initial-state-at-R_detect outputs from the first sub-sample go
-    # into the per-module merged result (so v1-style consumers reading
-    # `result["w_total"]` etc. continue to work, with the value being
-    # the starting-spot-size at R_detect).
-    out4 = last_out4 if not samples_R else _index_sample_outputs(
-        sample_times, samples_R, samples_tau_atm, samples_r0_sph,
-        samples_w_turb, last_out4, last_out5, last_out6, last_out7,
-        sample_idx=0,
-    )["out4"]
-    # For simplicity emit the LAST-sample outputs (closest approach)
-    # for the per-module dict — that's the most-stressing point and
-    # matches the math-tab convention of "spot at closest approach".
-    out4 = last_out4
-    out5 = last_out5
-    out6 = last_out6
-    out7 = last_out7
+    # SPEC v2.0 — emit per-module scalars at the FIRST trajectory
+    # sample (R_detect, t=0). This preserves the v1.x semantics where
+    # the user's "reference range" drives the displayed values: I_peak,
+    # d_spot, S_TB, PIB, w_total, tau_atm etc. all reflect "the
+    # conditions at the start of the engagement". Sweep plots that
+    # vary R_detect on the x-axis (Plot A on-target performance,
+    # Plot G spot-vs-bucket, Plot D blooming, etc.) thus show
+    # meaningful variation per engagement instead of collapsing to a
+    # single R_min point.
+    #
+    # Across-trajectory aggregates remain accessible through:
+    #   - trajectory_* arrays (per-sample series, t = 0 .. t_dwell)
+    #   - I_peak_max / I_avg_aim_max (worst-case maxima)
+    #   - the M8 PDE outputs (R_at_kill, T_surface_peak, etc.)
+    out4 = first_out4 if first_out4 else last_out4
+    out5 = first_out5 if first_out5 else last_out5
+    out6 = first_out6 if first_out6 else last_out6
+    out7 = first_out7 if first_out7 else last_out7
 
     merged = _merge_results(
         out1, out2, out3, out4, out5, out6, out7, out8, out9, out10,
