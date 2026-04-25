@@ -705,6 +705,63 @@ def test_plot_c_now_includes_w_bloom_trace(_engagement_sweep):
     assert "Blooming contribution" in names
 
 
+def test_plot_c_spot_tightening_through_trajectory_smoke():
+    """Plot C' renders the spot-diameter curve from the v2 trajectory
+    series. SPEC v2.0 §8.2 of docs/tracker_dwell_plan_2026-04-25.md."""
+    from physics.orchestrator import run_full_chain
+    from tests.golden.scenarios import C_UAS_1500M
+    from ui.plots import plot_c_spot_tightening_through_trajectory
+
+    # Build a v2 input dict from the c_uas scenario.
+    inputs = dict(C_UAS_1500M)
+    inputs.pop("R")
+    inputs.pop("v_perp")
+    inputs.update({
+        "R_detect": 1500, "R_min": 100,
+        "engagement_geometry": "head_on",
+    })
+    result = run_full_chain(inputs)
+    fig = plot_c_spot_tightening_through_trajectory(
+        result, d_aim=inputs["d_aim"],
+    )
+    # Spillover band (when spot exceeds bucket) + spot curve = up to
+    # 2 traces. If d_aim is None or every spot fits, only 1 trace.
+    assert 1 <= len(fig.data) <= 2
+    names = {t.name for t in fig.data}
+    assert "Total spot diameter" in names
+
+
+def test_plot_c_spot_tightening_handles_v1_result():
+    """Plot C' falls back to the empty-frame advisory when handed a
+    v1.x result (no trajectory series)."""
+    from physics.orchestrator import run_full_chain
+    from tests.golden.scenarios import C_UAS_1500M
+    from ui.plots import plot_c_spot_tightening_through_trajectory
+    result = run_full_chain(C_UAS_1500M)  # v1 — no trajectory_R
+    fig = plot_c_spot_tightening_through_trajectory(
+        result, d_aim=0.05,
+    )
+    assert len(fig.data) == 0  # empty-frame fallback
+
+
+def test_plot_c_spot_tightening_handles_none_d_aim():
+    """Without d_aim, Plot C' renders the spot curve but no bucket
+    reference / spillover band."""
+    from physics.orchestrator import run_full_chain
+    from tests.golden.scenarios import C_UAS_1500M
+    from ui.plots import plot_c_spot_tightening_through_trajectory
+    inputs = dict(C_UAS_1500M)
+    inputs.pop("R"); inputs.pop("v_perp")
+    inputs.update({
+        "R_detect": 1500, "R_min": 100,
+        "engagement_geometry": "head_on",
+    })
+    result = run_full_chain(inputs)
+    fig = plot_c_spot_tightening_through_trajectory(result, d_aim=None)
+    # Only the spot curve — no spillover fill.
+    assert len(fig.data) == 1
+
+
 def test_engagement_margin_arithmetic_matches_overview_chip():
     """The Plot-E margin formula must match the Overview-tab chip
     threshold so the two surfaces never disagree on the verdict."""
