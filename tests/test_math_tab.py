@@ -246,6 +246,119 @@ def test_compute_sensitivity_skips_zero_base():
     assert sens == {}
 
 
+def test_pr5_markdown_export_runs():
+    """``to_markdown`` returns a non-empty string for the canonical
+    scenario without raising. End-to-end smoke."""
+    from physics.orchestrator import run_full_chain
+    from tests.golden.scenarios import C_UAS_1500M
+    from ui.math_export import to_markdown
+
+    res = run_full_chain(C_UAS_1500M)
+    merged = {**C_UAS_1500M, **res}
+    md = to_markdown(merged, include_full=True)
+
+    assert isinstance(md, str)
+    assert len(md) > 5000, (
+        f"Expected a substantial export (>5 kB); got {len(md)} chars"
+    )
+
+
+def test_pr5_markdown_export_covers_every_metric():
+    """The exported Markdown contains every MATH_CONTENT key under its
+    own anchor heading. Catches drift where a new metric is added to
+    MATH_CONTENT but the export forgets to render it."""
+    from physics.orchestrator import run_full_chain
+    from tests.golden.scenarios import C_UAS_1500M
+    from ui.math_content import MATH_CONTENT
+    from ui.math_export import to_markdown
+
+    res = run_full_chain(C_UAS_1500M)
+    merged = {**C_UAS_1500M, **res}
+    md = to_markdown(merged)
+
+    for key, entry in MATH_CONTENT.items():
+        # Every metric appears in a "#### Display name · `key`" line.
+        marker = f"`{key}`"
+        assert marker in md, (
+            f"Markdown export does not reference metric {key!r}"
+        )
+        # And its display name appears too.
+        assert entry.display_name in md, (
+            f"Markdown export does not reference display name "
+            f"{entry.display_name!r} for {key}"
+        )
+
+
+def test_pr5_markdown_export_has_required_top_level_sections():
+    """The export carries the four top-level structural sections
+    (header, glossary, per-module metrics, constants, worked
+    example)."""
+    from physics.orchestrator import run_full_chain
+    from tests.golden.scenarios import C_UAS_1500M
+    from ui.math_export import to_markdown
+
+    res = run_full_chain(C_UAS_1500M)
+    merged = {**C_UAS_1500M, **res}
+    md = to_markdown(merged)
+
+    required = (
+        "# How it's calculated",
+        "## Glossary",
+        "## M1 — Laser source",
+        "## M7 — Spot size",
+        "## Constants & physical sources",
+        "## Worked example",
+    )
+    for marker in required:
+        assert marker in md, f"missing section header: {marker!r}"
+
+
+def test_pr5_markdown_export_simple_view_drops_full_content():
+    """When ``include_full=False`` the export carries the per-metric
+    formulas + values + short explanations but omits the citations,
+    code references, and assumption lists. Smaller export for
+    casual sharing."""
+    from physics.orchestrator import run_full_chain
+    from tests.golden.scenarios import C_UAS_1500M
+    from ui.math_export import to_markdown
+
+    res = run_full_chain(C_UAS_1500M)
+    merged = {**C_UAS_1500M, **res}
+    md_simple = to_markdown(merged, include_full=False)
+    md_full = to_markdown(merged, include_full=True)
+
+    # Simple view is strictly smaller.
+    assert len(md_simple) < len(md_full)
+    # Simple view does NOT carry the Citation / Implemented-at
+    # markers but the full one does.
+    assert "**Citation:**" not in md_simple
+    assert "**Citation:**" in md_full
+    # Simple view DOES carry per-metric formulas and short
+    # explanations.
+    assert "## M1 — Laser source" in md_simple
+    assert "$$" in md_simple
+
+
+def test_pr5_markdown_export_handles_categorical_metrics():
+    """Categorical Verdicts (failure_mode, laser_class, etc.) export
+    as code blocks rather than LaTeX."""
+    from physics.orchestrator import run_full_chain
+    from tests.golden.scenarios import C_UAS_1500M
+    from ui.math_export import to_markdown
+
+    res = run_full_chain(C_UAS_1500M)
+    merged = {**C_UAS_1500M, **res}
+    md = to_markdown(merged)
+
+    # The categorical-marker phrase appears at least once (each of
+    # the four categorical metrics emits it).
+    assert "Categorical (verdict) output" in md
+    # And every categorical metric is referenced.
+    for key in ("failure_mode", "laser_class",
+                 "engagement_viable", "m67_converged"):
+        assert f"`{key}`" in md, f"categorical metric missing: {key}"
+
+
 def test_pr4_constants_table_present():
     """PR 4 of the math-tab plan ships a structured constants table.
     Verify it covers every module that has hard-coded constants."""
