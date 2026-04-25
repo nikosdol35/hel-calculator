@@ -1734,6 +1734,155 @@ def plot_c_spot_tightening_through_trajectory(
 
 
 # ---------------------------------------------------------------------------
+# Plot I — Outcome map vs detection range (SPEC v2.0 §8.4).
+# The operational answer to "at what detection range does the
+# engagement actually close?" One curve of engagement-margin (%) vs
+# R_detect, on a log x-axis, with three colour-coded bands and an
+# annotation marking the minimum R_detect at which the curve crosses
+# 0 % margin (the kill threshold).
+# ---------------------------------------------------------------------------
+
+def plot_i_outcome_map_vs_R_detect(sweep: list[dict] | None) -> go.Figure:
+    """Engagement margin vs detection range — outcome map.
+
+    Margin is ``(t_dwell − tau_BT) / tau_BT × 100 %`` at each sweep
+    point. The same formula Plot E uses, here re-framed for the v2.0
+    R_detect-sweep contract: the x-axis is the detection range the
+    operator would have, and the curve crossing zero gives the
+    minimum detection range that closes a kill.
+
+    Bands: ``status.ok`` ≥ +30 % (engageable), ``status.warn`` 0–30 %
+    (marginal), ``status.error`` < 0 % (not viable). When the curve
+    has a finite zero-crossing, an annotation calls it out as the
+    "kill threshold".
+
+    Empty / None sweep → always-render frame fallback.
+    """
+    height = PLOT_HEIGHTS["default"]
+    xtitle = "Detection range R_detect (km, log)"
+    ytitle = "Engagement margin (%)"
+    title = "Outcome map — at what detection range does the engagement close?"
+
+    if not sweep:
+        return _empty_frame(
+            title=title, xtitle=xtitle, ytitle=ytitle,
+            advisory=ADVISORY["infeasible_geometry"], height=height,
+        )
+
+    palette = _active_palette()
+
+    # Compute margin per sweep element. Skip elements where tau_BT is
+    # missing or zero (degenerate engagement). Clamp to [-100, 200] %
+    # for visual readability — same convention as Plot E.
+    Y_FLOOR, Y_CEIL = -100.0, 200.0
+    x_km: list[float] = []
+    margin: list[float] = []
+    verdict: list[str] = []
+    for s in sweep:
+        R = float(s.get("range", math.nan))
+        tau = s.get("tau_BT")
+        dwell = s.get("available_dwell")
+        if (R is None or not math.isfinite(R) or R <= 0
+                or tau is None or not math.isfinite(float(tau)) or float(tau) <= 0
+                or dwell is None or not math.isfinite(float(dwell))):
+            continue
+        m = 100.0 * (float(dwell) - float(tau)) / float(tau)
+        x_km.append(R / 1000.0)
+        margin.append(max(Y_FLOOR, min(Y_CEIL, m)))
+        if m >= 30.0:
+            verdict.append("engageable")
+        elif m >= 0.0:
+            verdict.append("marginal")
+        else:
+            verdict.append("not viable")
+
+    if not x_km:
+        return _empty_frame(
+            title=title, xtitle=xtitle, ytitle=ytitle,
+            advisory=ADVISORY["no_burnthrough"], height=height,
+        )
+
+    # Find the kill-threshold crossing — minimum R_detect at which
+    # margin first crosses zero from below as R_detect increases.
+    # We scan from smallest to largest R; the threshold is the
+    # interpolated zero-crossing on the first sign change.
+    threshold_km: float | None = None
+    for i in range(1, len(margin)):
+        if margin[i - 1] < 0 <= margin[i]:
+            x_lo, x_hi = x_km[i - 1], x_km[i]
+            m_lo, m_hi = margin[i - 1], margin[i]
+            # Linear interp in linear-x space.
+            if m_hi != m_lo:
+                threshold_km = x_lo + (0 - m_lo) / (m_hi - m_lo) * (x_hi - x_lo)
+            else:
+                threshold_km = x_lo
+            break
+
+    fig = go.Figure()
+
+    # Three verdict bands.
+    ok_rgba = _hex_to_rgba(palette["status.ok"], alpha=0.12)
+    warn_rgba = _hex_to_rgba(palette["status.warn"], alpha=0.12)
+    err_rgba = _hex_to_rgba(palette["status.error"], alpha=0.12)
+    fig.add_hrect(y0=30.0, y1=Y_CEIL,
+                  fillcolor=ok_rgba, line_width=0,
+                  annotation_text="Engageable (≥ 30 %)",
+                  annotation_position="top left",
+                  annotation_font=dict(color=palette["fg.secondary"], size=10))
+    fig.add_hrect(y0=0.0, y1=30.0,
+                  fillcolor=warn_rgba, line_width=0,
+                  annotation_text="Marginal (0–30 %)",
+                  annotation_position="top left",
+                  annotation_font=dict(color=palette["fg.secondary"], size=10))
+    fig.add_hrect(y0=Y_FLOOR, y1=0.0,
+                  fillcolor=err_rgba, line_width=0,
+                  annotation_text="Not viable (< 0 %)",
+                  annotation_position="bottom left",
+                  annotation_font=dict(color=palette["fg.secondary"], size=10))
+
+    # Zero-margin reference line.
+    fig.add_hline(
+        y=0.0,
+        line=dict(color=palette["data.reference"], width=1.2, dash="dash"),
+    )
+
+    # Threshold annotation — where the curve first reaches viable.
+    if threshold_km is not None:
+        fig.add_vline(
+            x=threshold_km,
+            line=dict(color=palette["status.ok"], width=1.5, dash="dash"),
+            annotation_text=f"Kill threshold ≈ {threshold_km:.2f} km",
+            annotation_position="top right",
+            annotation_font=dict(color=palette["fg.secondary"], size=11),
+        )
+
+    # The margin curve.
+    s0 = _series_style(0, palette)
+    fig.add_trace(
+        go.Scatter(
+            x=x_km, y=margin,
+            mode="lines+markers",
+            name="Engagement margin",
+            line=s0["line"], marker=s0["marker"],
+            customdata=verdict,
+            hovertemplate=(
+                "R_detect %{x:.2f} km · margin %{y:+.0f}% · "
+                "%{customdata}<extra></extra>"
+            ),
+        )
+    )
+
+    fig.update_layout(
+        title=title,
+        height=height,
+        hovermode="x unified",
+    )
+    fig.update_xaxes(title_text=xtitle, type="log")
+    fig.update_yaxes(title_text=ytitle, range=[Y_FLOOR, Y_CEIL])
+    return fig
+
+
+# ---------------------------------------------------------------------------
 # Plot H — Engagement profile timeline (SPEC v2.0 §8.3).
 # Headline new visualization for the trajectory model: shows the
 # anatomy of one engagement second by second. Four stacked panels
@@ -1962,6 +2111,7 @@ __all__ = [
     "plot_e_engagement_margin_vs_range",
     "plot_g_spot_vs_bucket",
     "plot_h_engagement_profile",
+    "plot_i_outcome_map_vs_R_detect",
     "plot_overview_dwell_vs_burnthrough",
     "plot_target_temperature_envelope",
     "plot_target_material_comparison",

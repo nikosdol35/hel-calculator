@@ -862,6 +862,15 @@ EXPLANATIONS: dict[str, str] = {
         "dominates; at long range turbulence and jitter grow fastest, "
         "with blooming kicking in once the on-path power density is high."
     ),
+    "plot_i_intro": (
+        "This chart answers the question 'at what detection range "
+        "does the engagement actually close?' The curve is the "
+        "engagement margin (the time budget left over once the "
+        "burn-through is finished) at every detection range from very "
+        "close to very far. The kill threshold marker shows the "
+        "shortest detection range at which the engagement still closes "
+        "with margin to spare."
+    ),
     "plot_h_intro": (
         "This is the engagement second-by-second. The top panel shows "
         "how the slant range to the target shrinks through the "
