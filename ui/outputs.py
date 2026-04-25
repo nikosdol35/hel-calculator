@@ -1446,6 +1446,9 @@ def render_tab_math(result: dict) -> None:
     # --- Worked example ---------------------------------------------------
     _render_worked_example()
 
+    # --- Markdown export --------------------------------------------------
+    _render_markdown_export(result)
+
 
 @st.cache_data(max_entries=4, show_spinner=False)
 def _cached_worked_example() -> dict:
@@ -1499,6 +1502,42 @@ def _render_constants_section() -> None:
                     f"`{c.code_ref}`",
                 ]
                 st.markdown("| " + " | ".join(cells) + " |")
+
+
+def _render_markdown_export(result: dict) -> None:
+    """Render the bottom-of-tab Download-as-Markdown button.
+
+    The export carries the full math-tab content — glossary, every
+    per-metric row with the user's current values, the constants
+    roster, and the static worked example — as a self-contained
+    Markdown file. Engineers download and attach to trade-study
+    deliverables. The export is computed lazily inside
+    ``st.download_button``: the bytes are generated only when the
+    user clicks, so opening the math tab itself doesn't pay the
+    rendering cost.
+    """
+    from ui.math_export import to_markdown
+
+    st.divider()
+    st.markdown("### Download")
+    st.caption(
+        "Export the entire math tab as a self-contained Markdown "
+        "document — every formula, every value at your current "
+        "inputs, every citation and assumption. Opens cleanly in any "
+        "Markdown viewer."
+    )
+
+    md_bytes = to_markdown(result, include_full=True).encode("utf-8")
+    st.download_button(
+        label="Download as Markdown",
+        data=md_bytes,
+        file_name="hel-math-tab.md",
+        mime="text/markdown",
+        help=(
+            "Self-contained .md file — formulas as LaTeX math blocks, "
+            "values from your current run, no external assets."
+        ),
+    )
 
 
 def _render_worked_example() -> None:
