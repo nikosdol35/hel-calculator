@@ -1225,65 +1225,260 @@ def _render_provenance_badges(entry) -> None:
         st.caption(" · ".join(chips))
 
 
-@st.cache_data(max_entries=4, show_spinner="Computing operational envelope (~100 orchestrator runs, ~100 s)…")
-def _cached_envelope(frozen_inputs: tuple, n_R: int, n_v: int):
-    """Cache wrapper: compute and cache the operational-envelope grid
-    for the user's current input set. Re-running the math tab or
-    re-toggling the Engagement tab pulls from cache; only when the
-    user changes inputs does the cache miss and trigger the ~100 s
-    re-compute."""
-    from physics.operational_envelope import (
-        compute_operational_envelope,
+# ---------------------------------------------------------------------------
+# Engagement-envelope plots — background-compute pattern.
+#
+# Each of the two envelope sweeps (operational + atmospheric) runs ~100
+# orchestrator calls per click — long enough that a synchronous compute
+# locks the entire UI for the duration. Instead:
+#   1. Click → submit the compute to a background ThreadPoolExecutor.
+#   2. Store the Future + start time in st.session_state.
+#   3. Wrap the section in @st.fragment(run_every=...) so it re-polls
+#      every 2 seconds without re-running the rest of the page.
+#   4. While the future is pending, render an "elapsed: Xs" placeholder
+#      and a Cancel button. The rest of the page (other plots, other
+#      tabs) renders normally and remains interactive.
+#   5. When the future completes, swap the placeholder for the rendered
+#      2D + 3D plots.
+#
+# Cache semantics: instead of @st.cache_data, we cache the result in
+# session_state keyed on the current frozen-inputs tuple. Input changes
+# (different scenario) cancel the running job and clear the result.
+# ---------------------------------------------------------------------------
+
+# Session-state key prefixes for the two envelope kinds. The full keys
+# are ``{prefix}_<kind>`` where kind is "operational" or "atmospheric".
+_ENV_JOB_KEY = "_envelope_job"
+_ENV_RESULT_KEY = "_envelope_result"
+_ENV_INPUTS_KEY = "_envelope_inputs"
+_ENV_START_KEY = "_envelope_start_at"
+_ENV_ERROR_KEY = "_envelope_error"
+
+
+def _envelope_state_machine(
+    *,
+    kind: str,
+    frozen: tuple,
+    intro_pre_key: str,
+    intro_2d_key: str,
+    intro_3d_key: str,
+    button_caption: str,
+    compute_fn,
+    plot_2d_fn,
+    plot_3d_fn,
+    n_cells: int,
+) -> None:
+    """Render-state machine shared by the operational and atmospheric
+    envelope plots.
+
+    Holds the per-kind state in ``st.session_state``. On each call:
+      * cancels and clears state if the user's inputs have changed
+        since the last submit;
+      * shows the Compute button when neither a job nor a result is
+        in state;
+      * shows an elapsed-time placeholder + Cancel button while the
+        future is pending;
+      * pulls the result and renders 2D + 3D plots when the future
+        completes.
+
+    Caller is responsible for wrapping the call in an
+    ``@st.fragment(run_every="2s")`` decorator so this section
+    re-polls itself without re-running the parent script.
+    """
+    import time
+    import concurrent.futures
+
+    job_key = f"{_ENV_JOB_KEY}_{kind}"
+    result_key = f"{_ENV_RESULT_KEY}_{kind}"
+    inputs_key = f"{_ENV_INPUTS_KEY}_{kind}"
+    start_key = f"{_ENV_START_KEY}_{kind}"
+    error_key = f"{_ENV_ERROR_KEY}_{kind}"
+
+    ss = st.session_state
+    explanation(EXPLANATIONS[intro_pre_key])
+
+    # Input change → cancel pending job and clear cached result.
+    if ss.get(inputs_key) != frozen:
+        ss[inputs_key] = frozen
+        old_job = ss.get(job_key)
+        if old_job is not None and not old_job.done():
+            old_job.cancel()
+        ss[job_key] = None
+        ss[result_key] = None
+        ss[error_key] = None
+
+    job: concurrent.futures.Future | None = ss.get(job_key)
+    envelope = ss.get(result_key)
+    error_msg = ss.get(error_key)
+
+    # ── State 1: nothing running, no result yet → show Compute button.
+    if job is None and envelope is None and not error_msg:
+        col_btn, col_note = st.columns([1, 3])
+        with col_btn:
+            if st.button("Compute envelope", key=f"_envelope_btn_{kind}"):
+                from ui.background_jobs import submit_compute
+                ss[job_key] = submit_compute(compute_fn, dict(frozen))
+                ss[start_key] = time.time()
+                ss[error_key] = None
+                # Streamlit will re-run this fragment on button-click;
+                # the next pass will see the future and switch to the
+                # spinner state.
+                st.rerun(scope="fragment")
+        with col_note:
+            st.caption(button_caption)
+        return
+
+    # ── State 2: job is pending → render placeholder + cancel button.
+    if job is not None and not job.done():
+        elapsed = max(0.0, time.time() - ss.get(start_key, time.time()))
+        st.info(
+            f"⏳ Computing in the background — {elapsed:.0f} s elapsed "
+            f"of an estimated 2–5 minutes for {n_cells} engagements. "
+            f"You can keep using other plots and tabs while this runs; "
+            f"the section will refresh automatically when the result "
+            f"is ready."
+        )
+        col_cancel, _ = st.columns([1, 4])
+        with col_cancel:
+            if st.button("Cancel", key=f"_envelope_cancel_{kind}"):
+                job.cancel()
+                ss[job_key] = None
+                ss[start_key] = None
+                st.rerun(scope="fragment")
+        return
+
+    # ── State 3: job just completed → pull result, clear job handle.
+    if job is not None and job.done():
+        try:
+            envelope = job.result(timeout=0)
+            ss[result_key] = envelope
+            ss[error_key] = None
+        except concurrent.futures.CancelledError:
+            ss[job_key] = None
+            ss[start_key] = None
+            return
+        except Exception as exc:  # pragma: no cover — defensive
+            ss[error_key] = str(exc)
+            ss[job_key] = None
+            ss[start_key] = None
+            st.error(
+                f"Envelope compute failed: {exc!s}. Try a different "
+                "scenario or report this as a bug."
+            )
+            return
+        ss[job_key] = None
+        ss[start_key] = None
+
+    # ── State 4: error from a previous run → show it + offer retry.
+    if error_msg and envelope is None:
+        st.error(
+            f"Envelope compute failed: {error_msg}. Click below to "
+            "retry."
+        )
+        if st.button("Retry compute", key=f"_envelope_retry_{kind}"):
+            ss[error_key] = None
+            st.rerun(scope="fragment")
+        return
+
+    # ── State 5: result available → render 2D + 3D companions.
+    from ui.theme import PLOTLY_MODEBAR_CONFIG
+
+    st.plotly_chart(
+        plot_2d_fn(envelope),
+        use_container_width=True,
+        config=PLOTLY_MODEBAR_CONFIG,
     )
-    return compute_operational_envelope(
-        dict(frozen_inputs), n_R=n_R, n_v=n_v,
+    explanation(EXPLANATIONS[intro_2d_key], variant="plot")
+
+    # Bookkeeping caption — works for both EnvelopeGrid kinds because
+    # n_kills / n_failures are present on both.
+    if hasattr(envelope, "R_detect_axis"):
+        n_total = (
+            len(envelope.R_detect_axis) * len(envelope.v_tgt_axis)
+        )
+    else:
+        n_total = len(envelope.cn2_axis) * len(envelope.V_km_axis)
+    st.caption(
+        f"Computed {n_total} engagements · "
+        f"{envelope.n_kills} closed with margin · "
+        f"{envelope.n_failures} hit a validator boundary"
+    )
+
+    st.plotly_chart(
+        plot_3d_fn(envelope),
+        use_container_width=True,
+        config=PLOTLY_MODEBAR_CONFIG,
+    )
+    explanation(EXPLANATIONS[intro_3d_key], variant="plot")
+
+    col_recompute, _ = st.columns([1, 4])
+    with col_recompute:
+        if st.button(
+            "Re-compute envelope", key=f"_envelope_recompute_{kind}",
+        ):
+            ss[result_key] = None
+            ss[error_key] = None
+            st.rerun(scope="fragment")
+
+
+@st.fragment(run_every="2s")
+def _operational_envelope_fragment(frozen: tuple) -> None:
+    """Polling fragment for the operational envelope — re-runs every
+    2 seconds while the worker thread is computing, then swaps to
+    the rendered plots once the future completes."""
+    from physics.operational_envelope import compute_operational_envelope
+    from ui import plots  # used below as plot_*_fn references
+    _envelope_state_machine(
+        kind="operational",
+        frozen=frozen,
+        intro_pre_key="plot_k_intro_pre",
+        intro_2d_key="plot_k_intro",
+        intro_3d_key="plot_k_3d_intro",
+        button_caption=(
+            "Computes a 10 × 10 (R_detect × v_tgt) grid of "
+            "engagement outcomes. Runs in the background — you can "
+            "keep using other tabs and plots while it computes."
+        ),
+        compute_fn=lambda inputs: compute_operational_envelope(
+            inputs, n_R=10, n_v=10,
+        ),
+        plot_2d_fn=plots.plot_k_operational_envelope,
+        plot_3d_fn=plots.plot_k_operational_envelope_3d,
+        n_cells=100,
     )
 
 
-@st.cache_data(max_entries=4, show_spinner="Computing atmospheric envelope (~100 orchestrator runs, ~100 s)…")
-def _cached_atmospheric_envelope(frozen_inputs: tuple, n_cn2: int, n_V: int):
-    """Cache wrapper for the atmospheric envelope sweep — same pattern
-    as the kinematic envelope cache. The frozen-inputs tuple is keyed
-    on every input that affects the chain *except* Cn² and V (which
-    are swept per cell)."""
-    from physics.operational_envelope import (
-        compute_atmospheric_envelope,
-    )
-    return compute_atmospheric_envelope(
-        dict(frozen_inputs), n_cn2=n_cn2, n_V=n_V,
+@st.fragment(run_every="2s")
+def _atmospheric_envelope_fragment(frozen: tuple) -> None:
+    """Polling fragment for the atmospheric envelope — same pattern
+    as the operational one, different physics."""
+    from physics.operational_envelope import compute_atmospheric_envelope
+    from ui import plots  # used below as plot_*_fn references
+    _envelope_state_machine(
+        kind="atmospheric",
+        frozen=frozen,
+        intro_pre_key="plot_m_intro_pre",
+        intro_2d_key="plot_m_intro",
+        intro_3d_key="plot_m_3d_intro",
+        button_caption=(
+            "Holds R_detect and v_tgt fixed; sweeps Cn² × visibility "
+            "on a 10 × 10 grid. Runs in the background — you can "
+            "keep using other tabs and plots while it computes."
+        ),
+        compute_fn=lambda inputs: compute_atmospheric_envelope(
+            inputs, n_cn2=10, n_V=10,
+        ),
+        plot_2d_fn=plots.plot_m_atmospheric_envelope,
+        plot_3d_fn=plots.plot_m_atmospheric_envelope_3d,
+        n_cells=100,
     )
 
 
 def _render_operational_envelope_plot(result: dict) -> None:
-    """Render the operational-envelope heatmap behind a Compute-on-
-    click button (SPEC v2.0 §8.6 / plan §14 user choice)."""
+    """Render the operational-envelope plots — entry point called by
+    ``render_tab_engagement``. Builds the frozen-inputs tuple, then
+    delegates to the polling fragment."""
     section_header("Operational envelope")
-    explanation(EXPLANATIONS["plot_k_intro_pre"])
-
-    # Compute button — Streamlit re-renders on each interaction, so
-    # the button's clicked-state is held in session state across
-    # reruns.
-    button_key = "_envelope_compute_clicked"
-    if button_key not in st.session_state:
-        st.session_state[button_key] = False
-
-    col_btn, col_note = st.columns([1, 3])
-    with col_btn:
-        if st.button("Compute envelope", key="_envelope_compute_btn"):
-            st.session_state[button_key] = True
-    with col_note:
-        st.caption(
-            "Computes a 10 × 10 (R_detect × v_tgt) grid of engagement "
-            "outcomes. Takes ~100 seconds on first click; cached "
-            "afterwards for instant re-renders."
-        )
-
-    if not st.session_state[button_key]:
-        return
-
-    # Build a frozen-inputs tuple for the cache key. Only the v2-mode
-    # inputs that affect the envelope are included (R_detect / v_tgt
-    # are swept per cell, so they are not part of the cache key).
     frozen = _frozen_inputs_for_envelope(result)
     if frozen is None:
         st.warning(
@@ -1291,71 +1486,13 @@ def _render_operational_envelope_plot(result: dict) -> None:
             "input set is missing v2.0 trajectory keys."
         )
         return
-
-    try:
-        envelope = _cached_envelope(frozen, 10, 10)
-    except Exception as exc:  # pragma: no cover — defensive
-        st.error(
-            f"Operational-envelope compute failed: {exc!s}. Try a "
-            "different scenario or report this as a bug."
-        )
-        return
-
-    from ui import plots
-    from ui.theme import PLOTLY_MODEBAR_CONFIG
-    st.plotly_chart(
-        plots.plot_k_operational_envelope(envelope),
-        use_container_width=True,
-        config=PLOTLY_MODEBAR_CONFIG,
-    )
-    explanation(EXPLANATIONS["plot_k_intro"], variant="plot")
-    st.caption(
-        f"Computed {len(envelope.v_tgt_axis) * len(envelope.R_detect_axis)} "
-        f"engagements · {envelope.n_kills} closed with margin · "
-        f"{envelope.n_failures} hit a validator boundary"
-    )
-
-    # 3D companion view — same EnvelopeGrid, lifted into Z. One cache,
-    # two renders: zero extra orchestrator runs because the data is
-    # the same object.
-    st.plotly_chart(
-        plots.plot_k_operational_envelope_3d(envelope),
-        use_container_width=True,
-        config=PLOTLY_MODEBAR_CONFIG,
-    )
-    explanation(EXPLANATIONS["plot_k_3d_intro"], variant="plot")
+    _operational_envelope_fragment(frozen)
 
 
 def _render_atmospheric_envelope_plot(result: dict) -> None:
-    """Render the atmospheric-envelope sweep (Cn² × V → margin) behind
-    its own Compute-on-click button. Companion to the kinematic
-    operational envelope above — same engagement-margin definition,
-    orthogonal slice through the input space.
-    """
+    """Render the atmospheric-envelope plots — entry point called by
+    ``render_tab_engagement``."""
     section_header("Atmospheric envelope")
-    explanation(EXPLANATIONS["plot_m_intro_pre"])
-
-    button_key = "_atmospheric_envelope_compute_clicked"
-    if button_key not in st.session_state:
-        st.session_state[button_key] = False
-
-    col_btn, col_note = st.columns([1, 3])
-    with col_btn:
-        if st.button(
-            "Compute envelope",
-            key="_atmospheric_envelope_compute_btn",
-        ):
-            st.session_state[button_key] = True
-    with col_note:
-        st.caption(
-            "Holds R_detect and v_tgt fixed; sweeps Cn² × visibility on "
-            "a 10 × 10 grid. ~100 seconds on first click; cached "
-            "afterwards."
-        )
-
-    if not st.session_state[button_key]:
-        return
-
     frozen = _frozen_inputs_for_envelope(result)
     if frozen is None:
         st.warning(
@@ -1363,37 +1500,7 @@ def _render_atmospheric_envelope_plot(result: dict) -> None:
             "input set is missing v2.0 trajectory keys."
         )
         return
-
-    try:
-        envelope = _cached_atmospheric_envelope(frozen, 10, 10)
-    except Exception as exc:  # pragma: no cover — defensive
-        st.error(
-            f"Atmospheric-envelope compute failed: {exc!s}. Try a "
-            "different scenario or report this as a bug."
-        )
-        return
-
-    from ui import plots
-    from ui.theme import PLOTLY_MODEBAR_CONFIG
-    st.plotly_chart(
-        plots.plot_m_atmospheric_envelope(envelope),
-        use_container_width=True,
-        config=PLOTLY_MODEBAR_CONFIG,
-    )
-    explanation(EXPLANATIONS["plot_m_intro"], variant="plot")
-    st.caption(
-        f"Computed {len(envelope.V_km_axis) * len(envelope.cn2_axis)} "
-        f"engagements · {envelope.n_kills} closed with margin · "
-        f"{envelope.n_failures} hit a validator boundary"
-    )
-
-    # 3D companion — same data, two views.
-    st.plotly_chart(
-        plots.plot_m_atmospheric_envelope_3d(envelope),
-        use_container_width=True,
-        config=PLOTLY_MODEBAR_CONFIG,
-    )
-    explanation(EXPLANATIONS["plot_m_3d_intro"], variant="plot")
+    _atmospheric_envelope_fragment(frozen)
 
 
 def _frozen_inputs_for_envelope(result: dict) -> tuple | None:
