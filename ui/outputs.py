@@ -1271,15 +1271,19 @@ def _envelope_state_machine(
     """Render-state machine shared by the operational and atmospheric
     envelope plots.
 
-    Holds the per-kind state in ``st.session_state``. On each call:
-      * cancels and clears state if the user's inputs have changed
-        since the last submit;
-      * shows the Compute button when neither a job nor a result is
-        in state;
-      * shows an elapsed-time placeholder + Cancel button while the
-        future is pending;
-      * pulls the result and renders 2D + 3D plots when the future
-        completes.
+    Holds the per-kind state in ``st.session_state``. On each call,
+    transitions are evaluated FIRST (so a freshly-completed future is
+    immediately recognised as "done"), and rendering happens AFTER —
+    this keeps the widget tree shape stable from the perspective of
+    Streamlit's frontend reconciler.
+
+    Critical for fragment correctness: button-click handlers MUST NOT
+    call ``st.rerun(scope="fragment")``. Streamlit already triggers a
+    fragment rerun on button click; an explicit ``st.rerun()`` causes
+    a double-rerun that races with the polling timer and can produce
+    "Bad message format / setIn index" reconciliation errors on the
+    frontend. State mutations happen inline; the next natural rerun
+    reads the new state.
 
     Caller is responsible for wrapping the call in an
     ``@st.fragment(run_every="2s")`` decorator so this section
@@ -1295,130 +1299,125 @@ def _envelope_state_machine(
     error_key = f"{_ENV_ERROR_KEY}_{kind}"
 
     ss = st.session_state
-    explanation(EXPLANATIONS[intro_pre_key])
+    # Defaults — using setdefault keeps the keys present across reruns,
+    # which helps Streamlit's session-state diff stay clean.
+    for k in (job_key, result_key, inputs_key, start_key, error_key):
+        ss.setdefault(k, None)
 
-    # Input change → cancel pending job and clear cached result.
-    if ss.get(inputs_key) != frozen:
+    # ── Input change → cancel pending job and clear cached result.
+    if ss[inputs_key] != frozen:
         ss[inputs_key] = frozen
-        old_job = ss.get(job_key)
+        old_job = ss[job_key]
         if old_job is not None and not old_job.done():
             old_job.cancel()
         ss[job_key] = None
         ss[result_key] = None
         ss[error_key] = None
+        ss[start_key] = None
 
-    job: concurrent.futures.Future | None = ss.get(job_key)
-    envelope = ss.get(result_key)
-    error_msg = ss.get(error_key)
+    # ── Transition: future is done → pull result up to session_state
+    # BEFORE rendering. This keeps the post-render widget tree
+    # reflecting the actual current state, not the previous tick's.
+    job: concurrent.futures.Future | None = ss[job_key]
+    if job is not None and job.done():
+        try:
+            ss[result_key] = job.result(timeout=0)
+            ss[error_key] = None
+        except concurrent.futures.CancelledError:
+            pass
+        except Exception as exc:  # pragma: no cover — defensive
+            ss[error_key] = str(exc)
+        ss[job_key] = None
+        ss[start_key] = None
+        job = None
 
-    # ── State 1: nothing running, no result yet → show Compute button.
-    if job is None and envelope is None and not error_msg:
-        col_btn, col_note = st.columns([1, 3])
-        with col_btn:
-            if st.button("Compute envelope", key=f"_envelope_btn_{kind}"):
-                from ui.background_jobs import submit_compute
-                ss[job_key] = submit_compute(compute_fn, dict(frozen))
-                ss[start_key] = time.time()
+    envelope = ss[result_key]
+    error_msg = ss[error_key]
+
+    explanation(EXPLANATIONS[intro_pre_key])
+
+    # All dynamic content lives inside one stable container. The
+    # container is the same DOM anchor across every fragment rerun;
+    # only its contents change. This is what Streamlit's reconciler
+    # needs to keep messages well-ordered.
+    body = st.container()
+
+    with body:
+        # ── State A: result available → render 2D + 3D + Re-compute.
+        if envelope is not None:
+            from ui.theme import PLOTLY_MODEBAR_CONFIG
+            st.plotly_chart(
+                plot_2d_fn(envelope),
+                use_container_width=True,
+                config=PLOTLY_MODEBAR_CONFIG,
+            )
+            explanation(EXPLANATIONS[intro_2d_key], variant="plot")
+
+            if hasattr(envelope, "R_detect_axis"):
+                n_total = (
+                    len(envelope.R_detect_axis) * len(envelope.v_tgt_axis)
+                )
+            else:
+                n_total = len(envelope.cn2_axis) * len(envelope.V_km_axis)
+            st.caption(
+                f"Computed {n_total} engagements · "
+                f"{envelope.n_kills} closed with margin · "
+                f"{envelope.n_failures} hit a validator boundary"
+            )
+
+            st.plotly_chart(
+                plot_3d_fn(envelope),
+                use_container_width=True,
+                config=PLOTLY_MODEBAR_CONFIG,
+            )
+            explanation(EXPLANATIONS[intro_3d_key], variant="plot")
+
+            if st.button(
+                "Re-compute envelope",
+                key=f"_envelope_recompute_{kind}",
+            ):
+                ss[result_key] = None
                 ss[error_key] = None
-                # Streamlit will re-run this fragment on button-click;
-                # the next pass will see the future and switch to the
-                # spinner state.
-                st.rerun(scope="fragment")
-        with col_note:
-            st.caption(button_caption)
-        return
+                # No explicit rerun — the button click triggers it.
+            return
 
-    # ── State 2: job is pending → render placeholder + cancel button.
-    if job is not None and not job.done():
-        elapsed = max(0.0, time.time() - ss.get(start_key, time.time()))
-        st.info(
-            f"⏳ Computing in the background — {elapsed:.0f} s elapsed "
-            f"of an estimated 1–2 minutes for {n_cells} engagements. "
-            f"You can keep using other plots and tabs while this runs; "
-            f"the section will refresh automatically when the result "
-            f"is ready."
-        )
-        col_cancel, _ = st.columns([1, 4])
-        with col_cancel:
+        # ── State B: error from a previous run → show + offer retry.
+        if error_msg:
+            st.error(
+                f"Envelope compute failed: {error_msg}. Click below to "
+                "retry."
+            )
+            if st.button("Retry compute", key=f"_envelope_retry_{kind}"):
+                ss[error_key] = None
+                # Natural button-click rerun.
+            return
+
+        # ── State C: job is pending → placeholder + Cancel.
+        if job is not None and not job.done():
+            elapsed = max(0.0, time.time() - (ss[start_key] or time.time()))
+            st.info(
+                f"⏳ Computing in the background — {elapsed:.0f} s "
+                f"elapsed of an estimated 1–2 minutes for {n_cells} "
+                f"engagements. You can keep using other plots and "
+                f"tabs while this runs; the section will refresh "
+                f"automatically when the result is ready."
+            )
             if st.button("Cancel", key=f"_envelope_cancel_{kind}"):
                 job.cancel()
                 ss[job_key] = None
                 ss[start_key] = None
-                st.rerun(scope="fragment")
-        return
-
-    # ── State 3: job just completed → pull result, clear job handle.
-    if job is not None and job.done():
-        try:
-            envelope = job.result(timeout=0)
-            ss[result_key] = envelope
-            ss[error_key] = None
-        except concurrent.futures.CancelledError:
-            ss[job_key] = None
-            ss[start_key] = None
+                # Natural button-click rerun.
             return
-        except Exception as exc:  # pragma: no cover — defensive
-            ss[error_key] = str(exc)
-            ss[job_key] = None
-            ss[start_key] = None
-            st.error(
-                f"Envelope compute failed: {exc!s}. Try a different "
-                "scenario or report this as a bug."
-            )
-            return
-        ss[job_key] = None
-        ss[start_key] = None
 
-    # ── State 4: error from a previous run → show it + offer retry.
-    if error_msg and envelope is None:
-        st.error(
-            f"Envelope compute failed: {error_msg}. Click below to "
-            "retry."
-        )
-        if st.button("Retry compute", key=f"_envelope_retry_{kind}"):
+        # ── State D: idle → Compute button + caption.
+        st.caption(button_caption)
+        if st.button("Compute envelope", key=f"_envelope_btn_{kind}"):
+            from ui.background_jobs import submit_compute
+            ss[job_key] = submit_compute(compute_fn, dict(frozen))
+            ss[start_key] = time.time()
             ss[error_key] = None
-            st.rerun(scope="fragment")
-        return
-
-    # ── State 5: result available → render 2D + 3D companions.
-    from ui.theme import PLOTLY_MODEBAR_CONFIG
-
-    st.plotly_chart(
-        plot_2d_fn(envelope),
-        use_container_width=True,
-        config=PLOTLY_MODEBAR_CONFIG,
-    )
-    explanation(EXPLANATIONS[intro_2d_key], variant="plot")
-
-    # Bookkeeping caption — works for both EnvelopeGrid kinds because
-    # n_kills / n_failures are present on both.
-    if hasattr(envelope, "R_detect_axis"):
-        n_total = (
-            len(envelope.R_detect_axis) * len(envelope.v_tgt_axis)
-        )
-    else:
-        n_total = len(envelope.cn2_axis) * len(envelope.V_km_axis)
-    st.caption(
-        f"Computed {n_total} engagements · "
-        f"{envelope.n_kills} closed with margin · "
-        f"{envelope.n_failures} hit a validator boundary"
-    )
-
-    st.plotly_chart(
-        plot_3d_fn(envelope),
-        use_container_width=True,
-        config=PLOTLY_MODEBAR_CONFIG,
-    )
-    explanation(EXPLANATIONS[intro_3d_key], variant="plot")
-
-    col_recompute, _ = st.columns([1, 4])
-    with col_recompute:
-        if st.button(
-            "Re-compute envelope", key=f"_envelope_recompute_{kind}",
-        ):
-            ss[result_key] = None
-            ss[error_key] = None
-            st.rerun(scope="fragment")
+            # Natural button-click rerun — next pass reads the new
+            # state and renders the pending placeholder.
 
 
 @st.fragment(run_every="2s")
