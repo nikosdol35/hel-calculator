@@ -1,4 +1,4 @@
-"""HEL Calculator page (multipage refactor PR 2).
+"""HEL Calculator page (multipage refactor + auth-bypass hotfix).
 
 The HEL Engineering Calculator workflow: a six-section sidebar
 (laser source, beam director, engagement geometry, atmosphere,
@@ -11,17 +11,17 @@ Dispatched by ``ui/app.py`` via Streamlit's ``st.navigation`` /
 (``sys.path`` shim, ``st.set_page_config``, theme bootstrap, auth
 gate) before this script runs.
 
-PR 2 cleanup vs PR 1: the DRI Analyzer used to ship as a tab on
-this page; it is now its own sibling page
-(``ui/pages/dri_analyzer.py``). Removed from this file:
-    * DRI sidebar sections (``collect_all`` → ``collect_hel``)
-    * DRI compute call + DRI sweep helpers
-    * DRI tab dispatch
-    * ``dri_*`` keys from the URL-decode allow-list
+**Auth defense in depth (2026-04-26 hotfix).** This page calls
+``theme.apply()`` and ``require_login()`` at the top, even though
+``ui/app.py`` already does both. The redundancy guards against any
+flow where a request reaches this page without going through
+``app.py``. Both calls are idempotent — ``require_login()`` returns
+immediately when the session is already authed; ``theme.apply()``
+just re-injects identical CSS.
 
 References:
     ui/app.py — multipage entry script.
-    ui/pages/dri_analyzer.py — DRI page (sibling).
+    ui/tools/dri_analyzer.py — DRI page (sibling).
     ui/panels.py — ``collect_hel`` returns the six HEL sections only.
     ui/outputs.py — ``render_tab_*`` renderers.
 """
@@ -35,7 +35,8 @@ import streamlit as st
 
 from physics import m11_validation
 from physics.orchestrator import run_full_chain
-from ui import outputs, panels, presets
+from ui import outputs, panels, presets, theme
+from ui.auth import require_login
 from ui.components import error_card, progress_bar
 from ui.labels import (
     ADVISORY,
@@ -49,15 +50,23 @@ from ui.labels import (
 
 
 # ---------------------------------------------------------------------------
+# Auth defense in depth + theme re-apply.
+# Both are idempotent under the normal app.py-driven flow; they exist as
+# a safety net for any path that reaches this page without app.py.
+# ---------------------------------------------------------------------------
+_APP_MODE_KEY = "_app_mode"
+app_mode = st.session_state.get(_APP_MODE_KEY, "dark")
+theme.apply(app_mode)
+require_login()
+
+
+# ---------------------------------------------------------------------------
 # Provenance — surfaced in the footer strip only (never in the header).
 # Keep in sync with the latest contract-document revisions.
 # ---------------------------------------------------------------------------
 _SPEC_VERSION = "v1.11"
 _ARCH_VERSION = "v2.0"
 _BUILD_DATE = "2026-04-26"
-
-_APP_MODE_KEY = "_app_mode"
-app_mode = st.session_state.get(_APP_MODE_KEY, "dark")
 
 
 # ---------------------------------------------------------------------------

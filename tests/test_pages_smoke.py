@@ -1,4 +1,4 @@
-"""Multipage refactor smoke tests (multipage PR 3, 2026-04-26).
+"""Multipage refactor smoke tests + auth-bypass-hotfix invariants.
 
 Verifies the structural invariants of the two-page Streamlit
 application:
@@ -8,11 +8,20 @@ application:
     * The shared collect helpers in ui/panels.py return disjoint
       key spaces (HEL keys vs DRI keys).
     * The DRI preset registry writes the expected widget keys.
+    * **Auth defense in depth** — every page script calls
+      ``require_login()`` at the top so the auth gate cannot be
+      bypassed by direct URL navigation. (See the 2026-04-26 hotfix
+      that renamed ``ui/pages/`` to ``ui/tools/`` to kill Streamlit's
+      legacy multipage auto-discovery.)
+    * **No directory named ``ui/pages/``** — Streamlit auto-discovers
+      that path and exposes the page files as top-level URLs without
+      running ``ui/app.py``'s auth gate. We must not have a directory
+      with that name in the repo.
 
 We don't actually run the page scripts under bare-mode pytest (they
 need a Streamlit ScriptRunContext), but we cover the structural
 contracts the multipage refactor relies on so a regression that
-would crash the live app is caught before deploy.
+would crash or expose the live app is caught before deploy.
 """
 from __future__ import annotations
 
@@ -23,7 +32,7 @@ import pytest
 
 
 _REPO_ROOT = Path(__file__).resolve().parent.parent
-_PAGES_DIR = _REPO_ROOT / "ui" / "pages"
+_PAGES_DIR = _REPO_ROOT / "ui" / "tools"
 
 
 # ---------------------------------------------------------------------------
@@ -43,9 +52,32 @@ def test_page_file_parses(page_filename: str) -> None:
 
 
 def test_pages_init_exists() -> None:
-    """The ui/pages/__init__.py marker exists (so the directory is
+    """The ui/tools/__init__.py marker exists (so the directory is
     treated as a Python package by mypy / pyflakes)."""
     assert (_PAGES_DIR / "__init__.py").exists()
+
+
+def test_no_pages_directory_in_ui() -> None:
+    """**Critical security invariant** (2026-04-26 hotfix). Streamlit's
+    legacy multipage system auto-discovers any directory named
+    literally ``pages/`` adjacent to the entry script and exposes its
+    contents as top-level URLs reachable WITHOUT running the entry
+    script. That bypasses ``ui/app.py``'s auth gate.
+
+    The two tool scripts must therefore NOT live under ``ui/pages/``.
+    They live under ``ui/tools/`` and are dispatched only via
+    ``st.navigation`` from ``ui/app.py``, which runs after the auth
+    check.
+
+    This test fails if anyone re-introduces a ``ui/pages/`` directory.
+    """
+    forbidden = _REPO_ROOT / "ui" / "pages"
+    assert not forbidden.exists(), (
+        f"{forbidden} exists; Streamlit's legacy multipage discovery "
+        f"would expose its contents WITHOUT the auth gate. Move the "
+        f"page files to ui/tools/ (or any non-'pages' directory) and "
+        f"register them via st.Page in ui/app.py."
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -59,11 +91,53 @@ def test_app_entrypoint_uses_navigation() -> None:
     assert "st.navigation" in src, (
         "ui/app.py must dispatch via st.navigation([...]).run()"
     )
-    assert "pages/hel_calculator.py" in src, (
+    assert "tools/hel_calculator.py" in src, (
         "ui/app.py must register the HEL Calculator page"
     )
-    assert "pages/dri_analyzer.py" in src, (
+    assert "tools/dri_analyzer.py" in src, (
         "ui/app.py must register the DRI Analyzer page"
+    )
+
+
+@pytest.mark.parametrize("page_filename", [
+    "hel_calculator.py",
+    "dri_analyzer.py",
+])
+def test_each_page_calls_require_login(page_filename: str) -> None:
+    """**Auth defense in depth** (2026-04-26 hotfix). Each page script
+    must call ``require_login()`` at module level so the auth gate
+    triggers even if a request reaches the page without going through
+    ``ui/app.py`` first. ``require_login()`` is idempotent on already-
+    authed sessions, so this is free in the normal flow."""
+    src = (_PAGES_DIR / page_filename).read_text(encoding="utf-8")
+    tree = ast.parse(src)
+    found = False
+    for node in ast.walk(tree):
+        if (isinstance(node, ast.Call)
+                and isinstance(node.func, ast.Name)
+                and node.func.id == "require_login"):
+            found = True
+            break
+    assert found, (
+        f"ui/tools/{page_filename} does not call require_login() — the "
+        "auth gate must be applied at the page level too, as defense "
+        "in depth in case Streamlit dispatches this page without "
+        "running ui/app.py first."
+    )
+
+
+@pytest.mark.parametrize("page_filename", [
+    "hel_calculator.py",
+    "dri_analyzer.py",
+])
+def test_each_page_imports_require_login(page_filename: str) -> None:
+    """The auth defense-in-depth test above checks the *call*. This
+    test checks the *import* — both must be present, and the import
+    must be from ui.auth (not a stubbed re-export)."""
+    src = (_PAGES_DIR / page_filename).read_text(encoding="utf-8")
+    assert "from ui.auth import require_login" in src, (
+        f"ui/tools/{page_filename} must import require_login from "
+        "ui.auth so the auth gate is enforced at page level."
     )
 
 
@@ -251,7 +325,7 @@ def test_tab_labels_does_not_contain_dri_analyzer() -> None:
     from ui.labels import TAB_LABELS
     assert "dri_analyzer" not in TAB_LABELS, (
         "TAB_LABELS still contains 'dri_analyzer'; the multipage "
-        "refactor turned DRI into a page (ui/pages/dri_analyzer.py)."
+        "refactor turned DRI into a page (ui/tools/dri_analyzer.py)."
     )
 
 
@@ -286,7 +360,7 @@ def test_hel_page_contains_no_dri_references(forbidden: str) -> None:
     src = (_PAGES_DIR / "hel_calculator.py").read_text(encoding="utf-8")
     assert forbidden not in src, (
         f"hel_calculator.py still references {forbidden!r}; the DRI "
-        f"page (ui/pages/dri_analyzer.py) owns those helpers now."
+        f"page (ui/tools/dri_analyzer.py) owns those helpers now."
     )
 
 

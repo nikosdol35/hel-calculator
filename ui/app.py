@@ -17,17 +17,28 @@ every tool:
 After those four concerns are handled, this file declares the two
 pages (HEL Calculator and DRI Analyzer) and dispatches via Streamlit's
 native ``st.navigation`` API. Each page is a self-contained script
-under ``ui/pages/`` with its own sidebar, its own state, its own
-content area. Switching between them preserves ``st.session_state``,
-so the user can move between tools without losing their input edits.
+under ``ui/tools/`` (deliberately NOT named ``pages/`` — see below)
+with its own sidebar, its own state, its own content area. Switching
+between them preserves ``st.session_state``, so the user can move
+between tools without losing their input edits.
 
-In multipage PR 1 only the HEL Calculator page is registered; the
-DRI Analyzer still ships as a tab on the HEL page. PR 2 adds the
-sibling DRI page and removes the DRI tab.
+**Why ``ui/tools/`` instead of ``ui/pages/``** — Streamlit ships a
+*legacy* multipage system that auto-discovers any directory named
+literally ``pages/`` adjacent to the entry script and turns each
+file in it into a top-level page reachable by URL slug. That
+auto-discovery is what we hit on the live deploy: when
+``require_login()`` halted the script before ``st.navigation`` was
+reached, Streamlit fell back to the auto-discovered legacy pages,
+which exposed the tools in the sidebar to unauthenticated users
+*and* let them bypass the auth gate by clicking a page link
+(direct URL navigation runs the page file as a script without
+re-running ``app.py``). Renaming the directory kills the legacy
+discovery; ``st.navigation`` is then the only multipage mechanism.
 
 References:
-    ui/pages/hel_calculator.py — HEL Calculator page (sidebar, tabs,
+    ui/tools/hel_calculator.py — HEL Calculator page (sidebar, tabs,
         Run Analysis, share-URL, the seven HEL tabs).
+    ui/tools/dri_analyzer.py — DRI Analyzer page.
     ui/auth.py — shared-credentials login.
     ui/theme.py — palette + CSS + Plotly template.
 """
@@ -87,13 +98,13 @@ require_login()
 # relative to the entrypoint script's directory. The default page
 # renders when the user lands on the bare URL.
 hel_page = st.Page(
-    "pages/hel_calculator.py",
+    "tools/hel_calculator.py",
     title="HEL Calculator",
     icon=":material/cell_tower:",
     default=True,
 )
 dri_page = st.Page(
-    "pages/dri_analyzer.py",
+    "tools/dri_analyzer.py",
     title="DRI Analyzer",
     icon=":material/photo_camera:",
 )
