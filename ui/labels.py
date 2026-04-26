@@ -1204,6 +1204,24 @@ EXPLANATIONS: dict[str, str] = {
         "field of view and the target size. Useful for picking the FOV "
         "that maximises range against a class of targets."
     ),
+    "dri_plot_3d_operational_envelope_intro": (
+        "Same data as the heatmap above, lifted into a 3D surface so the "
+        "curvature reads at a glance. The plateau on the high-zoom / "
+        "small-target corner is where atmospheric extinction caps the "
+        "geometric Johnson advantage; the steep drop-off on the wide-FOV "
+        "side is where each pixel covers too much angle to resolve the "
+        "target. Drag to rotate, scroll to zoom."
+    ),
+    "dri_plot_3d_atmospheric_envelope_intro": (
+        "Detection range as a function of the two atmospheric extinction "
+        "mechanisms — turbulence (Cn², log x-axis) and visibility (km, "
+        "y-axis) — at the user's narrow field of view and target size. "
+        "Strong turbulence with clear visibility lives on the upper-right; "
+        "low visibility with calm air lives on the lower-left. The ridge "
+        "where neither mechanism dominates marks the operating regime "
+        "where additional improvement on either axis would help the most. "
+        "Drag to rotate, scroll to zoom."
+    ),
 }
 
 

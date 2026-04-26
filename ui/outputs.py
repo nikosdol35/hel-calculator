@@ -1772,6 +1772,7 @@ def render_tab_dri_analyzer(
     dri_cn2_sweeps: dict[str, list[dict]] | None = None,
     dri_frozen: tuple | None = None,
     dri_heatmap_runner=None,
+    dri_atmospheric_heatmap_runner=None,
 ) -> None:
     """Render the DRI Analyzer tab.
 
@@ -1916,12 +1917,15 @@ def render_tab_dri_analyzer(
             config=PLOTLY_MODEBAR_CONFIG,
         )
 
-    # --- Optional plot DRI-7: heatmap (compute-on-click) -------------------
+    # --- Optional Plot DRI-7 + DRI-8: operational envelope -----------------
+    # Single Compute button drives both the 2D heatmap and the 3D surface
+    # — same data, two complementary views (heatmap = precision readout,
+    # surface = curvature readout).
     if dri_frozen is not None and dri_heatmap_runner is not None:
         from ui import plots
         from ui.theme import PLOTLY_MODEBAR_CONFIG
 
-        section_header("DRI heatmap — FOV × target size")
+        section_header("Operational envelope — FOV × target size")
         explanation(EXPLANATIONS["dri_plot_heatmap_intro"])
 
         button_key = "_dri_heatmap_compute_clicked"
@@ -1930,13 +1934,15 @@ def render_tab_dri_analyzer(
 
         col_btn, col_note = st.columns([1, 3])
         with col_btn:
-            if st.button("Compute heatmap", key="_dri_heatmap_btn"):
+            if st.button("Compute envelope", key="_dri_heatmap_btn"):
                 st.session_state[button_key] = True
         with col_note:
             st.caption(
                 "Computes a 20 × 20 (FOV × target size) grid at the user's "
                 "current sensor / atmosphere settings. Takes ~0.5 s on the "
-                "first click; cached afterwards."
+                "first click; cached afterwards. Renders both the 2D "
+                "heatmap (precision view) and the 3D surface (gradient "
+                "view)."
             )
 
         if st.session_state[button_key]:
@@ -1960,6 +1966,7 @@ def render_tab_dri_analyzer(
                 grid_km = [
                     [v / 1000.0 for v in row] for row in grid
                 ]
+                # 2D heatmap (precision-readout view).
                 st.plotly_chart(
                     plots.plot_dri_heatmap_fov_vs_target(
                         fov_grid_deg=list(fov_grid),
@@ -1969,8 +1976,87 @@ def render_tab_dri_analyzer(
                     use_container_width=True,
                     config=PLOTLY_MODEBAR_CONFIG,
                 )
+                # 3D operational-envelope surface (gradient-readout view).
+                explanation(
+                    EXPLANATIONS["dri_plot_3d_operational_envelope_intro"],
+                    variant="plot",
+                )
+                st.plotly_chart(
+                    plots.plot_dri_3d_operational_envelope(
+                        fov_grid_deg=list(fov_grid),
+                        target_grid_m=list(target_grid),
+                        grid_km=grid_km,
+                    ),
+                    use_container_width=True,
+                    config=PLOTLY_MODEBAR_CONFIG,
+                )
             except Exception as exc:  # pragma: no cover — defensive
-                st.error(f"Heatmap compute failed: {exc!s}")
+                st.error(f"Operational-envelope compute failed: {exc!s}")
+
+    # --- Optional Plot DRI-9: 3D atmospheric envelope (Cn² × visibility) ---
+    if (dri_frozen is not None
+            and dri_atmospheric_heatmap_runner is not None):
+        from ui import plots
+        from ui.theme import PLOTLY_MODEBAR_CONFIG
+
+        section_header(
+            "Atmospheric envelope (3D) — Cn² × visibility"
+        )
+        explanation(EXPLANATIONS["dri_plot_3d_atmospheric_envelope_intro"])
+
+        atm_button_key = "_dri_atmospheric_envelope_compute_clicked"
+        if atm_button_key not in st.session_state:
+            st.session_state[atm_button_key] = False
+
+        col_btn, col_note = st.columns([1, 3])
+        with col_btn:
+            if st.button(
+                "Compute atmospheric envelope",
+                key="_dri_atmospheric_envelope_btn",
+            ):
+                st.session_state[atm_button_key] = True
+        with col_note:
+            st.caption(
+                "Computes a 15 × 15 (Cn² × visibility) grid at the user's "
+                "current FOV (NFOV) and target. Takes ~0.25 s on the "
+                "first click; cached afterwards."
+            )
+
+        if st.session_state[atm_button_key]:
+            n = 15
+            # Cn² log-spaced from 1e-16 to 5e-13 (the seven preset bookends
+            # plus interior fill).
+            cn2_lo, cn2_hi = 1.0e-16, 5.0e-13
+            cn2_grid = tuple(
+                cn2_lo * ((cn2_hi / cn2_lo) ** (i / (n - 1)))
+                for i in range(n)
+            )
+            # Visibility linear from 1 km (fog onset) to 60 km (very clear).
+            vis_lo, vis_hi = 1.0, 60.0
+            visibility_grid = tuple(
+                vis_lo + (vis_hi - vis_lo) * (i / (n - 1))
+                for i in range(n)
+            )
+            try:
+                grid_atm = dri_atmospheric_heatmap_runner(
+                    dri_frozen, cn2_grid, visibility_grid, "Detection",
+                )
+                grid_atm_km = [
+                    [v / 1000.0 for v in row] for row in grid_atm
+                ]
+                st.plotly_chart(
+                    plots.plot_dri_3d_atmospheric_envelope(
+                        cn2_grid=list(cn2_grid),
+                        visibility_grid=list(visibility_grid),
+                        grid_km=grid_atm_km,
+                    ),
+                    use_container_width=True,
+                    config=PLOTLY_MODEBAR_CONFIG,
+                )
+            except Exception as exc:  # pragma: no cover — defensive
+                st.error(
+                    f"Atmospheric-envelope compute failed: {exc!s}"
+                )
 
     # --- Diagnostics row ----------------------------------------------------
     section_header("Diagnostics")
