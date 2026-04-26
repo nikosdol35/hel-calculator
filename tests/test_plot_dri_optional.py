@@ -369,3 +369,154 @@ def test_plot_dri_3d_atmospheric_envelope_partial_empty_renders_frame():
         cn2_grid=[1e-14], visibility_grid=[23.0], grid_km=None,
     )
     assert len(fig.data) == 0
+
+
+# ---------------------------------------------------------------------------
+# Cache-wrapper regression — atmospheric envelope must inject fov_h_deg.
+# ---------------------------------------------------------------------------
+
+# Canonical user_inputs the DRI page produces from a fresh sidebar render
+# at default values. Used to reproduce the cache-wrapper kwarg flow without
+# importing the page module (which would execute Streamlit widget calls
+# under bare-mode pytest).
+_CANONICAL_DRI_BASE = {
+    "dri_n_pixels_h": 1920, "dri_n_pixels_v": 1080,
+    "dri_nfov_deg": 1.5, "dri_wfov_deg": 25.0,
+    "dri_focal_length_mm": 200.0, "dri_f_number": 2.8,
+    "dri_band": "Visible",
+    "dri_cn2_preset": "Moderate (canonical mid-altitude)",
+    "dri_visibility_km": 23.0, "dri_C0": 0.30,
+    "dri_target_preset": "NATO standard",
+    "dri_probability": 0.50,
+    "dri_n_cycles_D": 1.0, "dri_n_cycles_R": 4.0, "dri_n_cycles_I": 8.0,
+}
+
+
+def _resolve_dri_kwargs_like_page(base: dict, level: str) -> dict:
+    """Mirror of ``ui.tools.dri_analyzer._resolve_dri_kwargs``. Inlined
+    here so the test doesn't import the page module (which would
+    trigger Streamlit widget calls in bare-mode pytest)."""
+    from physics.dri_analyzer import CN2_PRESETS, target_critical_dim
+    target_preset = base["dri_target_preset"]
+    if target_preset == "Custom":
+        h_target = float(base.get("dri_target_h_m", 1.0))
+    else:
+        h_target = target_critical_dim(target_preset)
+    cn2 = CN2_PRESETS[base["dri_cn2_preset"]]
+    n_cycles_50 = float(base[{
+        "Detection": "dri_n_cycles_D",
+        "Recognition": "dri_n_cycles_R",
+        "Identification": "dri_n_cycles_I",
+    }[level]])
+    return dict(
+        h_target=h_target,
+        n_pixels_h=int(base["dri_n_pixels_h"]),
+        band=base["dri_band"],
+        cn2=cn2,
+        V_km=float(base["dri_visibility_km"]),
+        f_mm=float(base["dri_focal_length_mm"]),
+        f_number=float(base["dri_f_number"]),
+        C0=float(base.get("dri_C0", 0.30)),
+        probability=float(base.get("dri_probability", 0.50)),
+        n_cycles_50=n_cycles_50,
+    )
+
+
+def test_atmospheric_heatmap_cache_wrapper_injects_fov():
+    """**Regression for the 2026-04-26 hotfix.**
+
+    ``run_dri_atmospheric_heatmap_cached`` builds its kwargs from
+    ``_resolve_dri_kwargs``, which intentionally does NOT carry
+    ``fov_h_deg`` (every other helper sweeps FOV per evaluation).
+    The atmospheric envelope holds FOV constant at NFOV, so the
+    wrapper must explicitly inject ``fov_h_deg=base["dri_nfov_deg"]``.
+    Forgetting this injection produced a runtime
+    ``TypeError: dri_range() missing 1 required keyword-only argument:
+    'fov_h_deg'`` on the live deploy.
+    """
+    base = _CANONICAL_DRI_BASE
+    kwargs = _resolve_dri_kwargs_like_page(base, "Detection")
+    kwargs.pop("cn2")
+    kwargs.pop("V_km")
+
+    # Reproduce the wrapper's call exactly.
+    grid = atmospheric_heatmap(
+        cn2_grid=[1e-15, 1e-14, 1e-13],
+        visibility_grid=[10.0, 23.0, 50.0],
+        level="Detection",
+        fov_h_deg=float(base["dri_nfov_deg"]),
+        **kwargs,
+    )
+    assert len(grid) == 3 and all(len(row) == 3 for row in grid)
+    # Centre cell (V=23 km, Cn²=1e-14, NATO target, NFOV=1.5°,
+    # Visible band) reproduces the canonical Detection range —
+    # ~11 km. Pinned numerically.
+    centre = grid[1][1] / 1000.0
+    assert 9.0 <= centre <= 13.0, (
+        f"Atmospheric-heatmap centre cell at the canonical scenario "
+        f"should match the Detection-range headline (~11 km); got "
+        f"{centre:.2f} km. Likely a kwarg leak (missing fov_h_deg, "
+        f"missing target, etc.)."
+    )
+
+
+def test_atmospheric_heatmap_without_fov_raises_typeerror():
+    """Defensive: confirms that the underlying ``atmospheric_heatmap``
+    DOES require ``fov_h_deg`` — i.e. that the regression-guard test
+    above is testing a real failure mode and not a vacuous one."""
+    import pytest
+    base = _CANONICAL_DRI_BASE
+    kwargs = _resolve_dri_kwargs_like_page(base, "Detection")
+    kwargs.pop("cn2")
+    kwargs.pop("V_km")
+    with pytest.raises(TypeError, match="fov_h_deg"):
+        atmospheric_heatmap(
+            cn2_grid=[1e-14], visibility_grid=[23.0],
+            level="Detection",
+            **kwargs,  # no fov_h_deg — should raise
+        )
+
+
+def test_dri_atmospheric_heatmap_runner_passes_fov_to_kernel():
+    """Pin-the-source check: the page-level cache wrapper
+    ``run_dri_atmospheric_heatmap_cached`` MUST call the kernel with
+    ``fov_h_deg=...``. Catches a refactor that silently drops the
+    injection (which is exactly how the live-deploy bug came in).
+
+    Approach: locate the function via AST, walk the function body
+    for an ``atmospheric_heatmap`` call, and confirm one of its
+    keyword args is ``fov_h_deg``. Avoids fragile regex matching
+    over multi-line arg lists with nested parens.
+    """
+    import ast
+    from pathlib import Path
+
+    src = (Path(__file__).resolve().parent.parent
+           / "ui" / "tools" / "dri_analyzer.py").read_text(encoding="utf-8")
+    tree = ast.parse(src)
+
+    func = next(
+        (node for node in ast.walk(tree)
+         if isinstance(node, ast.FunctionDef)
+         and node.name == "run_dri_atmospheric_heatmap_cached"),
+        None,
+    )
+    assert func is not None, (
+        "Could not locate run_dri_atmospheric_heatmap_cached in "
+        "ui/tools/dri_analyzer.py — this regression guard is now stale."
+    )
+
+    fov_kw_seen = False
+    for node in ast.walk(func):
+        if (isinstance(node, ast.Call)
+                and isinstance(node.func, ast.Attribute)
+                and node.func.attr == "atmospheric_heatmap"):
+            kw_names = {kw.arg for kw in node.keywords}
+            if "fov_h_deg" in kw_names:
+                fov_kw_seen = True
+                break
+    assert fov_kw_seen, (
+        "run_dri_atmospheric_heatmap_cached must pass fov_h_deg= "
+        "explicitly to atmospheric_heatmap (the kernel iterates "
+        "Cn²/V_km but FOV is fixed at NFOV)."
+    )
