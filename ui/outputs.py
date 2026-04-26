@@ -1333,7 +1333,7 @@ def _envelope_state_machine(
         elapsed = max(0.0, time.time() - ss.get(start_key, time.time()))
         st.info(
             f"⏳ Computing in the background — {elapsed:.0f} s elapsed "
-            f"of an estimated 2–5 minutes for {n_cells} engagements. "
+            f"of an estimated 1–2 minutes for {n_cells} engagements. "
             f"You can keep using other plots and tabs while this runs; "
             f"the section will refresh automatically when the result "
             f"is ready."

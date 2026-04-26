@@ -1063,11 +1063,12 @@ EXPLANATIONS: dict[str, str] = {
     ),
     "plot_k_intro_pre": (
         "This is the strategic view of the engagement. For every "
-        "combination of detection range and target velocity in a "
-        "10-by-10 grid, the tool runs a full engagement analysis and "
-        "colour-codes the result. Computing the grid takes about a "
-        "minute and a half on first click; the result is cached for "
-        "the rest of the session so re-rendering is instant."
+        "combination of detection range (200 m to 12 km) and target "
+        "velocity (1 to 100 m/s) in a 10-by-10 grid, the tool runs a "
+        "full engagement analysis and colour-codes the result. "
+        "Computing the grid takes roughly 1–2 minutes on first click "
+        "and runs in the background — you can keep using other plots "
+        "and tabs while it computes."
     ),
     "plot_k_intro": (
         "Each cell is one engagement at a different (detection range, "
@@ -1091,9 +1092,10 @@ EXPLANATIONS: dict[str, str] = {
         "Holds the kinematics fixed (your current detection range and "
         "target velocity) and sweeps the atmosphere instead — visibility "
         "from heavy fog to crystal clear, turbulence from negligible to "
-        "near-surface desert noon. Same 10-by-10 grid, same cost as the "
-        "operational envelope above (about a minute and a half on first "
-        "click)."
+        "near-surface desert noon. Same 10-by-10 grid, runs in the "
+        "background like the operational envelope above (typically "
+        "1–2 minutes on first click; you can keep using other plots "
+        "while it computes)."
     ),
     "plot_m_intro": (
         "Each cell is one engagement at a different (turbulence Cn², "
