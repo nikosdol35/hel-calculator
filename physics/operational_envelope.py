@@ -48,8 +48,16 @@ class EnvelopeGrid:
     n_failures: int                    # cells where the run raised
 
 
-_LOG_SPAN_R_LOW_M = 100.0       # 0.1 km
-_LOG_SPAN_R_HIGH_M = 30_000.0   # 30 km
+# Sweep bounds — tightened 2026-04-26 from the original 100 m..30 km
+# down to 200 m..12 km. The wider bounds included a long-range / slow-
+# target corner where the engagement could not close, so M8 ran the
+# full PDE to its 60 s timeout for ~30 cells of the 100-cell grid →
+# 30 min worst case. The new bounds keep the grid in C-UAS-relevant
+# territory (200 m is just below typical R_min; 12 km covers every
+# realistic short-range engagement) while keeping the typical
+# compute under ~90 s on a 3 kW CFRP scenario.
+_LOG_SPAN_R_LOW_M = 200.0       # 0.2 km
+_LOG_SPAN_R_HIGH_M = 12_000.0   # 12 km
 _LIN_SPAN_V_LOW_MPS = 1.0
 _LIN_SPAN_V_HIGH_MPS = 100.0
 _MARGIN_FLOOR_PCT = -100.0

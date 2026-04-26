@@ -42,12 +42,11 @@ def _v2_inputs() -> dict:
     return inputs
 
 
-# Default sweep bounds (R 100..30 km, v 1..100 m/s) include cells that
-# pin the M8 PDE at its full 60-second timeout (e.g. 30 km @ 1 m/s with
-# CFRP at 1.5 km nominal — never closes). Each such cell costs ~30 s.
-# Tests that don't care about the bounds use this fast preset instead:
-# the entire 3×3 grid finishes in under 30 s on the canonical CFRP /
-# 3 kW scenario.
+# Default sweep bounds were narrowed 2026-04-26 to R 200..12 km
+# (was 100..30 km) to avoid the long-range / slow-target corner where
+# M8 ran the full PDE to its 60-second timeout. Tests that don't
+# care about the bounds use this fast preset instead: the entire 3×3
+# grid finishes in under 30 s on the canonical CFRP / 3 kW scenario.
 _FAST_KW = dict(
     R_low_m=200.0, R_high_m=2_000.0,
     v_low_mps=5.0, v_high_mps=30.0,
@@ -150,3 +149,24 @@ def test_plot_k_none_envelope_renders_empty_frame():
     from ui.plots import plot_k_operational_envelope
     fig = plot_k_operational_envelope(None)
     assert len(fig.data) == 0
+
+
+def test_default_bounds_locked_to_200m_12km():
+    """Pin the production default bounds — narrowed 2026-04-26 from
+    the original 100 m..30 km. Re-widening them silently would put the
+    long-range / slow-target M8-timeout corner back into the grid and
+    blow the typical compute time from ~90 s to ~30 min."""
+    from physics.operational_envelope import (
+        _LOG_SPAN_R_LOW_M, _LOG_SPAN_R_HIGH_M,
+    )
+    assert _LOG_SPAN_R_LOW_M == 200.0
+    assert _LOG_SPAN_R_HIGH_M == 12_000.0
+
+
+def test_default_bounds_used_when_no_kwargs():
+    """A grid built without explicit R bounds should respect the
+    locked defaults — first cell at 200 m, last cell at 12 km."""
+    env = compute_operational_envelope(_v2_inputs(), n_R=3, n_v=3,
+                                       v_low_mps=5.0, v_high_mps=30.0)
+    assert env.R_detect_axis[0] == pytest.approx(200.0, rel=1e-9)
+    assert env.R_detect_axis[-1] == pytest.approx(12_000.0, rel=1e-9)
