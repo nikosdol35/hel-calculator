@@ -584,6 +584,14 @@ def section_9_dri_target(initial: dict | None = None) -> dict:
 
     prob_options = ("50 %", "80 %", "95 %")
     prob_to_float = {"50 %": 0.50, "80 %": 0.80, "95 %": 0.95}
+    # Widget key intentionally distinct from the dict key ``dri_probability``.
+    # The output dict reports probability as a float (0.50 / 0.80 / 0.95);
+    # the widget shows label strings ("50 %" / "80 %" / "95 %"). Sharing the
+    # same name would write a float to a session-state slot the widget reads
+    # as a string-options selectbox — a ValueError on every preset apply
+    # because 0.50 is not in ("50 %", "80 %", "95 %"). See the 2026-04-26
+    # hotfix that renamed this key.
+    _PROB_WIDGET_KEY = "_dri_probability_select"
     initial_prob_float = float(_initial(initial, "dri_probability", 0.50))
     initial_prob_label = (
         "50 %" if initial_prob_float == 0.50 else
@@ -615,7 +623,7 @@ def section_9_dri_target(initial: dict | None = None) -> dict:
             input_label("dri_probability"),
             options=prob_options,
             index=prob_options.index(initial_prob_label),
-            key="dri_probability",
+            key=_PROB_WIDGET_KEY,
             help=input_tooltip("dri_probability"),
         )
         probability = prob_to_float[probability_label]

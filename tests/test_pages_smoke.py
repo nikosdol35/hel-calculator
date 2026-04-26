@@ -316,6 +316,59 @@ def test_dri_preset_values_match_band_label() -> None:
         assert presets.DRI_PRESET_PARAMETERS[key]["dri_band"] == expected_band
 
 
+def test_dri_preset_apply_writes_probability_widget_label() -> None:
+    """**Regression for the 2026-04-26 widget-key collision hotfix.**
+
+    The DRI preset stores ``dri_probability`` as a float (0.50 / 0.80 /
+    0.95). The corresponding widget is a string-options selectbox
+    (``"50 %"`` / ``"80 %"`` / ``"95 %"``) under the session-state key
+    ``_dri_probability_select``. ``apply_dri_preset_to_session_state``
+    must translate the float to the label form and write it to the
+    widget key — otherwise the selectbox raises a ValueError on its
+    next render because the float isn't in its options list.
+    """
+    from ui import presets
+    sess: dict = {}
+    presets.apply_dri_preset_to_session_state(sess, "swir_night_vision")
+    assert sess.get("dri_probability") == 0.50, (
+        "Preset value should also remain readable as a float in the "
+        "dict-key slot for any caller that reads it directly."
+    )
+    assert sess.get("_dri_probability_select") == "50 %", (
+        "Preset apply must translate the probability float to the "
+        "widget's selectbox label and write it to the widget's "
+        "session-state key (_dri_probability_select). Without this, "
+        "the selectbox would raise ValueError when it tries to find "
+        "0.50 in its string-only options list."
+    )
+
+
+def test_dri_panels_probability_widget_uses_separate_key() -> None:
+    """**Regression for the 2026-04-26 widget-key collision hotfix.**
+
+    The probability selectbox in ``ui.panels.section_9_dri_target`` must
+    NOT use ``key="dri_probability"`` because that name is the dict key
+    for the float value. A widget that stores a string label under a
+    name reserved for a float would crash on every preset apply.
+    """
+    panels_src = (_REPO_ROOT / "ui" / "panels.py").read_text(encoding="utf-8")
+    # Find the section_9_dri_target body and locate the probability
+    # selectbox call.
+    import re
+    m = re.search(
+        r"def section_9_dri_target\(.*?probability_label\s*=\s*st\.selectbox\((.*?)\)",
+        panels_src,
+        re.DOTALL,
+    )
+    assert m is not None, "Could not locate the probability selectbox"
+    selectbox_call = m.group(1)
+    assert 'key="dri_probability"' not in selectbox_call, (
+        "section_9_dri_target.probability_label uses key='dri_probability'; "
+        "this collides with the float-valued dict key. Use a distinct "
+        "widget key like '_dri_probability_select' instead."
+    )
+
+
 # ---------------------------------------------------------------------------
 # 5. TAB_LABELS no longer contains the DRI tab.
 # ---------------------------------------------------------------------------

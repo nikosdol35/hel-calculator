@@ -328,6 +328,20 @@ DRI_PRESET_PARAMETERS: dict[str, dict] = {
 }
 
 
+#: Translation map: dict-key ``dri_probability`` (float in [0, 1]) to the
+#: label string the selectbox widget actually stores in session_state.
+#: The widget's session-state key (``_dri_probability_select`` in
+#: ``ui/panels.py::section_9_dri_target``) is intentionally distinct from
+#: the dict key ``dri_probability`` so the float and the label cannot
+#: collide. See the 2026-04-26 hotfix that introduced this split.
+_DRI_PROB_FLOAT_TO_LABEL: dict[float, str] = {
+    0.50: "50 %",
+    0.80: "80 %",
+    0.95: "95 %",
+}
+_DRI_PROB_WIDGET_KEY: str = "_dri_probability_select"
+
+
 def apply_dri_preset_to_session_state(session_state, preset_key: str) -> bool:
     """Mirror of ``apply_to_session_state`` for DRI presets.
 
@@ -337,6 +351,12 @@ def apply_dri_preset_to_session_state(session_state, preset_key: str) -> bool:
     pathway uses. Returns ``True`` when a known preset is applied,
     ``False`` for the ``"custom"`` sentinel (or any unknown key) so
     the caller can keep the user's current widget edits.
+
+    Special case: ``dri_probability`` in the preset is a float (0.50 /
+    0.80 / 0.95), but the corresponding widget is a string-options
+    selectbox. We additionally write the label form to the widget's
+    actual session-state key so the widget renders the new value
+    rather than choking on a float-vs-string options mismatch.
     """
     if preset_key == "custom":
         return False
@@ -345,6 +365,15 @@ def apply_dri_preset_to_session_state(session_state, preset_key: str) -> bool:
         return False
     for widget_key, value in preset.items():
         session_state[widget_key] = value
+    # Translation step: keep the float in session_state[dri_probability]
+    # for any future caller that reads it directly, AND write the label
+    # form to the widget's actual key so the selectbox picks up the new
+    # value when the page re-renders.
+    prob_float = preset.get("dri_probability")
+    if prob_float is not None and prob_float in _DRI_PROB_FLOAT_TO_LABEL:
+        session_state[_DRI_PROB_WIDGET_KEY] = (
+            _DRI_PROB_FLOAT_TO_LABEL[prob_float]
+        )
     return True
 
 
