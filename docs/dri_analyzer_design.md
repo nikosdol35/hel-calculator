@@ -416,7 +416,7 @@ The DRI page sidebar contains, top to bottom:
 - Probability of discrimination — dropdown {50 %, 80 %, 95 %}
 - Johnson cycles override — three numeric inputs (D, R, I) — defaults 1.0 / 4.0 / 8.0
 
-**Sidebar footer:** "Share this analysis" button (encodes only `dri_*` keys) and a dark / light theme toggle. **No Run button** — the DRI analysis is closed-form arithmetic (sub-100 ms full sweep) and recomputes reactively on every sidebar widget change.
+**Sidebar footer:** "Run Analysis" button (primary), "Share this analysis" button (encodes only `dri_*` keys), and a dark / light theme toggle. The DRI page mirrors the HEL Calculator's compute-on-click workflow (per user feedback 2026-04-26): on first visit a welcome card is shown; the user adjusts inputs, clicks Run Analysis, and only then are results computed and plots rendered. After the first run the latch stays on, so subsequent edits re-render automatically (the cached sweep helpers keep that cheap).
 
 ### 9.2 — DRI page main content
 

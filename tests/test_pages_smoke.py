@@ -435,17 +435,39 @@ def test_dri_page_uses_collect_dri_not_collect_all() -> None:
     assert "panels.collect_all(" not in src
 
 
-def test_dri_page_has_no_run_button() -> None:
-    """The DRI page is reactive — it must NOT have a Run Analysis
-    button. Detected by the absence of BUTTON_LABELS["run_analysis"]
-    references in the page source."""
+def test_dri_page_has_run_analysis_button() -> None:
+    """The DRI page must mirror the HEL Calculator's Run-Analysis
+    workflow (per user feedback 2026-04-26): on first visit the page
+    shows a welcome card; the user adjusts inputs, clicks Run
+    Analysis, and only then is the analysis computed and rendered.
+
+    Detected by the presence of ``BUTTON_LABELS["run_analysis"]`` and
+    a ``_DRI_RUN_LATCH`` session-state guard in the page source."""
     src = (_PAGES_DIR / "dri_analyzer.py").read_text(encoding="utf-8")
-    # The Share / theme-toggle buttons reference BUTTON_LABELS["share"]
-    # and BUTTON_LABELS["theme_toggle_*"], which is fine.
-    assert 'BUTTON_LABELS["run_analysis"]' not in src, (
-        "DRI page should not have a Run Analysis button — the page "
-        "is reactive."
+    assert 'BUTTON_LABELS["run_analysis"]' in src, (
+        "DRI page must include a Run Analysis button — the page is "
+        "compute-on-click, mirroring the HEL Calculator workflow."
     )
+    assert "_DRI_RUN_LATCH" in src, (
+        "DRI page must guard the compute / render block with a "
+        "session-state latch so the first visit shows a welcome card "
+        "rather than auto-rendering results."
+    )
+    assert 'ADVISORY["dri_welcome_body"]' in src, (
+        "DRI page must render a welcome card (using ADVISORY["
+        "'dri_welcome_body']) on first visit before any Run click."
+    )
+
+
+def test_dri_welcome_copy_present() -> None:
+    """The DRI welcome card copy lives in ui.labels.ADVISORY under
+    keys ``dri_welcome_title`` and ``dri_welcome_body``."""
+    from ui.labels import ADVISORY
+    assert "dri_welcome_title" in ADVISORY
+    assert "dri_welcome_body" in ADVISORY
+    assert isinstance(ADVISORY["dri_welcome_title"], str)
+    assert isinstance(ADVISORY["dri_welcome_body"], str)
+    assert len(ADVISORY["dri_welcome_body"]) > 30  # non-trivial copy
 
 
 def test_hel_page_uses_collect_hel() -> None:
