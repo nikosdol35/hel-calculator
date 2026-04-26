@@ -712,7 +712,7 @@ header[data-testid="stHeader"] {{
   letter-spacing: 0.01em;
 }}
 .hel-login-attribution {{
-  font-size: 11px; color: var(--fg-tertiary);
+  font-size: 14px; color: var(--fg-secondary);
   text-align: center;
   margin-top: var(--space-8);
   padding-top: var(--space-4);
