@@ -657,22 +657,68 @@ select:focus-visible,
   text-align: center; letter-spacing: 0.01em;
 }}
 
+/* ---- Streamlit chrome suppression -------------------------------------- */
+/* Hide the built-in hamburger / "Made with Streamlit" / "Manage app"
+   floating button. The .streamlit/config.toml toolbarMode=minimal
+   handles most of this at the framework level; these CSS rules are
+   the belt-and-braces backup that catches any chrome the config flag
+   misses (Deploy menu, status indicator, viewer-mode footer badge).
+   The owner toolbar across the top of the page (Share / Star / Edit /
+   GitHub / Deploy) is a Streamlit Cloud platform feature visible only
+   to authenticated owners of the app — it cannot be hidden via app
+   CSS, but it is not visible to the team members the link is shared
+   with anyway. */
+[data-testid="stDeployButton"],
+[data-testid="stStatusWidget"],
+[data-testid="stToolbar"] [data-testid="manage-app-button"],
+[data-testid="stMainMenu"],
+.viewerBadge_link__1S137,
+.viewerBadge_container__1QSob,
+footer[class*="viewerBadge"],
+#MainMenu,
+header [data-testid="stToolbarActions"] {{
+  display: none !important;
+  visibility: hidden !important;
+}}
+/* Some Streamlit builds render a translucent header bar around the
+   toolbar; collapse that to zero so the page content sits flush. */
+header[data-testid="stHeader"] {{
+  background: transparent !important;
+  height: 0 !important;
+}}
+
 /* ---- Login card (full-viewport centered, dark canvas) ------------------ */
 /* The card itself is a centered Streamlit column — styling here tightens
    the wordmark + help-line without wrapping the whole column in custom
    HTML, which would break Streamlit's widget accessibility tree. */
 .hel-login-wordmark {{
   font-family: 'Inter', system-ui, -apple-system, sans-serif;
-  font-size: 24px; font-weight: 600; letter-spacing: -0.01em;
+  font-size: 26px; font-weight: 600; letter-spacing: -0.01em;
   color: var(--fg-primary);
   text-align: center;
-  margin: var(--space-12) 0 var(--space-6) 0;
+  margin: var(--space-12) 0 var(--space-2) 0;
+}}
+.hel-login-tagline {{
+  font-family: 'Inter', system-ui, -apple-system, sans-serif;
+  font-size: 13px; color: var(--fg-secondary);
+  text-align: center;
+  margin: 0 0 var(--space-6) 0;
+  letter-spacing: 0.01em;
 }}
 .hel-login-help {{
   font-size: 12px; color: var(--fg-secondary);
   text-align: center;
   margin-top: var(--space-3);
   letter-spacing: 0.01em;
+}}
+.hel-login-attribution {{
+  font-size: 11px; color: var(--fg-tertiary);
+  text-align: center;
+  margin-top: var(--space-8);
+  padding-top: var(--space-4);
+  border-top: 1px solid var(--border-subtle);
+  letter-spacing: 0.01em;
+  font-style: italic;
 }}
 
 /* ---- Custom scrollbar (WebKit only; Firefox falls back to system) ------ */

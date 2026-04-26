@@ -82,6 +82,44 @@ st.set_page_config(
     layout="wide",
 )
 
+# ---------------------------------------------------------------------------
+# Search-engine indexing: opt out.
+#
+# This is an internal research tool intended for distribution to a small
+# named audience. We do not want the URL / login page surfaced in
+# Google, Bing, archive.org, or other crawlers.
+#
+# Two layers:
+#   1. A meta tag injected via ``st.markdown`` — Streamlit places it
+#      in the body, but the major crawlers honour body-level
+#      ``<meta name="robots">`` for full-page directives.
+#   2. A small ``<script>`` that also clones the meta tag into the
+#      document ``<head>`` at runtime, where SEO heuristics weigh it
+#      most reliably. Belt-and-braces.
+#
+# The auth gate already blocks crawlers from seeing tool content
+# (everything past sign-in), but the URL itself can still appear in
+# search results without these directives.
+# ---------------------------------------------------------------------------
+st.markdown(
+    """
+    <meta name="robots" content="noindex, nofollow, noarchive, nosnippet">
+    <meta name="googlebot" content="noindex, nofollow, noarchive, nosnippet">
+    <meta name="bingbot" content="noindex, nofollow, noarchive, nosnippet">
+    <script>
+      (function () {
+        try {
+          var m = document.createElement('meta');
+          m.name = 'robots';
+          m.content = 'noindex, nofollow, noarchive, nosnippet';
+          document.head.appendChild(m);
+        } catch (e) {}
+      })();
+    </script>
+    """,
+    unsafe_allow_html=True,
+)
+
 _APP_MODE_KEY = "_app_mode"
 _mode_raw = st.session_state.get(_APP_MODE_KEY, "dark")
 app_mode: Literal["dark", "light"] = (

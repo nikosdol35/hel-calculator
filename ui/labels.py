@@ -894,11 +894,21 @@ ADVISORY: dict[str, str] = {
 
 LOGIN_COPY: dict[str, str] = {
     "wordmark":         "HEL Engineering Calculator",
+    "tagline": (
+        "Trade-study modelling for high-energy laser engagements "
+        "and passive-sensor DRI ranges."
+    ),
     "password_label":   "Access code",
-    "password_help":    "Contact owner for access.",
-    # User decision on PR 1 open-items (2026-04-24): minimal help-line copy.
+    "password_help": (
+        "Authorized access only — please contact the owner if you "
+        "need credentials."
+    ),
     "submit":           "Sign in",
     "auth_failure":     "Invalid access code. Try again.",
+    "attribution": (
+        "This model was created by Niko Dulzhikov for research "
+        "purposes only."
+    ),
 }
 
 
