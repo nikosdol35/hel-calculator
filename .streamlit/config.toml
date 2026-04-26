@@ -2,6 +2,22 @@
 headless = true
 
 # -----------------------------------------------------------------------------
+# Client UI chrome. ``toolbarMode = "minimal"`` hides Streamlit's built-in
+# hamburger / "Made with Streamlit" / developer-tools menu so the only
+# things on screen are the app's own surfaces (sidebar nav, content,
+# our footer). Combined with the CSS injected in ui/theme.py this also
+# suppresses the ``Manage app`` floating button at the bottom-right when
+# rendered to non-owner viewers.
+#
+# Note on the Streamlit Cloud OWNER toolbar (Share / Star / Edit /
+# GitHub / Deploy / ⋮): that bar is a Streamlit Cloud platform feature
+# visible only to authenticated owners of the app. It is NOT visible to
+# the team members the link is shared with — they see a clean app.
+# -----------------------------------------------------------------------------
+[client]
+toolbarMode = "minimal"
+
+# -----------------------------------------------------------------------------
 # HEL Calculator theme (SPEC v1.9 / ARCH v1.6, dark-mode primary).
 #
 # Streamlit's built-in [theme] block accepts only a narrow set of keys

@@ -84,6 +84,10 @@ def _render_login_card() -> None:
             f"<div class='hel-login-wordmark'>{LOGIN_COPY['wordmark']}</div>",
             unsafe_allow_html=True,
         )
+        st.markdown(
+            f"<div class='hel-login-tagline'>{LOGIN_COPY['tagline']}</div>",
+            unsafe_allow_html=True,
+        )
 
         with st.form("_login_form", clear_on_submit=False):
             password = st.text_input(
@@ -100,6 +104,10 @@ def _render_login_card() -> None:
 
         st.markdown(
             f"<div class='hel-login-help'>{LOGIN_COPY['password_help']}</div>",
+            unsafe_allow_html=True,
+        )
+        st.markdown(
+            f"<div class='hel-login-attribution'>{LOGIN_COPY['attribution']}</div>",
             unsafe_allow_html=True,
         )
 
