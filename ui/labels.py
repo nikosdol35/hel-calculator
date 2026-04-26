@@ -1078,6 +1078,39 @@ EXPLANATIONS: dict[str, str] = {
         "and green tells you the operational envelope of your system "
         "for the configured target."
     ),
+    "plot_k_3d_intro": (
+        "Same data as the heatmap above, lifted into a 3D surface — "
+        "rotate it to read the gradient. Steep slopes mark regimes where "
+        "a small change in detection range or target velocity flips the "
+        "engagement outcome; flat plateaus mark regimes where the kill "
+        "is robust to those inputs. Useful for spotting the kinematic "
+        "knee where the engagement transitions from comfortably-closed "
+        "to marginal."
+    ),
+    "plot_m_intro_pre": (
+        "Holds the kinematics fixed (your current detection range and "
+        "target velocity) and sweeps the atmosphere instead — visibility "
+        "from heavy fog to crystal clear, turbulence from negligible to "
+        "near-surface desert noon. Same 10-by-10 grid, same cost as the "
+        "operational envelope above (about a minute and a half on first "
+        "click)."
+    ),
+    "plot_m_intro": (
+        "Each cell is one engagement at a different (turbulence Cn², "
+        "visibility V) pair. Strong turbulence broadens the spot and "
+        "starves the bucket; low visibility cuts the on-target power via "
+        "Beer-Lambert extinction. Green-to-red boundaries tell you "
+        "which weather regimes the engagement survives — the white star "
+        "is your current scenario."
+    ),
+    "plot_m_3d_intro": (
+        "Same atmospheric envelope lifted into a 3D surface. Rotate to "
+        "see the ridge where the two extinction mechanisms (turbulence "
+        "spot-broadening vs Beer-Lambert contrast loss) trade off. The "
+        "high-margin plateau shows the weather window the system is "
+        "comfortable in; the cliff edges show where degradation stacks "
+        "up faster than the budget can absorb."
+    ),
     "plot_j_intro": (
         "This chart shows how much of the engagement window was "
         "actually delivering useful damage. The rising curve is the "

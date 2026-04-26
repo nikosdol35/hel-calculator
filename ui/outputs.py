@@ -591,8 +591,14 @@ def render_tab_engagement(
         # Compute-on-click per the user's PR-4-stage decision: the
         # full 10×10 grid is ~100 orchestrator runs (~100 s on first
         # click). Cached at the @st.cache_data layer — subsequent
-        # renders are instant for the same input set.
+        # renders are instant for the same input set. The 3D
+        # companion view is rendered inside the same render-block
+        # (single cache, two figures).
         _render_operational_envelope_plot(result)
+        # Plot M — atmospheric envelope (Cn² × V at fixed kinematics).
+        # Same compute-on-click pattern; orthogonal slice through the
+        # margin field.
+        _render_atmospheric_envelope_plot(result)
     st.plotly_chart(
         plots.plot_g_spot_vs_bucket(sweep, d_aim=d_aim_si),
         use_container_width=True,
@@ -1234,6 +1240,20 @@ def _cached_envelope(frozen_inputs: tuple, n_R: int, n_v: int):
     )
 
 
+@st.cache_data(max_entries=4, show_spinner="Computing atmospheric envelope (~100 orchestrator runs, ~100 s)…")
+def _cached_atmospheric_envelope(frozen_inputs: tuple, n_cn2: int, n_V: int):
+    """Cache wrapper for the atmospheric envelope sweep — same pattern
+    as the kinematic envelope cache. The frozen-inputs tuple is keyed
+    on every input that affects the chain *except* Cn² and V (which
+    are swept per cell)."""
+    from physics.operational_envelope import (
+        compute_atmospheric_envelope,
+    )
+    return compute_atmospheric_envelope(
+        dict(frozen_inputs), n_cn2=n_cn2, n_V=n_V,
+    )
+
+
 def _render_operational_envelope_plot(result: dict) -> None:
     """Render the operational-envelope heatmap behind a Compute-on-
     click button (SPEC v2.0 §8.6 / plan §14 user choice)."""
@@ -1294,6 +1314,86 @@ def _render_operational_envelope_plot(result: dict) -> None:
         f"engagements · {envelope.n_kills} closed with margin · "
         f"{envelope.n_failures} hit a validator boundary"
     )
+
+    # 3D companion view — same EnvelopeGrid, lifted into Z. One cache,
+    # two renders: zero extra orchestrator runs because the data is
+    # the same object.
+    st.plotly_chart(
+        plots.plot_k_operational_envelope_3d(envelope),
+        use_container_width=True,
+        config=PLOTLY_MODEBAR_CONFIG,
+    )
+    explanation(EXPLANATIONS["plot_k_3d_intro"], variant="plot")
+
+
+def _render_atmospheric_envelope_plot(result: dict) -> None:
+    """Render the atmospheric-envelope sweep (Cn² × V → margin) behind
+    its own Compute-on-click button. Companion to the kinematic
+    operational envelope above — same engagement-margin definition,
+    orthogonal slice through the input space.
+    """
+    section_header("Atmospheric envelope")
+    explanation(EXPLANATIONS["plot_m_intro_pre"])
+
+    button_key = "_atmospheric_envelope_compute_clicked"
+    if button_key not in st.session_state:
+        st.session_state[button_key] = False
+
+    col_btn, col_note = st.columns([1, 3])
+    with col_btn:
+        if st.button(
+            "Compute envelope",
+            key="_atmospheric_envelope_compute_btn",
+        ):
+            st.session_state[button_key] = True
+    with col_note:
+        st.caption(
+            "Holds R_detect and v_tgt fixed; sweeps Cn² × visibility on "
+            "a 10 × 10 grid. ~100 seconds on first click; cached "
+            "afterwards."
+        )
+
+    if not st.session_state[button_key]:
+        return
+
+    frozen = _frozen_inputs_for_envelope(result)
+    if frozen is None:
+        st.warning(
+            "Atmospheric envelope cannot be computed — the current "
+            "input set is missing v2.0 trajectory keys."
+        )
+        return
+
+    try:
+        envelope = _cached_atmospheric_envelope(frozen, 10, 10)
+    except Exception as exc:  # pragma: no cover — defensive
+        st.error(
+            f"Atmospheric-envelope compute failed: {exc!s}. Try a "
+            "different scenario or report this as a bug."
+        )
+        return
+
+    from ui import plots
+    from ui.theme import PLOTLY_MODEBAR_CONFIG
+    st.plotly_chart(
+        plots.plot_m_atmospheric_envelope(envelope),
+        use_container_width=True,
+        config=PLOTLY_MODEBAR_CONFIG,
+    )
+    explanation(EXPLANATIONS["plot_m_intro"], variant="plot")
+    st.caption(
+        f"Computed {len(envelope.V_km_axis) * len(envelope.cn2_axis)} "
+        f"engagements · {envelope.n_kills} closed with margin · "
+        f"{envelope.n_failures} hit a validator boundary"
+    )
+
+    # 3D companion — same data, two views.
+    st.plotly_chart(
+        plots.plot_m_atmospheric_envelope_3d(envelope),
+        use_container_width=True,
+        config=PLOTLY_MODEBAR_CONFIG,
+    )
+    explanation(EXPLANATIONS["plot_m_3d_intro"], variant="plot")
 
 
 def _frozen_inputs_for_envelope(result: dict) -> tuple | None:
