@@ -2909,6 +2909,264 @@ def plot_dri_3d_atmospheric_envelope(
     return fig
 
 
+# ---------------------------------------------------------------------------
+# Plot K-3D — Operational envelope as a 3D surface (companion view).
+# Same EnvelopeGrid that feeds the 2D heatmap, lifted into Z. The heatmap
+# is the precision-readout (hover for exact margin); the 3D surface
+# reveals the slope and the saddle where the diffraction-limited ceiling
+# meets the kinematic v_tgt cut-off — features the flat heatmap palette
+# can blur together. Diverging red→amber→green colourscale pinned at
+# margin = 0% to mirror the 2D companion.
+# ---------------------------------------------------------------------------
+def plot_k_operational_envelope_3d(envelope) -> go.Figure:
+    """3D surface of engagement margin (%) over (R_detect × v_tgt).
+
+    Inputs the same ``EnvelopeGrid`` as the 2D heatmap. Cells where
+    the orchestrator failed render as NaN, which Plotly treats as a
+    hole in the surface — visually identical to how the heatmap shows
+    them. Empty / None envelope → always-render frame fallback.
+    """
+    height = PLOT_HEIGHTS["hero"]
+    title = "Operational envelope (3D) — engagement margin vs R_detect × v_tgt"
+    xtitle = "Detection range R_detect (km, log)"
+    ytitle = "Target velocity v_tgt (m/s)"
+    ztitle = "Engagement margin (%)"
+
+    if envelope is None:
+        return _empty_frame(
+            title=title, xtitle=xtitle, ytitle=ytitle,
+            advisory=ADVISORY["infeasible_geometry"], height=height,
+        )
+
+    palette = _active_palette()
+    R_km = [r / 1000.0 for r in envelope.R_detect_axis]
+    v = list(envelope.v_tgt_axis)
+    grid = [list(row) for row in envelope.margin_grid]
+
+    # Same diverging palette as the 2D companion: red below 0%,
+    # amber in the 0..30% caution band, green above. cmid=0 anchors
+    # the zero crossing; the colour interpolation handles the tier
+    # transitions.
+    fig = go.Figure(data=go.Surface(
+        x=R_km,
+        y=v,
+        z=grid,
+        cmin=-100.0,
+        cmid=0.0,
+        cmax=200.0,
+        colorscale=[
+            [0.0, palette["status.error"]],
+            [1.0 / 3.0, palette["status.error"]],
+            [1.0 / 3.0 + 0.001, palette["status.warn"]],
+            [(1.0 / 3.0) + (30.0 / 300.0), palette["status.warn"]],
+            [(1.0 / 3.0) + (30.0 / 300.0) + 0.001, palette["status.ok"]],
+            [1.0, palette["status.ok"]],
+        ],
+        colorbar=dict(
+            title=dict(text="Margin (%)"),
+            tickvals=[-100, 0, 30, 200],
+            ticktext=["−100", "0", "+30", "+200"],
+        ),
+        hovertemplate=(
+            "R_detect %{x:.2f} km · v_tgt %{y:.0f} m/s · "
+            "margin %{z:+.0f}%<extra></extra>"
+        ),
+        contours=dict(
+            z=dict(show=True, usecolormap=True, project=dict(z=True)),
+        ),
+        showscale=True,
+    ))
+
+    fig.update_layout(
+        title=title,
+        height=height,
+        margin=dict(l=10, r=10, t=60, b=10),
+        scene=dict(
+            xaxis=dict(
+                title=dict(text=xtitle), type="log",
+                gridcolor=palette["border.subtle"],
+            ),
+            yaxis=dict(
+                title=dict(text=ytitle),
+                gridcolor=palette["border.subtle"],
+            ),
+            zaxis=dict(
+                title=dict(text=ztitle),
+                gridcolor=palette["border.subtle"],
+            ),
+            camera=dict(eye=dict(x=1.7, y=1.7, z=1.0)),
+            aspectmode="cube",
+            bgcolor=palette["bg.base"],
+        ),
+    )
+    return fig
+
+
+# ---------------------------------------------------------------------------
+# Plot M — Atmospheric envelope (3D + 2D, computed on click).
+# Sweeps Cn² (turbulence) × V (visibility) at fixed R_detect / v_tgt,
+# producing the per-cell engagement margin. Answers "how robust is the
+# kill against weather degradation?" — orthogonal to Plot K which holds
+# atmosphere fixed and varies the kinematics. Same red→amber→green
+# divergent palette.
+# ---------------------------------------------------------------------------
+def plot_m_atmospheric_envelope(envelope) -> go.Figure:
+    """2D heatmap of engagement margin (%) over (Cn² × V).
+
+    Companion to ``plot_m_atmospheric_envelope_3d`` — same data, two
+    views. Inputs an ``AtmosphericEnvelopeGrid`` from
+    ``physics.operational_envelope.compute_atmospheric_envelope``.
+    """
+    height = PLOT_HEIGHTS["hero"]
+    xtitle = "Cn² (m^(−2/3), log)"
+    ytitle = "Visibility V (km, log)"
+    title = "Atmospheric envelope — engagement margin map"
+
+    if envelope is None:
+        return _empty_frame(
+            title=title, xtitle=xtitle, ytitle=ytitle,
+            advisory=ADVISORY["infeasible_geometry"], height=height,
+        )
+
+    palette = _active_palette()
+    cn2 = list(envelope.cn2_axis)
+    V = list(envelope.V_km_axis)
+    grid = [list(row) for row in envelope.margin_grid]
+
+    fig = go.Figure(data=go.Heatmap(
+        x=cn2,
+        y=V,
+        z=grid,
+        zmin=-100.0,
+        zmid=0.0,
+        zmax=200.0,
+        colorscale=[
+            [0.0, palette["status.error"]],
+            [1.0 / 3.0, palette["status.error"]],
+            [1.0 / 3.0 + 0.001, palette["status.warn"]],
+            [(1.0 / 3.0) + (30.0 / 300.0), palette["status.warn"]],
+            [(1.0 / 3.0) + (30.0 / 300.0) + 0.001, palette["status.ok"]],
+            [1.0, palette["status.ok"]],
+        ],
+        hovertemplate=(
+            "Cn² %{x:.1e} · V %{y:.2f} km · margin %{z:+.0f}%<extra></extra>"
+        ),
+        colorbar=dict(
+            title=dict(text="Margin (%)"),
+            tickvals=[-100, 0, 30, 200],
+            ticktext=["−100", "0", "+30", "+200"],
+        ),
+    ))
+
+    if envelope.current_cn2 > 0 and envelope.current_V_km > 0:
+        fig.add_trace(go.Scatter(
+            x=[envelope.current_cn2],
+            y=[envelope.current_V_km],
+            mode="markers+text",
+            text=["You are here"],
+            textposition="top right",
+            marker=dict(
+                size=14, color=palette["fg.primary"],
+                line=dict(color=palette["bg.base"], width=2),
+                symbol="star",
+            ),
+            name="Current scenario",
+            hovertemplate=(
+                "Current scenario · Cn² %{x:.1e} · V %{y:.2f} km<extra></extra>"
+            ),
+            showlegend=False,
+        ))
+
+    fig.update_layout(
+        title=title,
+        height=height,
+        hovermode="closest",
+    )
+    fig.update_xaxes(title_text=xtitle, type="log")
+    fig.update_yaxes(title_text=ytitle, type="log")
+    return fig
+
+
+def plot_m_atmospheric_envelope_3d(envelope) -> go.Figure:
+    """3D surface of engagement margin (%) over (Cn² × V).
+
+    Companion to ``plot_m_atmospheric_envelope`` — same data, lifted
+    into Z. The 3D view reveals the ridge between the turbulence-
+    dominated regime (high Cn², good V → margin falls because the
+    spot broadens) and the contrast-dominated regime (low Cn², poor V
+    → margin falls because Beer-Lambert eats power).
+    """
+    height = PLOT_HEIGHTS["hero"]
+    title = "Atmospheric envelope (3D) — engagement margin vs Cn² × V"
+    xtitle = "Cn² (m^(−2/3), log)"
+    ytitle = "Visibility V (km, log)"
+    ztitle = "Engagement margin (%)"
+
+    if envelope is None:
+        return _empty_frame(
+            title=title, xtitle=xtitle, ytitle=ytitle,
+            advisory=ADVISORY["infeasible_geometry"], height=height,
+        )
+
+    palette = _active_palette()
+    cn2 = list(envelope.cn2_axis)
+    V = list(envelope.V_km_axis)
+    grid = [list(row) for row in envelope.margin_grid]
+
+    fig = go.Figure(data=go.Surface(
+        x=cn2,
+        y=V,
+        z=grid,
+        cmin=-100.0,
+        cmid=0.0,
+        cmax=200.0,
+        colorscale=[
+            [0.0, palette["status.error"]],
+            [1.0 / 3.0, palette["status.error"]],
+            [1.0 / 3.0 + 0.001, palette["status.warn"]],
+            [(1.0 / 3.0) + (30.0 / 300.0), palette["status.warn"]],
+            [(1.0 / 3.0) + (30.0 / 300.0) + 0.001, palette["status.ok"]],
+            [1.0, palette["status.ok"]],
+        ],
+        colorbar=dict(
+            title=dict(text="Margin (%)"),
+            tickvals=[-100, 0, 30, 200],
+            ticktext=["−100", "0", "+30", "+200"],
+        ),
+        hovertemplate=(
+            "Cn² %{x:.1e} · V %{y:.2f} km · margin %{z:+.0f}%<extra></extra>"
+        ),
+        contours=dict(
+            z=dict(show=True, usecolormap=True, project=dict(z=True)),
+        ),
+        showscale=True,
+    ))
+
+    fig.update_layout(
+        title=title,
+        height=height,
+        margin=dict(l=10, r=10, t=60, b=10),
+        scene=dict(
+            xaxis=dict(
+                title=dict(text=xtitle), type="log",
+                gridcolor=palette["border.subtle"],
+            ),
+            yaxis=dict(
+                title=dict(text=ytitle), type="log",
+                gridcolor=palette["border.subtle"],
+            ),
+            zaxis=dict(
+                title=dict(text=ztitle),
+                gridcolor=palette["border.subtle"],
+            ),
+            camera=dict(eye=dict(x=1.7, y=1.7, z=1.0)),
+            aspectmode="cube",
+            bgcolor=palette["bg.base"],
+        ),
+    )
+    return fig
+
+
 __all__ = [
     "plot_a_on_target_performance",
     "plot_b_time_to_burnthrough",
@@ -2928,6 +3186,9 @@ __all__ = [
     "plot_i_outcome_map_vs_R_detect",
     "plot_j_cumulative_energy_diagnostic",
     "plot_k_operational_envelope",
+    "plot_k_operational_envelope_3d",
+    "plot_m_atmospheric_envelope",
+    "plot_m_atmospheric_envelope_3d",
     "plot_overview_dwell_vs_burnthrough",
     "plot_target_temperature_envelope",
     "plot_target_material_comparison",

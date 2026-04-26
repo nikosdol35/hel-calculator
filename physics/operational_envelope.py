@@ -14,6 +14,12 @@ Cost: n_R × n_v orchestrator calls. Default 10×10 = 100 cells, ~100 s
 on the canonical scenario. Caller (Streamlit UI) wraps in
 ``@st.cache_data`` so the heatmap is computed once per session per
 input set.
+
+Companion sweep — ``compute_atmospheric_envelope`` — uses the same
+margin definition but sweeps (Cn² × visibility) at fixed R_detect /
+v_tgt. The two views (kinematic vs atmospheric) are independent
+slices through the same engagement-margin field, plotted as both 2D
+heatmaps and 3D surfaces on the Engagement tab.
 """
 from __future__ import annotations
 
@@ -154,7 +160,117 @@ def compute_operational_envelope(
     )
 
 
+@dataclass(frozen=True)
+class AtmosphericEnvelopeGrid:
+    """The output of ``compute_atmospheric_envelope``.
+
+    Holds the (Cn², V_km) sweep axes plus the per-cell engagement
+    margin in percent (clamped to [-100, +200] for plotting). Cells
+    where the orchestrator failed (validator-rejected, etc.) carry
+    NaN. The current-scenario coordinates indicate the user's
+    "you are here" reference.
+    """
+    cn2_axis: tuple[float, ...]        # m^(−2/3), log-spaced
+    V_km_axis: tuple[float, ...]       # km, log-spaced (vis spans ~0.5..50 km)
+    margin_grid: tuple[tuple[float, ...], ...]   # row=V, col=Cn²; %
+    current_cn2: float
+    current_V_km: float
+    n_kills: int                       # cells with margin >= 0
+    n_failures: int                    # cells where the run raised
+
+
+_LOG_SPAN_CN2_LOW = 1.0e-16
+_LOG_SPAN_CN2_HIGH = 5.0e-13
+_LOG_SPAN_V_LOW_KM = 0.5
+_LOG_SPAN_V_HIGH_KM = 50.0
+
+
+def compute_atmospheric_envelope(
+    base_inputs: dict,
+    n_cn2: int = 10,
+    n_V: int = 10,
+    cn2_low: float = _LOG_SPAN_CN2_LOW,
+    cn2_high: float = _LOG_SPAN_CN2_HIGH,
+    V_low_km: float = _LOG_SPAN_V_LOW_KM,
+    V_high_km: float = _LOG_SPAN_V_HIGH_KM,
+) -> AtmosphericEnvelopeGrid:
+    """Sweep Cn² (log) × V (log) → engagement margin.
+
+    Args:
+      base_inputs: full v2 input dict. Must include ``engagement_geometry``;
+        ``Cn2_value`` and ``V`` are overridden per cell. The
+        orchestrator runs the whole chain per cell — same trajectory
+        loop the kinematic envelope uses, just with different
+        atmosphere inputs.
+      n_cn2, n_V: grid dimensions. Defaults 10×10 → 100 orchestrator
+        runs. Tests pass smaller grids (3×3) so they finish in seconds.
+      cn2_low / cn2_high: log-space bounds on the x-axis (m^(-2/3)).
+      V_low_km / V_high_km: log-space bounds on the y-axis.
+
+    Returns:
+      AtmosphericEnvelopeGrid with the axes and per-cell margin matrix.
+      Cells where the orchestrator raises ValueError carry NaN. The
+      ``current_cn2`` / ``current_V_km`` coordinates are the user's
+      input values for the "you are here" overlay.
+
+    Raises:
+      KeyError: when ``base_inputs`` is missing ``engagement_geometry``
+        — the envelope is a v2-only feature.
+
+    Implementation note: when ``cn2_model == 'HV_5_7'`` the v2 chain
+    derives turbulence from ``Cn2_ground`` rather than ``Cn2_value``.
+    To make the sweep meaningful regardless of the user's mode we
+    flip ``cn2_model`` to ``'constant'`` for every cell — the per-cell
+    ``Cn2_value`` then drives M5 directly and the sweep maps a clean
+    Cn² → margin response.
+    """
+    if "engagement_geometry" not in base_inputs:
+        raise KeyError(
+            "compute_atmospheric_envelope requires v2.0 inputs "
+            "(engagement_geometry must be present)"
+        )
+
+    cn2_axis = _log_space(cn2_low, cn2_high, n_cn2)
+    V_axis = _log_space(V_low_km, V_high_km, n_V)
+
+    grid: list[tuple[float, ...]] = []
+    n_kills = 0
+    n_failures = 0
+    for V_km in V_axis:
+        row: list[float] = []
+        for cn2 in cn2_axis:
+            inputs = {
+                **base_inputs,
+                "V": float(V_km),
+                "Cn2_value": float(cn2),
+                "cn2_model": "constant",   # see docstring note
+            }
+            try:
+                result = run_full_chain(inputs)
+            except Exception:
+                row.append(math.nan)
+                n_failures += 1
+                continue
+            margin = _engagement_margin_pct(result)
+            row.append(margin)
+            if math.isfinite(margin) and margin >= 0:
+                n_kills += 1
+        grid.append(tuple(row))
+
+    return AtmosphericEnvelopeGrid(
+        cn2_axis=cn2_axis,
+        V_km_axis=V_axis,
+        margin_grid=tuple(grid),
+        current_cn2=float(base_inputs.get("Cn2_value", 0.0)),
+        current_V_km=float(base_inputs.get("V", 0.0)),
+        n_kills=n_kills,
+        n_failures=n_failures,
+    )
+
+
 __all__ = [
+    "AtmosphericEnvelopeGrid",
     "EnvelopeGrid",
+    "compute_atmospheric_envelope",
     "compute_operational_envelope",
 ]
