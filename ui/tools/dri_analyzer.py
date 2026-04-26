@@ -1,4 +1,4 @@
-"""DRI Analyzer page (multipage refactor PR 2, 2026-04-26).
+"""DRI Analyzer page (multipage refactor + auth-bypass hotfix).
 
 A standalone passive-sensor analyzer that computes Detection /
 Recognition / Identification ranges via the Johnson criteria. Lives
@@ -21,6 +21,12 @@ Behavioural contract (different from the HEL Calculator):
 Dispatched by ``ui/app.py`` via ``st.navigation``; the entry script
 handles page config, theme, and auth before this script ever runs.
 
+**Auth defense in depth (2026-04-26 hotfix).** This page calls
+``theme.apply()`` and ``require_login()`` at the top, even though
+``ui/app.py`` already does both. The redundancy guards against any
+flow where a request reaches this page without going through
+``app.py``. Both calls are idempotent.
+
 References:
     docs/dri_analyzer_design.md — DRI module contract.
     physics/dri_analyzer.py — pure module; ``compute(inputs) -> dict``.
@@ -35,7 +41,8 @@ from urllib.parse import urlencode
 import streamlit as st
 
 from physics import dri_analyzer
-from ui import outputs, panels, presets
+from ui import outputs, panels, presets, theme
+from ui.auth import require_login
 from ui.labels import (
     BUTTON_LABELS,
     DRI_PRESET_LABELS,
@@ -46,14 +53,22 @@ from ui.labels import (
 
 
 # ---------------------------------------------------------------------------
+# Auth defense in depth + theme re-apply.
+# Idempotent under normal flow (app.py already did both); guards any
+# path that reaches this page without app.py running first.
+# ---------------------------------------------------------------------------
+_APP_MODE_KEY = "_app_mode"
+app_mode = st.session_state.get(_APP_MODE_KEY, "dark")
+theme.apply(app_mode)
+require_login()
+
+
+# ---------------------------------------------------------------------------
 # Provenance — surfaced in the footer strip only.
 # ---------------------------------------------------------------------------
 _SPEC_VERSION = "v1.11"
 _ARCH_VERSION = "v2.0"
 _BUILD_DATE = "2026-04-26"
-
-_APP_MODE_KEY = "_app_mode"
-app_mode = st.session_state.get(_APP_MODE_KEY, "dark")
 
 
 # ---------------------------------------------------------------------------

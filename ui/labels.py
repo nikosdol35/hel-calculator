@@ -86,7 +86,7 @@ TAB_LABELS: dict[str, str] = {
     # the rightmost so it reads as "results, then the receipts behind them."
     "math":           "How it's calculated",
     # Multipage PR 2 (2026-04-26): "dri_analyzer" was here as an
-    # eighth tab; it now lives on its own page (ui/pages/dri_analyzer.py)
+    # eighth tab; it now lives on its own page (ui/tools/dri_analyzer.py)
     # registered alongside the HEL Calculator via st.navigation.
 }
 

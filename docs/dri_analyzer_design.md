@@ -388,7 +388,7 @@ docs/dri_analyzer_design.md      ← new (PR 4)
 
 ## 9 · UI layout
 
-> **Updated 2026-04-26 (multipage refactor).** The DRI Analyzer was originally specified as one tab inside the HEL Calculator. After three follow-up PRs (multipage PR 1 / 2 / 3) it lives on its own dedicated page under Streamlit's `st.navigation` system at `ui/pages/dri_analyzer.py`. This section reflects the post-multipage layout. The HEL Calculator page (`ui/pages/hel_calculator.py`) carries no DRI inputs at all; the DRI page carries no HEL inputs.
+> **Updated 2026-04-26 (multipage refactor).** The DRI Analyzer was originally specified as one tab inside the HEL Calculator. After three follow-up PRs (multipage PR 1 / 2 / 3) it lives on its own dedicated page under Streamlit's `st.navigation` system at `ui/tools/dri_analyzer.py`. This section reflects the post-multipage layout. The HEL Calculator page (`ui/tools/hel_calculator.py`) carries no DRI inputs at all; the DRI page carries no HEL inputs.
 
 ### 9.1 — DRI page sidebar
 

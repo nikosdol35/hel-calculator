@@ -64,12 +64,15 @@ SCANNED_FILES: tuple[Path, ...] = (
     _UI_DIR / "components.py",
     _UI_DIR / "plots.py",
     _UI_DIR / "presets.py",
-    # Multipage PR 3 (2026-04-26): the page scripts under ui/pages/
-    # render their own sidebar / main-area copy and so go through the
-    # same forbidden-token gate as the rest of the user-visible
-    # surfaces.
-    _UI_DIR / "pages" / "hel_calculator.py",
-    _UI_DIR / "pages" / "dri_analyzer.py",
+    # Multipage PR 3 (2026-04-26) + auth-bypass hotfix: the page
+    # scripts under ui/tools/ render their own sidebar / main-area
+    # copy and so go through the same forbidden-token gate as the
+    # rest of the user-visible surfaces. The directory is named
+    # ``tools/`` rather than ``pages/`` because Streamlit auto-
+    # discovers the latter and would expose the pages without the
+    # auth gate (see test_pages_smoke.test_no_pages_directory_in_ui).
+    _UI_DIR / "tools" / "hel_calculator.py",
+    _UI_DIR / "tools" / "dri_analyzer.py",
     # Math-tab plan PR 1 (docs/math_tab_plan_2026-04-25.md): the
     # glossary holds concept-level definitions and is plain-language
     # copy, so it goes through the same forbidden-token gate as the

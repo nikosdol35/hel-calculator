@@ -115,7 +115,10 @@ hel-calculator/
 ├── ui/                             ← LAYER 3: Streamlit interface (multipage from 2026-04-26)
 │   ├── __init__.py
 │   ├── app.py                      ← Thin entry point: page config + theme + auth + st.navigation
-│   ├── pages/                      ← Per-tool page scripts dispatched by st.navigation
+│   ├── tools/                      ← Per-tool page scripts dispatched by st.navigation
+│   │   │                              (intentionally NOT named ``pages/`` — that name
+│   │   │                              triggers Streamlit's legacy auto-discovery and
+│   │   │                              would expose pages without the auth gate)
 │   │   ├── __init__.py
 │   │   ├── hel_calculator.py       ← HEL Calculator page (six HEL sections, seven HEL tabs)
 │   │   └── dri_analyzer.py         ← DRI Analyzer page (three DRI sections, reactive)
@@ -343,11 +346,11 @@ The one file Streamlit Cloud runs with `streamlit run ui/app.py`. As of the mult
 3. Theme bootstrap via `ui.theme.apply(app_mode)`. The theme module injects the palette CSS, loads the Inter + JetBrains Mono font stack, and registers the shared Plotly template that every figure in `ui/plots.py` consumes. `app_mode` defaults to `'dark'` and is toggled by a per-page sidebar footer control.
 4. Auth gate via `ui.auth.require_login()` — one shared sign-in covers every page exposed by `st.navigation`.
 
-After those four concerns are handled, `app.py` declares the pages and dispatches via Streamlit's native `st.navigation` API. Each page is a self-contained script under `ui/pages/` with its own sidebar, its own state, and its own content area; switching between pages preserves `st.session_state`.
+After those four concerns are handled, `app.py` declares the pages and dispatches via Streamlit's native `st.navigation` API. Each page is a self-contained script under `ui/tools/` with its own sidebar, its own state, and its own content area; switching between pages preserves `st.session_state`.
 
 Two pages today:
-- **`ui/pages/hel_calculator.py`** — the HEL Calculator workflow (six HEL sidebar sections, preset dropdown, Run / Share / Validate buttons, the cached orchestrator chain, the seven-tab results stack). Page-scoped URL decode (`_url_decoded_hel`) reads non-`dri_*` query params; `dri_*` keys are skipped and decoded by the DRI page.
-- **`ui/pages/dri_analyzer.py`** — the DRI Analyzer (three DRI sidebar sections, sensor-preset dropdown, reactive recompute on every input edit, theme toggle). Page-scoped URL decode (`_url_decoded_dri`) reads only `dri_*` keys; share-URL button encodes only the DRI subset.
+- **`ui/tools/hel_calculator.py`** — the HEL Calculator workflow (six HEL sidebar sections, preset dropdown, Run / Share / Validate buttons, the cached orchestrator chain, the seven-tab results stack). Page-scoped URL decode (`_url_decoded_hel`) reads non-`dri_*` query params; `dri_*` keys are skipped and decoded by the DRI page.
+- **`ui/tools/dri_analyzer.py`** — the DRI Analyzer (three DRI sidebar sections, sensor-preset dropdown, reactive recompute on every input edit, theme toggle). Page-scoped URL decode (`_url_decoded_dri`) reads only `dri_*` keys; share-URL button encodes only the DRI subset.
 
 Each page calls only the half of `panels` it needs (`panels.collect_hel` or `panels.collect_dri`), so a HEL-only user sees only HEL inputs and a DRI-only user sees only DRI inputs.
 
