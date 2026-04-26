@@ -2753,12 +2753,170 @@ def plot_dri_heatmap_fov_vs_target(
     return fig
 
 
+def plot_dri_3d_operational_envelope(
+    *,
+    fov_grid_deg: list[float] | None,
+    target_grid_m: list[float] | None,
+    grid_km: list[list[float]] | None,
+) -> go.Figure:
+    """3D surface of Detection range (km) over (FOV × target size).
+
+    Same data the 2D heatmap consumes — lifted into Z. The 2D version
+    is the precision-readout (hover for exact values); this 3D view
+    is the gradient-readout: rotation reveals the curvature, and the
+    ``knee`` where atmospheric extinction caps the geometric Johnson
+    advantage shows up as a plateau the user would otherwise have to
+    infer from a flat colour scale.
+
+    Inputs / cell layout: rows of ``grid_km`` index target sizes;
+    columns index FOVs. None / empty inputs fall back to the always-
+    render frame.
+    """
+    height = PLOT_HEIGHTS["hero"]
+    title = "Operational envelope (3D) — Detection range vs FOV × target size"
+
+    if not fov_grid_deg or not target_grid_m or not grid_km:
+        return _empty_frame(
+            title=title,
+            xtitle="Field of view (deg)",
+            ytitle="Target critical dim (m)",
+            advisory=ADVISORY["infeasible_geometry"], height=height,
+        )
+
+    palette = _active_palette()
+
+    fig = go.Figure(data=go.Surface(
+        x=fov_grid_deg,
+        y=target_grid_m,
+        z=grid_km,
+        cmin=0.0,
+        colorscale=[
+            [0.0, palette["status.error"]],
+            [0.5, palette["status.warn"]],
+            [1.0, palette["status.ok"]],
+        ],
+        colorbar=dict(title=dict(text="R (km)")),
+        hovertemplate=(
+            "FOV %{x:.2f}° · h %{y:.2f} m · R %{z:.1f} km<extra></extra>"
+        ),
+        contours=dict(
+            z=dict(show=True, usecolormap=True, project=dict(z=True)),
+        ),
+        showscale=True,
+    ))
+
+    fig.update_layout(
+        title=title,
+        height=height,
+        margin=dict(l=10, r=10, t=60, b=10),
+        scene=dict(
+            xaxis=dict(
+                title=dict(text="Field of view (deg)"), type="log",
+                gridcolor=palette["border.subtle"],
+            ),
+            yaxis=dict(
+                title=dict(text="Target critical dim (m)"), type="log",
+                gridcolor=palette["border.subtle"],
+            ),
+            zaxis=dict(
+                title=dict(text="Detection range (km)"),
+                rangemode="tozero",
+                gridcolor=palette["border.subtle"],
+            ),
+            camera=dict(eye=dict(x=1.7, y=1.7, z=1.0)),
+            aspectmode="cube",
+            bgcolor=palette["bg.base"],
+        ),
+    )
+    return fig
+
+
+def plot_dri_3d_atmospheric_envelope(
+    *,
+    cn2_grid: list[float] | None,
+    visibility_grid: list[float] | None,
+    grid_km: list[list[float]] | None,
+) -> go.Figure:
+    """3D surface of Detection range (km) over (Cn² × visibility) at
+    fixed FOV / target / band.
+
+    The two extinction mechanisms — Fried-parameter turbulence MTF and
+    Koschmieder visual range — are independent. Strong Cn² with clear
+    visibility is turbulence-limited; weak Cn² with low visibility is
+    contrast-limited; the 3D surface shows their interaction and the
+    ridge where neither dominates.
+
+    ``grid_km`` is a 2D list with rows = visibility samples (Y axis),
+    columns = Cn² samples (X axis), values = R_final in km.
+    None / empty inputs fall back to the always-render frame.
+    """
+    height = PLOT_HEIGHTS["hero"]
+    title = "Atmospheric envelope (3D) — Detection range vs Cn² × visibility"
+
+    if not cn2_grid or not visibility_grid or not grid_km:
+        return _empty_frame(
+            title=title,
+            xtitle="Cn² (m^(−2/3))",
+            ytitle="Visibility (km)",
+            advisory=ADVISORY["infeasible_geometry"], height=height,
+        )
+
+    palette = _active_palette()
+
+    fig = go.Figure(data=go.Surface(
+        x=cn2_grid,
+        y=visibility_grid,
+        z=grid_km,
+        cmin=0.0,
+        colorscale=[
+            [0.0, palette["status.error"]],
+            [0.5, palette["status.warn"]],
+            [1.0, palette["status.ok"]],
+        ],
+        colorbar=dict(title=dict(text="R (km)")),
+        hovertemplate=(
+            "Cn² %{x:.1e} · V %{y:.1f} km · R %{z:.2f} km<extra></extra>"
+        ),
+        contours=dict(
+            z=dict(show=True, usecolormap=True, project=dict(z=True)),
+        ),
+        showscale=True,
+    ))
+
+    fig.update_layout(
+        title=title,
+        height=height,
+        margin=dict(l=10, r=10, t=60, b=10),
+        scene=dict(
+            xaxis=dict(
+                title=dict(text="Cn² (m^(−2/3))"), type="log",
+                gridcolor=palette["border.subtle"],
+            ),
+            yaxis=dict(
+                title=dict(text="Visibility (km)"),
+                gridcolor=palette["border.subtle"],
+            ),
+            zaxis=dict(
+                title=dict(text="Detection range (km)"),
+                rangemode="tozero",
+                gridcolor=palette["border.subtle"],
+            ),
+            camera=dict(eye=dict(x=1.7, y=1.7, z=1.0)),
+            aspectmode="cube",
+            bgcolor=palette["bg.base"],
+        ),
+    )
+    return fig
+
+
 __all__ = [
     "plot_a_on_target_performance",
     "plot_b_time_to_burnthrough",
     "plot_c_beam_diameter_breakdown",
     "plot_c_spot_tightening_through_trajectory",
     "plot_d_blooming_distortion_number",
+    "plot_dri_3d_atmospheric_envelope",
+    "plot_dri_3d_operational_envelope",
     "plot_dri_atmospheric_transmission",
     "plot_dri_distance_vs_cn2",
     "plot_dri_distance_vs_fov",

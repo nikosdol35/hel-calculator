@@ -558,13 +558,45 @@ def heatmap(
     level: str = "Detection",
     **kwargs,
 ) -> list[list[float]]:
-    """2D grid of R_final (m) over (FOV × target size). Used by Plot DRI-7."""
+    """2D grid of R_final (m) over (FOV × target size). Used by Plot
+    DRI-7 (2D heatmap) and Plot DRI-8 (3D surface — same data lifted
+    into Z)."""
     grid: list[list[float]] = []
     for h in target_grid_m:
         row: list[float] = []
         for fov in fov_grid_deg:
             r = dri_range(
                 level=level, h_target=float(h), fov_h_deg=float(fov), **kwargs,
+            )
+            row.append(r["R_final_m"])
+        grid.append(row)
+    return grid
+
+
+def atmospheric_heatmap(
+    *,
+    cn2_grid: list[float],
+    visibility_grid: list[float],
+    level: str = "Detection",
+    **kwargs,
+) -> list[list[float]]:
+    """2D grid of R_final (m) over (Cn² × visibility) at fixed FOV /
+    target / band. Rows iterate over visibility (Y axis); columns
+    iterate over Cn² (X axis). Used by Plot DRI-9 (3D atmospheric
+    envelope surface).
+
+    Visualises where the two atmospheric extinction mechanisms — the
+    Fried-parameter turbulence MTF and the Koschmieder visual range —
+    each dominate. Strong Cn² + clear visibility is turbulence-
+    limited; weak Cn² + low visibility is contrast-limited; the
+    surface shows the interaction.
+    """
+    grid: list[list[float]] = []
+    for V_km in visibility_grid:
+        row: list[float] = []
+        for cn2 in cn2_grid:
+            r = dri_range(
+                level=level, cn2=float(cn2), V_km=float(V_km), **kwargs,
             )
             row.append(r["R_final_m"])
         grid.append(row)
@@ -752,5 +784,6 @@ __all__ = [
     "target_size_sweep",
     "cn2_sweep",
     "heatmap",
+    "atmospheric_heatmap",
     "compute",
 ]

@@ -169,7 +169,7 @@ def run_dri_cn2_sweep_cached(
     )
 
 
-@st.cache_data(max_entries=4, show_spinner="Computing DRI heatmap…")
+@st.cache_data(max_entries=4, show_spinner="Computing operational envelope…")
 def run_dri_heatmap_cached(
     frozen_inputs: tuple,
     fov_grid_deg: tuple,
@@ -177,13 +177,37 @@ def run_dri_heatmap_cached(
     level: str = "Detection",
 ) -> list[list[float]]:
     """Cache wrapper: 2D heatmap over (FOV × target size).
-    20×20 = 400 evaluations; <500 ms typical."""
+    20×20 = 400 evaluations; <500 ms typical. Same data feeds both the
+    2D heatmap (Plot DRI-7) and the 3D operational envelope (Plot
+    DRI-8)."""
     base = dict(frozen_inputs)
     kwargs = _resolve_dri_kwargs(base, level)
     kwargs.pop("h_target")
     return dri_analyzer.heatmap(
         fov_grid_deg=list(fov_grid_deg),
         target_grid_m=list(target_grid_m),
+        level=level,
+        **kwargs,
+    )
+
+
+@st.cache_data(max_entries=4, show_spinner="Computing atmospheric envelope…")
+def run_dri_atmospheric_heatmap_cached(
+    frozen_inputs: tuple,
+    cn2_grid: tuple,
+    visibility_grid: tuple,
+    level: str = "Detection",
+) -> list[list[float]]:
+    """Cache wrapper: 2D heatmap over (Cn² × visibility) at fixed FOV
+    + target. Drives the 3D atmospheric envelope plot (Plot DRI-9).
+    15×15 = 225 evaluations; ~250 ms typical."""
+    base = dict(frozen_inputs)
+    kwargs = _resolve_dri_kwargs(base, level)
+    kwargs.pop("cn2")
+    kwargs.pop("V_km")
+    return dri_analyzer.atmospheric_heatmap(
+        cn2_grid=list(cn2_grid),
+        visibility_grid=list(visibility_grid),
         level=level,
         **kwargs,
     )
@@ -460,6 +484,7 @@ outputs.render_tab_dri_analyzer(
     dri_sweeps=dri_sweeps,
     dri_target_size_sweeps=dri_target_size_sweeps,
     dri_cn2_sweeps=dri_cn2_sweeps,
+    dri_atmospheric_heatmap_runner=run_dri_atmospheric_heatmap_cached,
     dri_frozen=dri_frozen,
     dri_heatmap_runner=run_dri_heatmap_cached,
 )
