@@ -865,6 +865,13 @@ ADVISORY: dict[str, str] = {
         "Analysis when the configuration is ready — every tab populates "
         "together."
     ),
+    "dri_welcome_title": "Ready to run",
+    "dri_welcome_body": (
+        "Pick a Sensor preset in the sidebar to load a reference "
+        "configuration, or adjust the three DRI sections directly. "
+        "Click Run Analysis when the configuration is ready — every "
+        "plot populates together."
+    ),
     "temperature_schematic": (
         "Temperature-vs-time view is a simplified two-point envelope — the "
         "physics solver reports only the ambient baseline and the peak "

@@ -1,15 +1,17 @@
-"""DRI Analyzer page (multipage refactor + auth-bypass hotfix).
+"""DRI Analyzer page (multipage refactor + Run-Analysis pattern).
 
 A standalone passive-sensor analyzer that computes Detection /
 Recognition / Identification ranges via the Johnson criteria. Lives
 on its own page under Streamlit's ``st.navigation`` system; entirely
 independent of the HEL Calculator's laser-emitter chain.
 
-Behavioural contract (different from the HEL Calculator):
-    * **Reactive** — no Run button. The full DRI analysis (compute()
-      + three FOV sweeps + target-size sweep + Cn² sweep) finishes
-      in <100 ms, so we recompute on every sidebar widget change.
-      Streamlit's natural rerun-on-change loop drives the page.
+Behavioural contract:
+    * **Run-Analysis-gated** — first visit shows a welcome card; the
+      user adjusts inputs, clicks Run Analysis, and only then does
+      the page compute and render results. Once Run has been clicked
+      at least once, subsequent edits re-render automatically (the
+      cached sweep helpers make that cheap). Mirrors the HEL
+      Calculator's "compute on click" workflow.
     * **No HEL physics in the sidebar** — only the DRI sensor / DRI
       atmosphere / DRI target sections, plus a sensor-preset dropdown
       and a theme toggle.
@@ -21,11 +23,11 @@ Behavioural contract (different from the HEL Calculator):
 Dispatched by ``ui/app.py`` via ``st.navigation``; the entry script
 handles page config, theme, and auth before this script ever runs.
 
-**Auth defense in depth (2026-04-26 hotfix).** This page calls
-``theme.apply()`` and ``require_login()`` at the top, even though
-``ui/app.py`` already does both. The redundancy guards against any
-flow where a request reaches this page without going through
-``app.py``. Both calls are idempotent.
+**Auth defense in depth.** This page calls ``theme.apply()`` and
+``require_login()`` at the top, even though ``ui/app.py`` already
+does both. The redundancy guards against any flow where a request
+reaches this page without going through ``app.py``. Both calls
+are idempotent.
 
 References:
     docs/dri_analyzer_design.md — DRI module contract.
@@ -35,6 +37,7 @@ References:
 """
 from __future__ import annotations
 
+import time
 from typing import Any
 from urllib.parse import urlencode
 
@@ -43,7 +46,9 @@ import streamlit as st
 from physics import dri_analyzer
 from ui import outputs, panels, presets, theme
 from ui.auth import require_login
+from ui.components import progress_bar
 from ui.labels import (
+    ADVISORY,
     BUTTON_LABELS,
     DRI_PRESET_LABELS,
     DRI_PRESET_PICKER_HELP,
@@ -245,6 +250,42 @@ def _render_footer() -> None:
 
 
 # ---------------------------------------------------------------------------
+# "Last run" indicator + Run-Analysis latch.
+# Mirrors the HEL Calculator's pattern so both pages feel identical:
+# user clicks Run Analysis once, the latch flips on, and subsequent
+# sidebar edits re-render automatically (the cached sweep helpers
+# keep that cheap).
+# ---------------------------------------------------------------------------
+_DRI_RUN_LATCH = "_dri_run_requested"
+_DRI_LAST_RUN_AT = "_dri_last_run_at"
+
+
+def _format_last_run(ts: float | None) -> str:
+    """Short human-readable "time since" label for the last DRI run."""
+    if ts is None:
+        return "not yet run"
+    elapsed = max(0.0, time.time() - ts)
+    if elapsed < 5:
+        return "just now"
+    if elapsed < 60:
+        return f"{int(elapsed)} s ago"
+    if elapsed < 3600:
+        return f"{int(elapsed // 60)} min ago"
+    return f"{int(elapsed // 3600)} h ago"
+
+
+def _render_last_run_indicator() -> None:
+    """Render the "Last run …" caption in the DRI sidebar footer."""
+    ts = st.session_state.get(_DRI_LAST_RUN_AT)
+    fresh = ts is not None and (time.time() - ts) < 5
+    cls = "hel-last-run hel-last-run--fresh" if fresh else "hel-last-run"
+    st.sidebar.markdown(
+        f"<div class='{cls}'>Last run: {_format_last_run(ts)}</div>",
+        unsafe_allow_html=True,
+    )
+
+
+# ---------------------------------------------------------------------------
 # Main body.
 # ---------------------------------------------------------------------------
 _decode_url_params_once()
@@ -254,7 +295,7 @@ st.title("DRI Analyzer")
 st.caption(
     "Detection · Recognition · Identification ranges for a passive "
     "electro-optical sensor. Independent of the HEL Calculator — "
-    "edits here recompute the page instantly."
+    "click Run Analysis to compute the page."
 )
 
 # ---------------------------------------------------------------------------
@@ -290,6 +331,11 @@ user_inputs = panels.collect_dri(initial=prefill or None)
 
 with st.sidebar:
     st.markdown("---")
+    run_clicked = st.button(
+        BUTTON_LABELS["run_analysis"], type="primary",
+        use_container_width=True,
+        key="_dri_run_btn",
+    )
     share_clicked = st.button(
         BUTTON_LABELS["share"],
         use_container_width=True,
@@ -310,7 +356,28 @@ with st.sidebar:
         )
         st.rerun()
 
-    st.caption("DRI updates instantly as you edit.")
+# ---------------------------------------------------------------------------
+# Run-Analysis latch + welcome card.
+# Once the user has clicked Run Analysis even once, subsequent reruns
+# (preset switch, sidebar edit) re-render the outputs automatically —
+# ``@st.cache_data`` on the sweep helpers makes that cheap when inputs
+# haven't changed. Track the "ever-run" latch in session state.
+# ---------------------------------------------------------------------------
+if run_clicked:
+    st.session_state[_DRI_RUN_LATCH] = True
+
+_render_last_run_indicator()
+
+if not st.session_state.get(_DRI_RUN_LATCH):
+    st.markdown(
+        '<div class="hel-welcome-card">'
+        f'<div class="hel-welcome-card__title">{ADVISORY["dri_welcome_title"]}</div>'
+        f'<div class="hel-welcome-card__body">{ADVISORY["dri_welcome_body"]}</div>'
+        "</div>",
+        unsafe_allow_html=True,
+    )
+    _render_footer()
+    st.stop()
 
 # ---------------------------------------------------------------------------
 # Share URL block (DRI-only — encodes only dri_* keys).
@@ -326,14 +393,24 @@ if share_clicked:
     )
 
 # ---------------------------------------------------------------------------
-# DRI compute (always-on; no Run button).
+# Compute-time feedback: thin progress bar above the results.
+# Cached helpers make subsequent re-renders near-instant; on a cold run
+# the bar's sliding animation is briefly visible.
+# ---------------------------------------------------------------------------
+progress_slot = st.empty()
+with progress_slot.container():
+    progress_bar(visible=True)
+
+# ---------------------------------------------------------------------------
+# DRI compute.
 # ---------------------------------------------------------------------------
 try:
     dri_result = dri_analyzer.compute(user_inputs)
 except (KeyError, ValueError) as exc:
+    progress_slot.empty()
     st.error(
         f"DRI inputs rejected: {exc}. Adjust the sidebar values and "
-        "the page will recompute automatically."
+        "click Run Analysis again."
     )
     _render_footer()
     st.stop()
@@ -368,6 +445,12 @@ for _level in ("Detection", "Recognition", "Identification"):
 # Merge user_inputs into the result so the renderer can read both the
 # input echoes (dri_nfov_deg, etc.) and the compute outputs.
 merged = {**user_inputs, **dri_result}
+
+# Clear the progress bar — the results below are about to render.
+progress_slot.empty()
+
+# Stamp the "Last run" indicator so the next rerun picks up a fresh age.
+st.session_state[_DRI_LAST_RUN_AT] = time.time()
 
 # ---------------------------------------------------------------------------
 # Render the DRI page content.
