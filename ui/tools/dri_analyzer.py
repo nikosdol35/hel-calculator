@@ -200,7 +200,17 @@ def run_dri_atmospheric_heatmap_cached(
 ) -> list[list[float]]:
     """Cache wrapper: 2D heatmap over (Cn² × visibility) at fixed FOV
     + target. Drives the 3D atmospheric envelope plot (Plot DRI-9).
-    15×15 = 225 evaluations; ~250 ms typical."""
+    15×15 = 225 evaluations; ~250 ms typical.
+
+    The kernel iterates Cn² and V_km per cell, holding FOV at the
+    user's NFOV and target at the user's selected critical dimension —
+    so we must explicitly pass ``fov_h_deg`` (the resolved kwargs
+    drop ``cn2`` and ``V_km`` because they are swept, but
+    ``_resolve_dri_kwargs`` does not include FOV at all — FOV is
+    per-evaluation in every helper). Missing this injection produced
+    a runtime ``TypeError: dri_range() missing 1 required keyword-
+    only argument: 'fov_h_deg'`` on the live deploy.
+    """
     base = dict(frozen_inputs)
     kwargs = _resolve_dri_kwargs(base, level)
     kwargs.pop("cn2")
@@ -209,6 +219,7 @@ def run_dri_atmospheric_heatmap_cached(
         cn2_grid=list(cn2_grid),
         visibility_grid=list(visibility_grid),
         level=level,
+        fov_h_deg=float(base["dri_nfov_deg"]),
         **kwargs,
     )
 
