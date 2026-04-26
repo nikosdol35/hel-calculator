@@ -1119,6 +1119,30 @@ The **Engagement verdict chip** on the Overview tab uses the same three-tier log
 
 **Plot modebar (curated).** Every plot's `config={...}` dict keeps `zoom2d`, `pan2d`, `zoomIn2d`, `zoomOut2d`, `resetScale2d`, `toImage` and removes `lasso2d`, `select2d`, `toggleSpikelines` (spikes always on), `autoScale2d` (redundant with reset); the Plotly logo is stripped (`displaylogo=False`). The modebar becomes visible on plot-hover only so it doesn't clutter the chart at rest. For plots whose dynamic range is wide (peak intensity vs range, extinction breakdown, transmission vs range), a small `[linear / log]` radio group is rendered **above the plot** (not inside the modebar) so the axis-scale toggle is visibly engineer-legible. PNG export via `toImage` produces a 2× DPI image with the current theme baked in.
 
+#### 5.2.1 Jitter target visualizer (illustrative; introduced 2026-04-26)
+
+A Plotly Frames animation on the Engagement tab, rendered after the Spot & Strehl decomposition section and before the range-sweep plots. Loops continuously. Shows the instantaneous laser spot wandering on the target plane due to beam-pointing jitter, with a persistent fluence heat map (Inferno colormap) underneath. Speed control offers 1×, 0.5×, and 0.2× playback speeds; default 1×.
+
+**Pinned inputs (all from existing §3 chain outputs):**
+- `w_inst = √(w_diff² + w_turb² + w_bloom²)` — instantaneous 1/e² spot radius (M5/M6/M7).
+- `σ_jit · R` — jitter envelope radius (§1.3 + M7).
+- `P_in_bucket = P₀ · η_opt · τ_atm · PIB_fraction` — in-bucket optical power (M7).
+- `d_aim` — bucket diameter (user input).
+- `E_fail = ρ · c_p · thickness · (T_fail − T_amb)` — lumped-mass failure fluence (M8 material tables). May be `None` for materials missing from the lookup; the visualizer renders without the burn-through marker in that case.
+- `tau_BT` — trajectory burn-through time (M8). The burn-through annotation is pinned to this value, NOT to the animation's own pixel-wise peak fluence (the two diverge because M8's PDE integrates against the broader `w_total` while the animation deposits flux at the wandering spot's center). When `tau_BT` is absent or exceeds the 3-second visualization window, no marker is drawn.
+
+**Illustrative parameters (not pinned to a SPEC formula):**
+- `τ_corr = 10 ms` — jitter correlation time, set to typical 100 Hz electromechanical bandwidth.
+- Ornstein-Uhlenbeck random-walk model — gives the visible motion. Stationary RMS pinned to `σ_jit · R`; lag-1 autocorrelation `α = exp(−dt/τ_corr)`. Initial state drawn from the stationary distribution so frame 0 is already in steady state (no warm-up transient).
+- Animation length 3 seconds (looping); `dt = 5 ms`; `n_frames = 600`.
+- Fluence quantized to uint8 (256 levels) with the un-scaled J/cm² maximum stored separately so the colorbar reads in J/cm² — visualization-lossless given Inferno's 256-color resolution.
+
+**Scope:**
+- Visualization only. Does not modify any chain output, including `tau_BT` (M8 already accounts for jitter via the broader `w_total`).
+- The burn-through marker is a per-frame Plotly annotation that fades from full opacity to zero across the 1 s after `tau_BT`; it reappears each loop iteration.
+- Axes are geometrically true. At default `σ_jit = 10 µrad` the wander envelope (~10 mm at R = 1 km) is much smaller than the spot itself (~50 mm), and the visualizer does not auto-scale to make the wander look bigger. A caption nudges the user to increase `σ_jit` for a more dramatic visual.
+- The visualizer's output dict carries `assumptions_flagged: ["jitter_animation_illustrative"]` so users know what's pinned vs modeled.
+
 ### 5.3 UI Behavior Contract
 
 1. **No cached state between sessions, but state is shareable via URL.** Every session starts from the defaults. To share a specific input configuration with a colleague, the user clicks a "Share this analysis" button (in the sidebar) which generates a URL with the current input set encoded as query parameters (via Streamlit's `st.query_params`). Opening that URL recreates the exact input state, allowing reproducible team review. URL length stays well within browser limits because the parameter set is small (~30 numeric/enum values). JSON-file save/load remains a deferred v1.5 feature for users who prefer file-based archival; URL sharing covers the common case.

@@ -524,6 +524,14 @@ def render_tab_engagement(
         "against the turbulence- and blooming-free baseline."
     )
 
+    # --- Jitter target visualizer ------------------------------------------
+    # SPEC §8.7 — Plotly Frames animation showing the laser spot
+    # wandering on the target plane due to jitter, with a persistent
+    # fluence heat map. Loops continuously. Illustrative; consumes
+    # M5/M7/M8 outputs but adds no new physics.
+    if "trajectory_t_pde" in result:
+        _render_jitter_animation(result)
+
     # --- Range-sweep plots --------------------------------------------------
     # Import the plots module and the modebar config locally — keeps the
     # unit-test import surface of ui/outputs.py light (tests that only
@@ -1500,6 +1508,185 @@ def _render_atmospheric_envelope_plot(result: dict) -> None:
         )
         return
     _atmospheric_envelope_fragment(frozen)
+
+
+# ---------------------------------------------------------------------------
+# Jitter target visualizer (SPEC §8.7) — animation showing the laser
+# spot wandering on the target due to beam-pointing jitter, with a
+# persistent fluence heat map. Loops continuously.
+# ---------------------------------------------------------------------------
+
+@st.cache_data(max_entries=4, show_spinner="Building jitter animation…")
+def _cached_jitter_frames(inputs: tuple):
+    """Cache wrapper for the jitter-animation frame generator.
+
+    Inputs tuple is hashable (rounded floats + strings); cached at
+    most 4 entries (~24 MB at uint8 quantization). On a cache miss
+    the generator runs in ~0.5 s on the canonical scenario.
+    """
+    from physics.jitter_animation import generate_jitter_animation
+    kwargs = dict(inputs)
+    return generate_jitter_animation(**kwargs)
+
+
+def _jitter_inputs_tuple(result: dict) -> tuple | None:
+    """Build the cache-key + generator-kwargs tuple from the merged
+    orchestrator result.
+
+    Returns None when any required input is missing or non-numeric
+    (e.g., infeasible-geometry stub before any trajectory has run).
+    Floats are rounded to 6 decimals so floating-point noise on
+    re-renders doesn't miss the cache.
+    """
+    by = result.get("by_module", {})
+    m7 = by.get("m7", {}) if isinstance(by, dict) else {}
+
+    # w_inst = √(w_diff² + w_turb² + w_bloom²) — instantaneous spot
+    # without the jitter contribution.
+    w_diff = m7.get("w_diff")
+    w_turb = m7.get("w_turb")
+    w_bloom = m7.get("w_bloom") or 0.0
+    if w_diff is None or w_turb is None:
+        return None
+    try:
+        w_inst_m = math.sqrt(
+            float(w_diff) ** 2
+            + float(w_turb) ** 2
+            + float(w_bloom) ** 2
+        )
+    except (TypeError, ValueError):
+        return None
+
+    # In-bucket optical power = P0 · η_opt · τ_atm · PIB.
+    P0 = result.get("P0")
+    eta_opt = result.get("eta_opt")
+    tau_atm = m7.get("tau_atm") or by.get("m4", {}).get("tau_atm")
+    PIB = m7.get("PIB_fraction")
+    if any(v is None for v in (P0, eta_opt, tau_atm, PIB)):
+        return None
+    try:
+        P_in_bucket_w = (
+            float(P0) * float(eta_opt) * float(tau_atm) * float(PIB)
+        )
+    except (TypeError, ValueError):
+        return None
+    if P_in_bucket_w <= 0:
+        return None
+
+    # σ_jit and slant range: σ_jit is per-axis radians; we use the
+    # reference range for the visualizer (consistent with how the
+    # rest of the Engagement tab interprets "the spot at this range").
+    sigma_jit_rad = result.get("sigma_jit")
+    R_m = result.get("R_detect") or result.get("R")
+    d_aim_m = result.get("d_aim")
+    if any(v is None for v in (sigma_jit_rad, R_m, d_aim_m)):
+        return None
+
+    # Target silhouette dimensions — fall back to 2.3 m × 2.3 m
+    # (NATO target) when not supplied. Future SPEC extension could
+    # plumb target_w / target_h through the input panel.
+    target_w_m = float(result.get("target_w_m") or 2.3)
+    target_h_m = float(result.get("target_h_m") or 2.3)
+
+    # E_fail (lumped-mass) — same lookup Plot J uses. May be None.
+    material = result.get("material")
+    thickness = result.get("thickness")
+    T_amb = float(result.get("T_ambient", 293.0))
+    E_fail_jpcm2: float | None = None
+    try:
+        from physics.m8_material_tables import MATERIAL_PROPERTIES
+        if material in MATERIAL_PROPERTIES and thickness:
+            props = MATERIAL_PROPERTIES[material]
+            T_fail = props["T_fail"]
+            E_fail_jpm2 = (
+                props["rho"] * props["c_p"]
+                * float(thickness) * (T_fail - T_amb)
+            )
+            E_fail_jpcm2 = E_fail_jpm2 * 1e-4
+    except Exception:
+        E_fail_jpcm2 = None
+
+    tau_BT_s_raw = result.get("tau_BT")
+    tau_BT_s: float | None
+    if tau_BT_s_raw is None:
+        tau_BT_s = None
+    else:
+        try:
+            tau_val = float(tau_BT_s_raw)
+        except (TypeError, ValueError):
+            tau_val = float("nan")
+        tau_BT_s = tau_val if math.isfinite(tau_val) and tau_val > 0 else None
+
+    return tuple(sorted({
+        "w_inst_m": round(float(w_inst_m), 6),
+        "sigma_jit_rad": round(float(sigma_jit_rad), 9),
+        "R_m": round(float(R_m), 3),
+        "d_aim_m": round(float(d_aim_m), 6),
+        "target_w_m": round(target_w_m, 3),
+        "target_h_m": round(target_h_m, 3),
+        "P_in_bucket_w": round(P_in_bucket_w, 3),
+        "E_fail_jpcm2": (
+            round(float(E_fail_jpcm2), 3)
+            if E_fail_jpcm2 is not None else None
+        ),
+        "tau_BT_s": (
+            round(tau_BT_s, 4) if tau_BT_s is not None else None
+        ),
+    }.items()))
+
+
+def _render_jitter_animation(result: dict) -> None:
+    """Render the SPEC §8.7 jitter target visualizer.
+
+    Single-mode (current σ_jit only, per the v3 plan). Loops forever.
+    Speed control 1× / 0.5× / 0.2×. No comparison toggle, no auto-scale.
+    """
+    section_header("Jitter visualizer")
+    explanation(EXPLANATIONS["jitter_animation_intro"])
+
+    inputs = _jitter_inputs_tuple(result)
+    if inputs is None:
+        st.info(
+            "Jitter visualizer not available — required spot / power "
+            "inputs are missing for this scenario."
+        )
+        return
+
+    # Speed control.
+    speed = st.radio(
+        "Playback speed",
+        options=(1.0, 0.5, 0.2),
+        format_func=lambda x: f"{x}×",
+        horizontal=True,
+        index=0,
+        key="_jitter_animation_speed",
+    )
+
+    try:
+        frames = _cached_jitter_frames(inputs)
+    except ValueError as exc:
+        st.warning(f"Jitter visualizer skipped: {exc}")
+        return
+
+    from ui import plots
+    from ui.theme import PLOTLY_MODEBAR_CONFIG
+
+    fig = plots.plot_jitter_target_animation(frames, speed=float(speed))
+    st.plotly_chart(
+        fig, use_container_width=True, config=PLOTLY_MODEBAR_CONFIG,
+    )
+
+    # Honest caption when the wander is geometrically smaller than
+    # the spot itself — common at default σ_jit values.
+    if frames.envelope_radius_m < 0.5 * frames.spot_radius_m:
+        st.caption(
+            f"Tip — at the current σ_jit, the wander envelope "
+            f"({frames.envelope_radius_m * 1000:.1f} mm) is smaller than "
+            f"the spot itself ({frames.spot_radius_m * 1000:.1f} mm), "
+            f"so the visible wander is subtle. Try increasing σ_jit "
+            f"in the Beam director panel (e.g. 50–100 µrad) to see a "
+            f"more pronounced jitter footprint."
+        )
 
 
 def _frozen_inputs_for_envelope(result: dict) -> tuple | None:

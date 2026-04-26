@@ -84,6 +84,7 @@ from __future__ import annotations
 
 import math
 
+import numpy as np
 import plotly.graph_objects as go
 import plotly.io as pio
 from plotly.subplots import make_subplots
@@ -3290,6 +3291,368 @@ def plot_m_atmospheric_envelope_3d(envelope) -> go.Figure:
     return fig
 
 
+# ---------------------------------------------------------------------------
+# Jitter target visualizer (SPEC §8.7) — Plotly Frames animation showing
+# the laser spot wandering on the target plane due to beam-pointing
+# jitter, with a persistent fluence heat map. Illustrative; consumes
+# existing M5/M7/M8 outputs but adds no new physics. The data comes
+# from ``physics/jitter_animation.py`` which precomputes the OU walk,
+# the per-frame fluence grid, and the burn-through marker frame.
+# ---------------------------------------------------------------------------
+
+# Comet-trail length — number of recent frames whose position is shown
+# as a fading dot ahead of (sic, behind) the bright instantaneous spot.
+# 50 × 5 ms = 250 ms of recent history; visually striking without
+# overwhelming the heat map.
+_JITTER_COMET_TRAIL_LEN = 50
+
+
+def plot_jitter_target_animation(
+    frames,
+    speed: float = 1.0,
+) -> go.Figure:
+    """Plotly Frames animation for the SPEC §8.7 jitter visualizer.
+
+    Inputs:
+      - ``frames``: a ``JitterAnimationFrames`` produced by
+        ``physics.jitter_animation.generate_jitter_animation``. Pass
+        ``None`` to render an empty frame with the infeasibility advisory.
+      - ``speed``: playback speed multiplier. Allowed values: 1.0
+        (real-time), 0.5 (half speed), 0.2 (one-fifth speed). The
+        physical dt is fixed at 5 ms; speed sets ``frame.duration``
+        in milliseconds = ``5 / speed``.
+
+    Animation behaviour:
+      - Loops continuously (``mode="immediate"`` + ``loop=True``).
+      - Pause / Play / Reset buttons via Plotly's native updatemenus.
+      - Slider scrubs through frame indices.
+      - Burn-through annotation appears at ``frames.burn_through_frame``
+        and fades out linearly over the next ~1 s.
+
+    Layer z-order (bottom to top):
+      1. Heatmap (fluence, inferno colormap)
+      2. UAV silhouette (gray polyline)
+      3. Aimpoint bucket (dashed circle, d_aim/2 radius)
+      4. Jitter envelope (dashed circle, σ_jit·R radius)
+      5. Comet trail (last 50 spot positions, fading)
+      6. Instantaneous spot (bright filled circle, w_inst radius)
+    """
+    height = PLOT_HEIGHTS["hero"]
+    title = "Jitter visualizer — spot wander on target"
+    xtitle = "x (mm, target frame)"
+    ytitle = "y (mm, target frame)"
+
+    if frames is None or frames.n_frames == 0:
+        return _empty_frame(
+            title=title, xtitle=xtitle, ytitle=ytitle,
+            advisory=ADVISORY["infeasible_geometry"], height=height,
+        )
+
+    palette = _active_palette()
+    extent_mm = tuple(v * 1000.0 for v in frames.extent_m)
+    n = frames.n_frames
+
+    # ── Heatmap colormap: inferno (Plotly built-in). Maps the uint8
+    # quantization back to J/cm² via the stored fluence_max for the
+    # colorbar tick labels.
+    heatmap_x_mm = np.linspace(extent_mm[0], extent_mm[1],
+                               frames.fluence_grids_uint8.shape[2])
+    heatmap_y_mm = np.linspace(extent_mm[2], extent_mm[3],
+                               frames.fluence_grids_uint8.shape[1])
+
+    def _heatmap_trace(grid_uint8: np.ndarray) -> dict:
+        return dict(
+            type="heatmap",
+            x=heatmap_x_mm,
+            y=heatmap_y_mm,
+            z=grid_uint8,
+            zmin=0, zmax=255,
+            colorscale="Inferno",
+            colorbar=dict(
+                title=dict(text="Fluence (J/cm²)"),
+                tickvals=[0, 64, 128, 192, 255],
+                ticktext=[
+                    f"{frames.fluence_max_jpcm2 * v / 255.0:.0f}"
+                    for v in (0, 64, 128, 192, 255)
+                ],
+            ),
+            hovertemplate=(
+                "x %{x:.1f} mm · y %{y:.1f} mm · "
+                "fluence %{z}<extra></extra>"
+            ),
+            zsmooth="best",
+        )
+
+    # ── Static layers (silhouette + bucket + envelope) — same on
+    # every frame; baked into the figure's main `data` list so the
+    # frames don't need to redraw them.
+    silhouette_xy = frames.target_silhouette_xy_m * 1000.0  # m → mm
+    silhouette_trace = dict(
+        type="scatter",
+        x=silhouette_xy[:, 0],
+        y=silhouette_xy[:, 1],
+        mode="lines",
+        line=dict(color=palette["fg.secondary"], width=1.2),
+        hoverinfo="skip",
+        showlegend=False,
+        name="Target",
+    )
+
+    # Bucket and jitter envelope rendered as parametric circles.
+    theta = np.linspace(0.0, 2.0 * math.pi, 80, endpoint=True)
+    bucket_x_mm = frames.bucket_radius_m * 1000.0 * np.cos(theta)
+    bucket_y_mm = frames.bucket_radius_m * 1000.0 * np.sin(theta)
+    envelope_x_mm = frames.envelope_radius_m * 1000.0 * np.cos(theta)
+    envelope_y_mm = frames.envelope_radius_m * 1000.0 * np.sin(theta)
+
+    bucket_trace = dict(
+        type="scatter",
+        x=bucket_x_mm, y=bucket_y_mm,
+        mode="lines",
+        line=dict(color=palette["data.b"], width=1.5, dash="dash"),
+        hoverinfo="skip",
+        showlegend=True,
+        name=f"Bucket (d_aim = {frames.bucket_radius_m * 2 * 1000:.1f} mm)",
+    )
+    envelope_trace = dict(
+        type="scatter",
+        x=envelope_x_mm, y=envelope_y_mm,
+        mode="lines",
+        line=dict(color=palette["data.c"], width=1.5, dash="dot"),
+        hoverinfo="skip",
+        showlegend=True,
+        name=(
+            f"Jitter envelope (σ·R = "
+            f"{frames.envelope_radius_m * 1000:.1f} mm)"
+        ),
+    )
+
+    # ── Per-frame dynamic layers (comet trail + instantaneous spot).
+    spot_theta = np.linspace(0.0, 2.0 * math.pi, 60, endpoint=True)
+    spot_r_mm = frames.spot_radius_m * 1000.0
+    spot_circle_x = spot_r_mm * np.cos(spot_theta)
+    spot_circle_y = spot_r_mm * np.sin(spot_theta)
+    positions_mm = frames.spot_positions_m * 1000.0
+
+    def _comet_trail(i: int) -> dict:
+        """Last ``_JITTER_COMET_TRAIL_LEN`` positions with fading
+        opacity. Plotly doesn't support per-marker opacity for a
+        single trace, so we encode the fade in size: oldest dots are
+        small, newest are large.
+        """
+        start = max(0, i - _JITTER_COMET_TRAIL_LEN + 1)
+        recent = positions_mm[start:i + 1]
+        # Size ramps linearly from 1 at oldest to 6 at newest.
+        n_recent = len(recent)
+        if n_recent == 0:
+            sizes = []
+        else:
+            sizes = list(np.linspace(1.0, 6.0, n_recent))
+        return dict(
+            type="scatter",
+            x=recent[:, 0].tolist() if n_recent else [],
+            y=recent[:, 1].tolist() if n_recent else [],
+            mode="markers",
+            marker=dict(
+                color=palette["data.a"],
+                size=sizes,
+                opacity=0.35,
+            ),
+            hoverinfo="skip",
+            showlegend=False,
+            name="Comet trail",
+        )
+
+    def _spot_circle(i: int) -> dict:
+        """Bright filled circle at the instantaneous spot position.
+        1/e² radius matches w_inst.
+        """
+        cx, cy = positions_mm[i]
+        return dict(
+            type="scatter",
+            x=(cx + spot_circle_x).tolist(),
+            y=(cy + spot_circle_y).tolist(),
+            mode="lines",
+            line=dict(color=palette["data.a"], width=2.0),
+            fill="toself",
+            fillcolor=_hex_to_rgba(palette["data.a"], alpha=0.35),
+            hoverinfo="skip",
+            showlegend=(i == 0),
+            name=f"Spot (w_inst = {spot_r_mm:.1f} mm)",
+        )
+
+    # ── Frame 0: initial visible state.
+    initial_data = [
+        _heatmap_trace(frames.fluence_grids_uint8[0]),
+        silhouette_trace,
+        bucket_trace,
+        envelope_trace,
+        _comet_trail(0),
+        _spot_circle(0),
+    ]
+
+    # ── Per-frame data — only the heatmap, comet, and spot change.
+    # Plotly expects each frame's data list to match the figure's
+    # data list 1-to-1; static traces are still re-emitted unchanged.
+    plotly_frames = []
+    for i in range(n):
+        plotly_frames.append(go.Frame(
+            name=str(i),
+            data=[
+                _heatmap_trace(frames.fluence_grids_uint8[i]),
+                silhouette_trace,
+                bucket_trace,
+                envelope_trace,
+                _comet_trail(i),
+                _spot_circle(i),
+            ],
+        ))
+
+    # ── Per-frame layout annotations carry the burn-through marker.
+    # Plotly's `frames[].layout.annotations` mechanism overrides the
+    # figure-level annotations for the duration of that frame.
+    # ``burn_through_marker_active`` returns (active, opacity) where
+    # opacity decays from 1.0 to 0.0 across the post-marker fade
+    # window. Active=False frames carry an empty annotations list,
+    # which Plotly takes as "no annotations on this frame".
+    for i, frame in enumerate(plotly_frames):
+        from physics.jitter_animation import burn_through_marker_active
+        active, opacity = burn_through_marker_active(
+            i, frames.burn_through_frame,
+        )
+        if active:
+            t_kill = frames.times_s[frames.burn_through_frame]
+            frame.layout = go.Layout(
+                annotations=[
+                    dict(
+                        x=extent_mm[0] + 0.05 * (extent_mm[1] - extent_mm[0]),
+                        y=extent_mm[3] - 0.05 * (extent_mm[3] - extent_mm[2]),
+                        xref="x", yref="y",
+                        text=f"Burn-through at t = {t_kill:.2f} s",
+                        showarrow=False,
+                        font=dict(
+                            color=palette["status.ok"], size=14,
+                        ),
+                        opacity=opacity,
+                        align="left",
+                    ),
+                ],
+            )
+        else:
+            frame.layout = go.Layout(annotations=[])
+
+    # ── Updatemenus and slider.
+    frame_duration_ms = 5.0 / float(speed)   # 1× = 5 ms; 0.2× = 25 ms
+    updatemenus = [
+        dict(
+            type="buttons",
+            direction="left",
+            x=0.0, y=-0.10,
+            xanchor="left", yanchor="top",
+            pad=dict(t=10, l=0),
+            showactive=False,
+            buttons=[
+                dict(
+                    label="Play",
+                    method="animate",
+                    args=[
+                        None,
+                        dict(
+                            frame=dict(
+                                duration=frame_duration_ms,
+                                redraw=True,
+                            ),
+                            fromcurrent=True,
+                            transition=dict(duration=0),
+                            mode="immediate",
+                            loop=True,
+                        ),
+                    ],
+                ),
+                dict(
+                    label="Pause",
+                    method="animate",
+                    args=[
+                        [None],
+                        dict(
+                            frame=dict(duration=0, redraw=False),
+                            mode="immediate",
+                            transition=dict(duration=0),
+                        ),
+                    ],
+                ),
+                dict(
+                    label="Reset",
+                    method="animate",
+                    args=[
+                        ["0"],
+                        dict(
+                            frame=dict(duration=0, redraw=True),
+                            mode="immediate",
+                            transition=dict(duration=0),
+                        ),
+                    ],
+                ),
+            ],
+        ),
+    ]
+
+    # Sub-sample the slider to keep it responsive when n_frames is
+    # large. 1 step every 10 frames is plenty for scrubbing.
+    slider_step = max(1, n // 60)
+    slider_steps = []
+    for i in range(0, n, slider_step):
+        slider_steps.append(dict(
+            label=f"{frames.times_s[i]:.2f} s",
+            method="animate",
+            args=[[str(i)], dict(
+                frame=dict(duration=0, redraw=True),
+                mode="immediate",
+                transition=dict(duration=0),
+            )],
+        ))
+    sliders = [
+        dict(
+            active=0,
+            x=0.10, y=-0.10,
+            xanchor="left", yanchor="top",
+            len=0.85,
+            pad=dict(t=10, b=0),
+            currentvalue=dict(
+                prefix="t = ",
+                font=dict(color=palette["fg.secondary"]),
+            ),
+            steps=slider_steps,
+        ),
+    ]
+
+    # ── Build the figure.
+    fig = go.Figure(data=initial_data, frames=plotly_frames)
+    fig.update_layout(
+        title=title,
+        height=height,
+        showlegend=True,
+        legend=dict(
+            orientation="h", yanchor="bottom", y=1.02,
+            xanchor="right", x=1.0,
+        ),
+        updatemenus=updatemenus,
+        sliders=sliders,
+        margin=dict(l=10, r=10, t=60, b=80),
+    )
+    fig.update_xaxes(
+        title_text=xtitle,
+        range=[extent_mm[0], extent_mm[1]],
+        constrain="domain",
+    )
+    fig.update_yaxes(
+        title_text=ytitle,
+        range=[extent_mm[2], extent_mm[3]],
+        scaleanchor="x", scaleratio=1.0,
+    )
+    return fig
+
+
 __all__ = [
     "plot_a_on_target_performance",
     "plot_b_time_to_burnthrough",
@@ -3308,6 +3671,7 @@ __all__ = [
     "plot_h_engagement_profile",
     "plot_i_outcome_map_vs_R_detect",
     "plot_j_cumulative_energy_diagnostic",
+    "plot_jitter_target_animation",
     "plot_k_operational_envelope",
     "plot_k_operational_envelope_3d",
     "plot_m_atmospheric_envelope",

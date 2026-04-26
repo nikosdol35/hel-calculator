@@ -87,6 +87,7 @@ hel-calculator/
 │   ├── m11_validation.py           ← Self-test runner (invokes pytest)
 │   ├── m_trajectory.py             ← SPEC v2.0 trajectory model (R(t), t_dwell)
 │   ├── operational_envelope.py     ← Plot K helper — 2D operational-envelope sweep
+│   ├── jitter_animation.py         ← SPEC §8.7 helper — Plotly Frames data for the jitter visualizer
 │   ├── dri_analyzer.py             ← DRI Analyzer (passive sensor, independent of HEL chain)
 │   ├── orchestrator.py             ← Chain coordinator (M1→M10, M6↔M7 iter); called by ui/app.py
 │   └── common.py                   ← Shared helpers (unit conversions, validators)
@@ -110,6 +111,8 @@ hel-calculator/
 │   ├── test_dri_analyzer.py             ← DRI physics core (sensor-side analysis)
 │   ├── test_plot_dri_fov_sweep.py       ← DRI FOV-sweep plot smoke + structural
 │   ├── test_plot_dri_optional.py        ← DRI optional plots (target size, atm transmission, Cn², heatmap)
+│   ├── test_jitter_animation.py         ← SPEC §8.7 jitter-visualizer physics tests
+│   ├── test_plot_jitter_animation.py    ← SPEC §8.7 jitter-visualizer plot tests
 │   └── test_pages_smoke.py              ← Multipage refactor smoke + structural invariants
 │
 ├── ui/                             ← LAYER 3: Streamlit interface (multipage from 2026-04-26)

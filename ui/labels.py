@@ -1068,6 +1068,21 @@ EXPLANATIONS: dict[str, str] = {
         "jitter grow fastest, with blooming kicking in once the on-path "
         "power density is high."
     ),
+    "jitter_animation_intro": (
+        "The bright filled circle is where the laser is hitting RIGHT "
+        "NOW. The dashed inner circle is the bucket you're aiming at; "
+        "the dotted outer circle is where the spot is statistically "
+        "expected to wander due to jitter. The Inferno heat map "
+        "underneath shows where energy has actually been deposited — "
+        "watch how the spot paints a wider area than its instantaneous "
+        "footprint, and how that smearing is exactly what makes jitter "
+        "lengthen the burn-through time. The animation loops "
+        "continuously; pause and scrub to study the motion. Spot "
+        "sizes, range, and in-bucket power are pinned to SPEC §3 "
+        "M5/M7; the random-walk model itself is illustrative "
+        "(10 ms correlation time, typical 100 Hz electromechanical "
+        "bandwidth)."
+    ),
     "plot_k_intro_pre": (
         "This is the strategic view of the engagement. For every "
         "combination of detection range (200 m to 12 km) and target "
