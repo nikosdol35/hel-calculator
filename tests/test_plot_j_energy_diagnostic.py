@@ -33,13 +33,18 @@ def _v2_inputs() -> dict:
 
 
 def test_plot_j_smoke():
-    """Plot J renders against a real v2 engagement with a single
-    cumulative-energy curve."""
+    """Plot J renders against a real v2 engagement with the
+    cumulative-energy curve plus the closing-physics overlay
+    (I_avg_aim on a right axis). The overlay was added 2026-04-26
+    so a near-linear cumulative-E line in a brief engagement still
+    visibly carries the closing-physics signal."""
     from ui.plots import plot_j_cumulative_energy_diagnostic
     result = run_full_chain(_v2_inputs())
     fig = plot_j_cumulative_energy_diagnostic(result)
-    assert len(fig.data) == 1
-    assert fig.data[0].name == "Cumulative absorbed energy"
+    assert len(fig.data) == 2
+    names = {trace.name for trace in fig.data}
+    assert "Cumulative absorbed energy" in names
+    assert "I_avg_aim (closing-physics signal)" in names
 
 
 def test_plot_j_cumulative_energy_non_decreasing():
@@ -49,8 +54,13 @@ def test_plot_j_cumulative_energy_non_decreasing():
     from ui.plots import plot_j_cumulative_energy_diagnostic
     result = run_full_chain(_v2_inputs())
     fig = plot_j_cumulative_energy_diagnostic(result)
-    # Trace 0 is the cumulative-energy curve.
-    y_vals = list(fig.data[0].y)
+    # Find the cumulative-energy curve by name (trace order changed
+    # 2026-04-26 with the I_avg overlay addition).
+    cum_traces = [
+        t for t in fig.data if t.name == "Cumulative absorbed energy"
+    ]
+    assert len(cum_traces) == 1
+    y_vals = list(cum_traces[0].y)
     for prev, curr in zip(y_vals, y_vals[1:]):
         assert curr >= prev - 1e-9, (
             f"non-monotone cumulative energy: {prev:.4g} → {curr:.4g}"
@@ -102,8 +112,12 @@ def test_plot_j_no_kill_no_kill_marker():
     result = run_full_chain(inputs)
     assert result["failure_mode"] == "engagement_ended_at_R_min"
     fig = plot_j_cumulative_energy_diagnostic(result)
-    # Curve is still drawn.
-    assert len(fig.data) == 1
+    # Curve + I_avg overlay (added 2026-04-26 to surface the closing-
+    # physics signal even on no-kill engagements).
+    assert len(fig.data) == 2
+    names = {trace.name for trace in fig.data}
+    assert "Cumulative absorbed energy" in names
+    assert "I_avg_aim (closing-physics signal)" in names
     # Without a kill moment, no kill vline or useful-zone vrect.
     # Only the E_fail hline (if material lookup succeeded) remains.
     n_shapes = len(fig.layout.shapes or [])

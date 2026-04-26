@@ -149,6 +149,39 @@ def _x_km(sweep: list[dict]) -> list[float]:
     return [s.get("range", 0.0) / 1000.0 for s in sweep]
 
 
+def _is_v2_sweep(sweep: list[dict] | None) -> bool:
+    """Detect whether a sweep was generated in v2.0 trajectory mode.
+
+    The v2 sweep wrapper varies ``R_detect`` per sample (each cell is
+    a separate full-trajectory engagement starting at that detection
+    range). The v1.x sweep varies the static ``R`` (slant range during
+    the engagement).
+
+    Detection rule: any v2-only output key in the result dict. We use
+    ``trajectory_R`` because it's emitted by the v2 trajectory loop
+    and never by the v1.x path. (User-side keys like
+    ``engagement_geometry`` are NOT echoed by the orchestrator output;
+    only the merged-input dict carries them, and sweep cells are
+    orchestrator-only dicts plus the ``range`` annotation.)
+
+    The x-axis label on the per-range plots (A, B, C, D, E, G) needs
+    to follow the swept variable: "Detection range R_detect (km)"
+    in v2 mode, "Slant range (km)" in v1.x mode.
+    """
+    if not sweep:
+        return False
+    return any("trajectory_R" in s for s in sweep)
+
+
+def _range_axis_title(sweep: list[dict] | None) -> str:
+    """Per-plot x-axis title — swaps to ``Detection range R_detect``
+    for v2.0 sweeps so the label matches the swept quantity. See
+    ``_is_v2_sweep`` for the mode-detection rule."""
+    if _is_v2_sweep(sweep):
+        return "Detection range R_detect (km)"
+    return "Slant range (km)"
+
+
 def _get(sweep: list[dict], key: str, default: float = math.nan) -> list[float]:
     """Pull one key across the sweep, coercing missing entries to a sentinel."""
     return [float(s.get(key, default)) for s in sweep]
@@ -247,9 +280,14 @@ def plot_a_on_target_performance(
     area so the layout slot remains intact.
     """
     height = PLOT_HEIGHTS["hero"]
-    xtitle = "Slant range (km)"
+    xtitle = _range_axis_title(sweep)
     ytitle = "Peak irradiance (W/cm²)"
-    title = "Peak irradiance vs slant range"
+    # Title stays generic ("vs slant range") — the axis label carries
+    # the v2-vs-v1 distinction. Two-source-of-truth → drift risk.
+    title = (
+        "Peak irradiance vs detection range" if _is_v2_sweep(sweep)
+        else "Peak irradiance vs slant range"
+    )
 
     if not sweep:
         return _empty_frame(
@@ -399,9 +437,12 @@ def plot_b_time_to_burnthrough(
     the "no burn-through" advisory instead.
     """
     height = PLOT_HEIGHTS["hero"]
-    xtitle = "Slant range (km)"
+    xtitle = _range_axis_title(sweep)
     ytitle = "Time (s)"
-    title = "Time to burn-through vs slant range"
+    title = (
+        "Time to burn-through vs detection range" if _is_v2_sweep(sweep)
+        else "Time to burn-through vs slant range"
+    )
 
     if not sweep:
         return _empty_frame(
@@ -514,9 +555,12 @@ def plot_c_beam_diameter_breakdown(
     is ``None``/empty.
     """
     height = PLOT_HEIGHTS["hero"]
-    xtitle = "Slant range (km)"
+    xtitle = _range_axis_title(sweep)
     ytitle = "1/e² diameter (cm)"
-    title = "Spot diameter vs slant range"
+    title = (
+        "Spot diameter vs detection range" if _is_v2_sweep(sweep)
+        else "Spot diameter vs slant range"
+    )
 
     if not sweep:
         return _empty_frame(
@@ -1197,9 +1241,16 @@ def plot_atmosphere_transmission_vs_range(
     transmission value is NaN, renders a frame + advisory.
     """
     height = PLOT_HEIGHTS["default"]
-    xtitle = "Slant range (km)"
+    xtitle = _range_axis_title(sweep)
     ytitle = "Atmospheric transmission"
-    title = "Transmission vs slant range"
+    # τ_atm(R) is identical whether you read R as "static slant range"
+    # or "R_detect for an engagement starting there", so the data doesn't
+    # change in v2 mode — only the label switches for consistency with
+    # the other range-sweep plots above.
+    title = (
+        "Transmission vs detection range" if _is_v2_sweep(sweep)
+        else "Transmission vs slant range"
+    )
 
     if not sweep:
         return _empty_frame(
@@ -1277,9 +1328,12 @@ def plot_g_spot_vs_bucket(
     ``sweep`` is None/empty or ``d_aim`` is missing/non-positive.
     """
     height = PLOT_HEIGHTS["default"]
-    xtitle = "Slant range (km)"
+    xtitle = _range_axis_title(sweep)
     ytitle = "1/e² spot diameter (cm)"
-    title = "Spot vs bucket vs slant range"
+    title = (
+        "Spot vs bucket vs detection range" if _is_v2_sweep(sweep)
+        else "Spot vs bucket vs slant range"
+    )
 
     if not sweep or d_aim is None or not (d_aim > 0):
         return _empty_frame(
@@ -1398,9 +1452,12 @@ def plot_d_blooming_distortion_number(
     ``sweep`` is None/empty.
     """
     height = PLOT_HEIGHTS["default"]
-    xtitle = "Slant range (km)"
+    xtitle = _range_axis_title(sweep)
     ytitle = "Thermal-blooming N_D (—)"
-    title = "Blooming distortion number vs slant range"
+    title = (
+        "Blooming distortion number vs detection range" if _is_v2_sweep(sweep)
+        else "Blooming distortion number vs slant range"
+    )
 
     if not sweep:
         return _empty_frame(
@@ -1512,9 +1569,12 @@ def plot_e_engagement_margin_vs_range(
     reads the verdict.
     """
     height = PLOT_HEIGHTS["default"]
-    xtitle = "Slant range (km)"
+    xtitle = _range_axis_title(sweep)
     ytitle = "Engagement margin (%)"
-    title = "Engagement margin vs slant range"
+    title = (
+        "Engagement margin vs detection range" if _is_v2_sweep(sweep)
+        else "Engagement margin vs slant range"
+    )
     Y_FLOOR, Y_CEIL = -100.0, 200.0
 
     if not sweep:
@@ -1866,6 +1926,12 @@ def plot_j_cumulative_energy_diagnostic(
     the kill moment makes visible how much of the engagement window
     was actually doing damaging work.
 
+    A right-axis overlay traces ``I_avg_aim(t)`` over the same window.
+    Over short engagements the cumulative-energy curve looks nearly
+    linear (because I_avg barely grew between t=0 and the kill); the
+    overlay surfaces the (small but non-zero) rise in irradiance and
+    proves the closing physics is engaged.
+
     Falls back to the always-render frame for v1.x results (no
     trajectory series).
     """
@@ -1931,14 +1997,63 @@ def plot_j_cumulative_energy_diagnostic(
             and tau_BT is not None):
         useful_end_t = float(tau_BT)
 
-    fig = go.Figure()
+    # Right-axis overlay: I_avg_aim(t) over the same engagement window.
+    # When the engagement is too brief for cumulative-E to curve
+    # visibly, the I_avg_aim trace still surfaces the rising flux —
+    # proving the closing physics chain is engaged. Sampled on the
+    # trajectory grid (per-range orchestrator outputs), not the PDE
+    # grid, since I_aim_of_t is the trajectory-time interpolant.
+    have_overlay = bool(traj_t and traj_I_avg)
 
-    # Useful-zone shaded background.
+    if have_overlay:
+        fig = make_subplots(specs=[[{"secondary_y": True}]])
+    else:
+        fig = go.Figure()
+
+    # Traces FIRST, shapes second. On a make_subplots figure, add_vrect
+    # / add_hline / add_vline silently no-op until a trace exists to
+    # anchor the axis frame. This was a real foot-gun in the v1 of this
+    # plot — the order is now load-bearing.
+    s0 = _series_style(0, palette)
+    cum_kwargs: dict = dict(
+        x=t_pde, y=E_cum_jpcm2,
+        mode="lines",
+        name="Cumulative absorbed energy",
+        line=dict(**{**s0["line"], "width": 2.5}),
+        hovertemplate=(
+            "t %{x:.2f} s · E %{y:.2g} J/cm²<extra></extra>"
+        ),
+    )
+    if have_overlay:
+        fig.add_trace(go.Scatter(**cum_kwargs), secondary_y=False)
+    else:
+        fig.add_trace(go.Scatter(**cum_kwargs))
+
+    # I_avg_aim(t) overlay (right axis, dashed teal). Convert W/m² to
+    # W/cm² for human-readable values matching the Plot H subplot.
+    if have_overlay:
+        s1 = _series_style(1, palette)
+        traj_I_avg_wpcm2 = [v * 1e-4 for v in traj_I_avg]
+        fig.add_trace(
+            go.Scatter(
+                x=traj_t, y=traj_I_avg_wpcm2,
+                mode="lines",
+                name="I_avg_aim (closing-physics signal)",
+                line=dict(**{**s1["line"], "dash": "dash"}),
+                hovertemplate=(
+                    "t %{x:.2f} s · I_avg %{y:.2g} W/cm²<extra></extra>"
+                ),
+            ),
+            secondary_y=True,
+        )
+
+    # Useful-zone shaded background. With the secondary-y figure mode
+    # active, ``secondary_y=False`` binds the rect to the primary axis.
     if (useful_start_t is not None
             and useful_end_t is not None
             and useful_end_t > useful_start_t):
         ok_rgba = _hex_to_rgba(palette["status.ok"], alpha=0.12)
-        fig.add_vrect(
+        vrect_kwargs: dict = dict(
             x0=useful_start_t, x1=useful_end_t,
             fillcolor=ok_rgba, line_width=0,
             annotation_text=(
@@ -1950,24 +2065,14 @@ def plot_j_cumulative_energy_diagnostic(
             annotation_position="top left",
             annotation_font=dict(color=palette["fg.secondary"], size=10),
         )
+        if have_overlay:
+            vrect_kwargs["secondary_y"] = False
+        fig.add_vrect(**vrect_kwargs)
 
-    # Cumulative absorbed-energy curve.
-    s0 = _series_style(0, palette)
-    fig.add_trace(
-        go.Scatter(
-            x=t_pde, y=E_cum_jpcm2,
-            mode="lines",
-            name="Cumulative absorbed energy",
-            line=dict(**{**s0["line"], "width": 2.5}),
-            hovertemplate=(
-                "t %{x:.2f} s · E %{y:.2g} J/cm²<extra></extra>"
-            ),
-        )
-    )
-
-    # Failure-fluence reference line (lumped-mass).
+    # Failure-fluence reference line (lumped-mass). On the primary
+    # y-axis in J/cm² for the cumulative-energy curve.
     if E_fail_jpcm2 is not None and E_fail_jpcm2 > 0:
-        fig.add_hline(
+        hline_kwargs: dict = dict(
             y=E_fail_jpcm2,
             line=dict(
                 color=palette["status.error"], width=1.5, dash="dash",
@@ -1978,16 +2083,24 @@ def plot_j_cumulative_energy_diagnostic(
             annotation_position="bottom right",
             annotation_font=dict(color=palette["fg.secondary"], size=11),
         )
+        if have_overlay:
+            hline_kwargs["secondary_y"] = False
+        fig.add_hline(**hline_kwargs)
 
-    # Kill-moment vertical marker (when applicable).
+    # Kill-moment vertical marker (when applicable). Spans both
+    # axes; binding to primary keeps the call consistent with the
+    # other shape adds above.
     if useful_end_t is not None:
-        fig.add_vline(
+        vline_kwargs: dict = dict(
             x=useful_end_t,
             line=dict(color=palette["status.ok"], width=1.5, dash="dash"),
             annotation_text=f"Kill at t = {useful_end_t:.2f} s",
             annotation_position="top right",
             annotation_font=dict(color=palette["fg.secondary"], size=11),
         )
+        if have_overlay:
+            vline_kwargs["secondary_y"] = False
+        fig.add_vline(**vline_kwargs)
 
     fig.update_layout(
         title=title,
@@ -1995,16 +2108,24 @@ def plot_j_cumulative_energy_diagnostic(
         hovermode="x unified",
     )
     fig.update_xaxes(title_text=xtitle)
-    fig.update_yaxes(title_text=ytitle)
+    if have_overlay:
+        fig.update_yaxes(title_text=ytitle, secondary_y=False)
+        fig.update_yaxes(
+            title_text="I_avg_aim (W/cm²)",
+            secondary_y=True,
+        )
+    else:
+        fig.update_yaxes(title_text=ytitle)
 
     # Auto-zoom the time axis when the kill happens early in the
-    # engagement window. Same heuristic as Plot H so the two figures
-    # stack cleanly above one another.
+    # engagement window. Same heuristic as Plot H — proportional to
+    # kill_t with a 1 s absolute minimum, so the two figures stack
+    # cleanly above one another and a fast kill stays visible.
     t_axis_max = float(t_pde[-1]) if t_pde else 0.0
     if (useful_end_t is not None
             and t_axis_max > 0
             and useful_end_t < 0.3 * t_axis_max):
-        zoom_to = max(useful_end_t * 1.5, 30.0, useful_end_t + 5.0)
+        zoom_to = max(useful_end_t * 3.0, useful_end_t + 1.0)
         zoom_to = min(zoom_to, t_axis_max)
         fig.update_xaxes(range=[0.0, zoom_to])
     return fig
@@ -2390,17 +2511,19 @@ def plot_h_engagement_profile(result: dict | None) -> go.Figure:
     fig.update_xaxes(title_text="Engagement time (s)", row=4, col=1)
 
     # Auto-zoom the time axis when the kill happens early in the
-    # engagement window. With a fast burn-through (~8 s in a 290 s
-    # window), 97 % of the panel area would otherwise be empty
-    # post-kill trajectory. Show out to 1.5×kill_t (or 30 s,
-    # whichever is larger) so the kill region reads cleanly while
-    # still leaving a margin of post-kill context. When there's no
-    # kill, fall back to the full trajectory window.
+    # engagement window. The previous heuristic used a 30 s absolute
+    # floor, which dominated very-fast-kill scenarios (a 1.13 s kill
+    # in a 90 s dwell would zoom to 30 s, leaving the kill region in
+    # 4 % of the panel — closing-physics signal squashed visually).
+    # New rule: margin scales with kill_t, so the kill always sits at
+    # ~33 % of the panel width regardless of how fast it is. A 1 s
+    # absolute minimum keeps the post-kill annotations breathable.
+    # When there's no kill, fall back to the full trajectory window.
     t_axis_max = max(t_traj[-1] if t_traj else 0.0, t_pde[-1] if t_pde else 0.0)
     if (kill_t is not None
             and t_axis_max > 0
             and kill_t < 0.3 * t_axis_max):
-        zoom_to = max(kill_t * 1.5, 30.0, kill_t + 5.0)
+        zoom_to = max(kill_t * 3.0, kill_t + 1.0)
         zoom_to = min(zoom_to, t_axis_max)
         fig.update_xaxes(range=[0.0, zoom_to])
     return fig
