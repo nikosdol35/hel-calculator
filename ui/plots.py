@@ -3711,6 +3711,163 @@ def plot_jitter_target_animation(
     return fig
 
 
+# ---------------------------------------------------------------------------
+# Plot N — Burn-through time vs Jitter (Engagement tab; SPEC §5.2.2).
+# Shows τ_BT scaling with σ_jit at fixed kinematics. Sweep is the lumped-
+# mass approximation in physics/jitter_sensitivity.py (~ms compute, runs
+# inline). The user's "you are here" star uses the chain's PDE-accurate
+# τ_BT — same number that appears in the headline metrics.
+# ---------------------------------------------------------------------------
+
+def plot_n_jitter_sensitivity(curve) -> go.Figure:
+    """6-layer plot of τ_BT vs σ_jit with regime annotations.
+
+    Layers (bottom to top):
+      1. Greyed-out background spanning the no-kill region.
+      2. Amber band fill where curve > available_dwell.
+      3. Orange τ_BT curve (solid + markers).
+      4. Horizontal dashed teal line at y = available_dwell.
+      5. Vertical dashed line at the kill threshold + annotation.
+      6. White "you are here" star at the user's σ_jit + chain τ_BT.
+
+    None / empty curve → always-render frame fallback.
+    """
+    height = PLOT_HEIGHTS["hero"]
+    title = "Burn-through time vs Jitter"
+    xtitle = "σ_jit (µrad, log)"
+    ytitle = "τ_BT (s, log)"
+
+    if (curve is None
+            or not curve.sigma_jit_axis_urad
+            or not curve.tau_BT_axis_s):
+        return _empty_frame(
+            title=title, xtitle=xtitle, ytitle=ytitle,
+            advisory=ADVISORY["infeasible_geometry"], height=height,
+        )
+
+    palette = _active_palette()
+    sigma = list(curve.sigma_jit_axis_urad)
+    tau = list(curve.tau_BT_axis_s)
+
+    fig = go.Figure()
+
+    # ── Layer 1: greyed-out background for the no-kill region.
+    # Plotly's add_vrect spans full y on a log axis, drawn before the
+    # data traces so the curve renders on top of it.
+    if curve.no_kill_threshold_urad is not None:
+        grey_rgba = _hex_to_rgba(palette["bg.surface"], alpha=0.45)
+        fig.add_vrect(
+            x0=curve.no_kill_threshold_urad,
+            x1=sigma[-1],
+            fillcolor=grey_rgba, line_width=0,
+            annotation_text=(
+                "no-kill region<br>(spot too wide)"
+            ),
+            annotation_position="top right",
+            annotation_font=dict(color=palette["fg.secondary"], size=10),
+            layer="below",
+        )
+
+    # ── Layer 2: amber band where the τ_BT curve exceeds dwell.
+    # Build (x, y) traces tracing the upper edge (curve) and lower
+    # edge (dwell line) of the band, only across cells where curve >
+    # dwell. Plotly fills the closed shape.
+    dwell = curve.available_dwell_s
+    if dwell > 0:
+        band_x: list[float] = []
+        band_curve_y: list[float] = []
+        band_dwell_y: list[float] = []
+        for s, t in zip(sigma, tau):
+            if (not math.isnan(t)) and t > dwell:
+                band_x.append(s)
+                band_curve_y.append(t)
+                band_dwell_y.append(dwell)
+        if band_x:
+            warn_rgba = _hex_to_rgba(palette["status.warn"], alpha=0.18)
+            fig.add_trace(go.Scatter(
+                x=band_x + band_x[::-1],
+                y=band_curve_y + band_dwell_y[::-1],
+                fill="toself",
+                fillcolor=warn_rgba,
+                line=dict(color="rgba(0,0,0,0)"),
+                hoverinfo="skip",
+                name="Engagement infeasible",
+                showlegend=True,
+            ))
+
+    # ── Layer 3: τ_BT curve. Drop NaN cells — Plotly renders gaps.
+    s0 = _series_style(0, palette)
+    fig.add_trace(go.Scatter(
+        x=sigma, y=tau,
+        mode="lines+markers",
+        name="τ_BT (lumped-mass)",
+        line=s0["line"], marker=s0["marker"],
+        connectgaps=False,
+        hovertemplate=(
+            "σ_jit %{x:.2g} µrad · τ_BT %{y:.2f} s<extra></extra>"
+        ),
+    ))
+
+    # ── Layer 4: horizontal dashed teal line at y = available_dwell.
+    if dwell > 0:
+        fig.add_hline(
+            y=dwell,
+            line=dict(
+                color=palette["data.b"], width=1.5, dash="dash",
+            ),
+            annotation_text=f"available_dwell ≈ {dwell:.1f} s",
+            annotation_position="bottom right",
+            annotation_font=dict(color=palette["fg.secondary"], size=11),
+        )
+
+    # ── Layer 5: vertical kill-threshold line + annotation.
+    if curve.kill_threshold_urad is not None:
+        fig.add_vline(
+            x=curve.kill_threshold_urad,
+            line=dict(
+                color=palette["status.error"], width=1.5, dash="dash",
+            ),
+            annotation_text=(
+                f"Kill threshold: σ_jit ≤ "
+                f"{curve.kill_threshold_urad:.0f} µrad"
+            ),
+            annotation_position="top left",
+            annotation_font=dict(color=palette["fg.secondary"], size=11),
+        )
+
+    # ── Layer 6: "you are here" star.
+    if (curve.current_sigma_jit_urad > 0
+            and curve.current_tau_BT_s > 0
+            and not math.isnan(curve.current_tau_BT_s)):
+        fig.add_trace(go.Scatter(
+            x=[curve.current_sigma_jit_urad],
+            y=[curve.current_tau_BT_s],
+            mode="markers+text",
+            text=["Current scenario"],
+            textposition="top right",
+            marker=dict(
+                size=16, color=palette["fg.primary"],
+                line=dict(color=palette["bg.base"], width=2),
+                symbol="star",
+            ),
+            name="You are here",
+            hovertemplate=(
+                "σ_jit %{x:.2g} µrad · τ_BT %{y:.2f} s "
+                "(PDE-accurate)<extra></extra>"
+            ),
+            showlegend=False,
+        ))
+
+    fig.update_layout(
+        title=title,
+        hovermode="x unified",
+    )
+    fig.update_xaxes(title_text=xtitle, type="log")
+    fig.update_yaxes(title_text=ytitle, type="log")
+    _apply_default_layout(fig, height=height)
+    return fig
+
+
 __all__ = [
     "plot_a_on_target_performance",
     "plot_b_time_to_burnthrough",
@@ -3734,6 +3891,7 @@ __all__ = [
     "plot_k_operational_envelope_3d",
     "plot_m_atmospheric_envelope",
     "plot_m_atmospheric_envelope_3d",
+    "plot_n_jitter_sensitivity",
     "plot_overview_dwell_vs_burnthrough",
     "plot_target_temperature_envelope",
     "plot_target_material_comparison",
