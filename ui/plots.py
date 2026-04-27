@@ -3863,7 +3863,60 @@ def plot_n_jitter_sensitivity(curve) -> go.Figure:
         hovermode="x unified",
     )
     fig.update_xaxes(title_text=xtitle, type="log")
-    fig.update_yaxes(title_text=ytitle, type="log")
+
+    # Bound the y-axis range so the τ_BT curve is always readable.
+    # Without this, scenarios with long dwell windows (e.g. slow
+    # target × long range = thousands of seconds) push the dwell
+    # reference line so high that the curve at 2–100 s squashes
+    # into the bottom strip of the plot — invisible. We pick the
+    # range from the curve's actual data; the dwell line clips if
+    # it's outside.
+    finite_tau = [t for t in tau if not math.isnan(t)]
+    if finite_tau:
+        # Pad ±0.5 decades so the curve breathes on the log axis.
+        y_lo = max(min(finite_tau) * 0.3, 1.0e-2)
+        y_hi = max(finite_tau) * 3.0
+        # If the dwell line fits within ~1.5 decades above the curve,
+        # extend the range to include it (so the user sees both).
+        if dwell > 0 and dwell <= y_hi * 5:
+            y_hi = max(y_hi, dwell * 1.3)
+        fig.update_yaxes(
+            title_text=ytitle, type="log",
+            range=[math.log10(y_lo), math.log10(y_hi)],
+        )
+        # If dwell line is far above the displayed curve (e.g. very
+        # long-dwell scenarios), the hline drawn above is off-screen
+        # — add an in-plot annotation so the user still sees the
+        # value. The hline itself is still drawn; if it's outside
+        # the displayed y-range it just doesn't appear.
+        if dwell > y_hi * 2:
+            fig.add_annotation(
+                xref="paper", yref="paper", x=0.99, y=0.92,
+                xanchor="right", yanchor="top",
+                text=(
+                    f"available_dwell = {dwell:.0f} s "
+                    f"(off-chart above)"
+                ),
+                showarrow=False,
+                font=dict(color=palette["fg.secondary"], size=11),
+            )
+    else:
+        # Every cell was NaN — the plot would be empty. Render an
+        # explanatory message so the user knows what happened.
+        fig.update_yaxes(title_text=ytitle, type="log")
+        fig.add_annotation(
+            xref="paper", yref="paper", x=0.5, y=0.5,
+            xanchor="center", yanchor="middle",
+            text=(
+                "Engagement is infeasible at every σ_jit in the swept "
+                "range — the laser cannot deposit enough flux to "
+                "reach burn-through. Increase power or shorten range."
+            ),
+            showarrow=False,
+            font=dict(color=palette["fg.secondary"], size=12),
+            align="center",
+        )
+
     _apply_default_layout(fig, height=height)
     return fig
 
