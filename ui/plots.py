@@ -3491,21 +3491,34 @@ def plot_jitter_target_animation(
         _spot_circle(0),
     ]
 
-    # ── Per-frame data — only the heatmap, comet, and spot change.
-    # Plotly expects each frame's data list to match the figure's
-    # data list 1-to-1; static traces are still re-emitted unchanged.
+    # ── Per-frame data — only the dynamic traces (heatmap, comet,
+    # spot) are re-emitted. The static layers (silhouette, bucket,
+    # envelope) live once at the figure level and are NOT included
+    # in the frames; the ``traces=[...]`` argument tells Plotly which
+    # trace indices to update. Without this dedup, a 600-frame
+    # animation would push ~28 MB of redundant JSON over the
+    # WebSocket and trip Streamlit Cloud's reverse-proxy size limit
+    # (the symptom is a "Failed to process WebSocket message
+    # (404)" error and a frozen sidebar / faded plots below).
+    #
+    # Trace index map (matches initial_data ordering above):
+    #   0 = heatmap (dynamic)
+    #   1 = silhouette (static)
+    #   2 = bucket (static)
+    #   3 = envelope (static)
+    #   4 = comet trail (dynamic)
+    #   5 = spot circle (dynamic)
+    DYNAMIC_TRACE_INDICES = [0, 4, 5]
     plotly_frames = []
     for i in range(n):
         plotly_frames.append(go.Frame(
             name=str(i),
             data=[
                 _heatmap_trace(frames.fluence_grids_uint8[i]),
-                silhouette_trace,
-                bucket_trace,
-                envelope_trace,
                 _comet_trail(i),
                 _spot_circle(i),
             ],
+            traces=DYNAMIC_TRACE_INDICES,
         ))
 
     # ── Per-frame layout annotations carry the burn-through marker.

@@ -524,14 +524,6 @@ def render_tab_engagement(
         "against the turbulence- and blooming-free baseline."
     )
 
-    # --- Jitter target visualizer ------------------------------------------
-    # SPEC §8.7 — Plotly Frames animation showing the laser spot
-    # wandering on the target plane due to jitter, with a persistent
-    # fluence heat map. Loops continuously. Illustrative; consumes
-    # M5/M7/M8 outputs but adds no new physics.
-    if "trajectory_t_pde" in result:
-        _render_jitter_animation(result)
-
     # --- Range-sweep plots --------------------------------------------------
     # Import the plots module and the modebar config locally — keeps the
     # unit-test import surface of ui/outputs.py light (tests that only
@@ -661,6 +653,18 @@ def render_tab_engagement(
         config=PLOTLY_MODEBAR_CONFIG,
     )
     explanation(EXPLANATIONS["plot_d_intro"], variant="plot")
+
+    # --- Jitter target visualizer (last on the tab) ----------------------------
+    # SPEC §5.2.1 — Plotly Frames animation showing the laser spot
+    # wandering on the target plane due to jitter, with a persistent
+    # fluence heat map. Loops continuously. Illustrative; consumes
+    # M5/M7/M8 outputs but adds no new physics. Placed at the end of
+    # the tab because it's a deep-dive diagnostic — users land on the
+    # Engagement tab to see the headline results first (Plot H, the
+    # range-sweep panels, and so on); the visualizer is for users who
+    # want to study how σ_jit shapes the heat distribution.
+    if "trajectory_t_pde" in result:
+        _render_jitter_animation(result)
 
 
 # =============================================================================

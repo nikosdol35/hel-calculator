@@ -192,3 +192,45 @@ def test_plot_none_frames_renders_empty_frame():
     """A None input renders the always-render frame fallback."""
     fig = plot_jitter_target_animation(None)
     assert len(fig.data) == 0
+
+
+def test_plot_frames_only_emit_dynamic_traces():
+    """Each Frame carries only the 3 dynamic traces (heatmap, comet,
+    spot) — NOT all 6. The static layers (silhouette, bucket,
+    envelope) live once at the figure level and Plotly's
+    ``traces=[indices]`` parameter routes the per-frame updates to
+    the right slots.
+
+    Regression guard for the 2026-04-26 fix: re-emitting all 6
+    traces × 600 frames produced a ~28 MB figure that broke
+    Streamlit Cloud's WebSocket reverse-proxy cap.
+    """
+    f = _frames()
+    fig = plot_jitter_target_animation(f)
+    # Every frame has 3 traces (not 6) and the indices map to the
+    # dynamic slots: heatmap (0), comet (4), spot (5).
+    for frame in fig.frames:
+        assert len(frame.data) == 3, (
+            f"frame must carry only dynamic traces, got {len(frame.data)}"
+        )
+        assert tuple(frame.traces) == (0, 4, 5), (
+            f"frame.traces must be (0, 4, 5), got {frame.traces}"
+        )
+
+
+def test_plot_payload_under_4_MB_for_default_canonical_scenario():
+    """The figure JSON must fit under Streamlit Cloud's reverse-proxy
+    cap (~4 MB observed). Regression guard against future re-bloat
+    (e.g., someone re-widens grid_pixels back to 96 or n_frames to
+    600 without remembering the constraint).
+
+    Tests against a fully-populated, default-defaults animation —
+    the worst case for payload size.
+    """
+    f = generate_jitter_animation(**_BASE)   # default n_frames + grid
+    fig = plot_jitter_target_animation(f, speed=1.0)
+    payload_mb = len(fig.to_json()) / (1024 * 1024)
+    assert payload_mb < 4.0, (
+        f"figure JSON payload is {payload_mb:.2f} MB — over the 4 MB "
+        f"WebSocket cap. Reduce n_frames, grid_pixels, or trace count."
+    )

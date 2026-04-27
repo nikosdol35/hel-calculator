@@ -1134,8 +1134,9 @@ A Plotly Frames animation on the Engagement tab, rendered after the Spot & Streh
 **Illustrative parameters (not pinned to a SPEC formula):**
 - `τ_corr = 10 ms` — jitter correlation time, set to typical 100 Hz electromechanical bandwidth.
 - Ornstein-Uhlenbeck random-walk model — gives the visible motion. Stationary RMS pinned to `σ_jit · R`; lag-1 autocorrelation `α = exp(−dt/τ_corr)`. Initial state drawn from the stationary distribution so frame 0 is already in steady state (no warm-up transient).
-- Animation length 3 seconds (looping); `dt = 5 ms`; `n_frames = 600`.
+- Animation length 1.5 seconds (looping); `dt = 5 ms`; `n_frames = 300`; `grid_pixels = 48`. Numbers tuned to keep the Plotly figure JSON under 4 MB so it fits inside Streamlit Cloud's reverse-proxy WebSocket message cap; an earlier 600-frame / 96-grid setup produced ~28 MB payloads that broke the connection.
 - Fluence quantized to uint8 (256 levels) with the un-scaled J/cm² maximum stored separately so the colorbar reads in J/cm² — visualization-lossless given Inferno's 256-color resolution.
+- Frames re-emit only the dynamic traces (heatmap, comet trail, spot circle) via Plotly's `traces=[indices]` parameter. Static layers (target silhouette, bucket circle, jitter envelope) live once at the figure level and never appear in per-frame data.
 
 **Scope:**
 - Visualization only. Does not modify any chain output, including `tau_BT` (M8 already accounts for jitter via the broader `w_total`).
