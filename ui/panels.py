@@ -127,7 +127,7 @@ def section_1_laser_source(initial: dict | None = None) -> dict:
 
 def section_2_beam_director(initial: dict | None = None) -> dict:
     """Beam-director inputs: optical transmission, pointing jitter. Feeds M2 + M7."""
-    with st.sidebar.expander(SECTION_LABELS["beam_director"], expanded=False):
+    with st.sidebar.expander(SECTION_LABELS["beam_director"], expanded=True):
         eta_opt = st.number_input(
             input_label("eta_opt"),
             min_value=0.50, max_value=0.99,
@@ -250,7 +250,7 @@ def section_4_atmosphere(initial: dict | None = None) -> dict:
     defaults) so M5's input validation always sees the full required
     key-set.
     """
-    with st.sidebar.expander(SECTION_LABELS["atmosphere"], expanded=False):
+    with st.sidebar.expander(SECTION_LABELS["atmosphere"], expanded=True):
         V = st.number_input(
             _labelled("V"),
             min_value=0.5, max_value=50.0,
@@ -408,7 +408,7 @@ def section_5_target_aimpoint(initial: dict | None = None) -> dict:
 
 def section_6_system_resources(initial: dict | None = None) -> dict:
     """System-resource inputs: wall-plug, cooling, exposure duration."""
-    with st.sidebar.expander(SECTION_LABELS["system_resources"], expanded=False):
+    with st.sidebar.expander(SECTION_LABELS["system_resources"], expanded=True):
         eta_wallplug = st.number_input(
             input_label("eta_wallplug"),
             min_value=0.05, max_value=0.50,
@@ -468,7 +468,7 @@ def section_7_dri_sensor(initial: dict | None = None) -> dict:
         WAVELENGTH_BANDS,                # cheap to load when DRI is disabled
     )
     _ = WAVELENGTH_BANDS  # imported for downstream sections; see _atmosphere
-    with st.sidebar.expander(SECTION_LABELS["dri_sensor"], expanded=False):
+    with st.sidebar.expander(SECTION_LABELS["dri_sensor"], expanded=True):
         n_pixels_h = st.number_input(
             _labelled("dri_n_pixels_h"),
             min_value=320, max_value=8192,
@@ -535,7 +535,7 @@ def section_8_dri_atmosphere(initial: dict | None = None) -> dict:
     if initial_cn2 not in cn2_options:
         initial_cn2 = cn2_options[3]  # "Moderate" — index 3
 
-    with st.sidebar.expander(SECTION_LABELS["dri_atmosphere"], expanded=False):
+    with st.sidebar.expander(SECTION_LABELS["dri_atmosphere"], expanded=True):
         band = st.selectbox(
             input_label("dri_band"),
             options=band_options,
@@ -600,7 +600,7 @@ def section_9_dri_target(initial: dict | None = None) -> dict:
         "50 %"
     )
 
-    with st.sidebar.expander(SECTION_LABELS["dri_target"], expanded=False):
+    with st.sidebar.expander(SECTION_LABELS["dri_target"], expanded=True):
         target_preset = st.selectbox(
             input_label("dri_target_preset"),
             options=target_options,
