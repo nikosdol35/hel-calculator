@@ -647,6 +647,11 @@ def render_tab_engagement(
     # want to study how σ_jit shapes the heat distribution.
     if "trajectory_t_pde" in result:
         _render_jitter_animation(result)
+        # Plot N — Burn-through time vs Jitter (SPEC §5.2.2). Sits
+        # right under the visualizer at the absolute bottom of the
+        # engagement tab. Renders inline (no Compute button) because
+        # the lumped-mass sweep is sub-second.
+        _render_jitter_sensitivity(result)
 
 
 # =============================================================================
@@ -1724,6 +1729,65 @@ def _render_jitter_animation(result: dict) -> None:
     # Tip-caption (small-wander hint) removed 2026-04-27 per user
     # request. The visualizer's main caption already invites users
     # to bump σ_jit if they want a more dramatic wander.
+
+
+# ---------------------------------------------------------------------------
+# Plot N — Burn-through time vs Jitter (SPEC §5.2.2). Sub-second
+# closed-form sweep using lumped-mass τ_BT (skips M6 + M8 PDE per
+# cell). The user's "you are here" star uses the chain's PDE-accurate
+# τ_BT — same number as the headline metric. Renders inline; no
+# Compute button or background-job machinery needed at this scale.
+# ---------------------------------------------------------------------------
+
+@st.cache_data(max_entries=8, show_spinner=False)
+def _cached_jitter_sensitivity(frozen_inputs: tuple):
+    """Cache wrapper for the jitter-sensitivity sweep. Memoised on
+    the same frozen-inputs tuple as the envelope plots — anything
+    that affects the chain (laser, atmosphere, target, geometry)
+    invalidates the cache; the actual σ_jit value is part of the
+    tuple too, so changing the user's σ_jit invalidates and re-
+    computes (which is correct — the 'you are here' star moves)."""
+    from physics.jitter_sensitivity import compute_jitter_sensitivity
+    return compute_jitter_sensitivity(dict(frozen_inputs))
+
+
+def _render_jitter_sensitivity(result: dict) -> None:
+    """Render Plot N — Burn-through time vs Jitter — at the absolute
+    bottom of the Engagement tab.
+
+    Uses the same `_frozen_inputs_for_envelope` helper as the
+    operational/atmospheric envelopes for the cache key (covers all
+    user inputs that matter to the chain).
+    """
+    section_header("Burn-through time vs Jitter")
+    explanation(EXPLANATIONS["plot_n_intro_pre"])
+
+    frozen = _frozen_inputs_for_envelope(result)
+    if frozen is None:
+        st.info(
+            "Burn-through-vs-jitter plot is not available for this "
+            "scenario — the current input set is missing required "
+            "v2.0 trajectory keys."
+        )
+        return
+
+    try:
+        curve = _cached_jitter_sensitivity(frozen)
+    except KeyError as exc:
+        st.info(f"Burn-through-vs-jitter plot skipped: {exc}")
+        return
+    except Exception as exc:  # pragma: no cover — defensive
+        st.warning(f"Burn-through-vs-jitter compute failed: {exc!s}")
+        return
+
+    from ui import plots
+    from ui.theme import PLOTLY_MODEBAR_CONFIG
+
+    fig = plots.plot_n_jitter_sensitivity(curve)
+    st.plotly_chart(
+        fig, use_container_width=True, config=PLOTLY_MODEBAR_CONFIG,
+    )
+    explanation(EXPLANATIONS["plot_n_intro"], variant="plot")
 
 
 def _frozen_inputs_for_envelope(result: dict) -> tuple | None:

@@ -1053,6 +1053,21 @@ EXPLANATIONS: dict[str, str] = {
         "deposited. Try increasing σ_jit (Beam director panel) to "
         "make the wander obvious."
     ),
+    "plot_n_intro_pre": (
+        "How burn-through time scales with pointing jitter at your "
+        "current detection range. The white star is your scenario; "
+        "the vertical dashed line is the kill threshold; the greyed "
+        "region is where the spot is so wide that the laser can't "
+        "deposit enough flux to reach burn-through regardless of "
+        "dwell."
+    ),
+    "plot_n_intro": (
+        "Approximate scaling — the curve uses a fast lumped-mass "
+        "τ_BT for the sweep, while the white star is your scenario's "
+        "PDE-accurate value (matches the headline τ_BT). Below the "
+        "kill threshold, jitter has negligible impact; above it, "
+        "τ_BT grows rapidly until the engagement stops closing."
+    ),
     "plot_k_intro_pre": (
         "Strategic view: a 6×6 grid that re-runs the full engagement "
         "at every (detection range × target velocity) pair, colour-"
