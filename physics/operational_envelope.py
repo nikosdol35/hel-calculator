@@ -10,10 +10,18 @@ Pure module — no Streamlit imports. The orchestrator handles the
 trajectory loop; this helper only sweeps the inputs and collects
 the per-cell margin.
 
-Cost: n_R × n_v orchestrator calls. Default 10×10 = 100 cells, ~100 s
+Cost: n_R × n_v orchestrator calls. Default 8×8 = 64 cells, ~30–90 s
 on the canonical scenario. Caller (Streamlit UI) wraps in
 ``@st.cache_data`` so the heatmap is computed once per session per
 input set.
+
+**Cancellation contract.** The optional ``cancel_token`` argument
+takes a ``threading.Event``. When set, the cell-loop checks it
+between cells and raises ``concurrent.futures.CancelledError`` —
+freeing the worker slot promptly when the user changes inputs or
+clicks the Cancel button. Without this, ``Future.cancel()`` on a
+running compute returns False (Python can't kill a running thread
+without help) and the orphaned worker keeps eating CPU.
 
 Companion sweep — ``compute_atmospheric_envelope`` — uses the same
 margin definition but sweeps (Cn² × visibility) at fixed R_detect /
@@ -23,7 +31,9 @@ heatmaps and 3D surfaces on the Engagement tab.
 """
 from __future__ import annotations
 
+import concurrent.futures
 import math
+import threading
 from dataclasses import dataclass
 
 from physics.orchestrator import run_full_chain
@@ -101,12 +111,13 @@ def _engagement_margin_pct(result: dict) -> float:
 
 def compute_operational_envelope(
     base_inputs: dict,
-    n_R: int = 10,
-    n_v: int = 10,
+    n_R: int = 8,
+    n_v: int = 8,
     R_low_m: float = _LOG_SPAN_R_LOW_M,
     R_high_m: float = _LOG_SPAN_R_HIGH_M,
     v_low_mps: float = _LIN_SPAN_V_LOW_MPS,
     v_high_mps: float = _LIN_SPAN_V_HIGH_MPS,
+    cancel_token: threading.Event | None = None,
 ) -> EnvelopeGrid:
     """Sweep R_detect (log) × v_tgt (linear) → engagement margin.
 
@@ -114,10 +125,19 @@ def compute_operational_envelope(
       base_inputs: full v2 input dict. Must include ``engagement_geometry``
         (the envelope only makes sense in trajectory mode); ``R_detect``
         and ``v_tgt`` are overridden per cell.
-      n_R, n_v: grid dimensions. Defaults 10×10 → 100 orchestrator
-        runs. Tests pass smaller grids (3×3) so they finish in seconds.
+      n_R, n_v: grid dimensions. Defaults 8×8 → 64 orchestrator runs
+        (was 10×10 = 100; reduced 2026-04-26 because the corner
+        cells dominated total compute time and 64 cells is plenty
+        of resolution for a heatmap). Tests pass smaller grids
+        (3×3) so they finish in seconds.
       R_low_m / R_high_m: log-space bounds on the x-axis.
       v_low_mps / v_high_mps: linear-space bounds on the y-axis.
+      cancel_token: optional ``threading.Event`` checked between
+        cells. When set, the loop raises
+        ``concurrent.futures.CancelledError`` immediately, freeing
+        the worker slot. Without this, an in-flight worker can't
+        be stopped by ``Future.cancel()`` (Python's ThreadPool
+        cancel semantics return False on running tasks).
 
     Returns:
       EnvelopeGrid with the axes and the per-cell margin matrix.
@@ -128,6 +148,8 @@ def compute_operational_envelope(
     Raises:
       KeyError: when ``base_inputs`` is missing ``engagement_geometry``
         — the envelope is a v2-only feature.
+      concurrent.futures.CancelledError: when ``cancel_token`` is set
+        between cells.
     """
     if "engagement_geometry" not in base_inputs:
         raise KeyError(
@@ -142,8 +164,16 @@ def compute_operational_envelope(
     n_kills = 0
     n_failures = 0
     for v in v_axis:
+        if cancel_token is not None and cancel_token.is_set():
+            raise concurrent.futures.CancelledError(
+                "operational-envelope compute cancelled mid-sweep"
+            )
         row: list[float] = []
         for R in R_axis:
+            if cancel_token is not None and cancel_token.is_set():
+                raise concurrent.futures.CancelledError(
+                    "operational-envelope compute cancelled mid-sweep"
+                )
             inputs = {**base_inputs, "R_detect": float(R), "v_tgt": float(v)}
             try:
                 result = run_full_chain(inputs)
@@ -195,12 +225,13 @@ _LOG_SPAN_V_HIGH_KM = 50.0
 
 def compute_atmospheric_envelope(
     base_inputs: dict,
-    n_cn2: int = 10,
-    n_V: int = 10,
+    n_cn2: int = 8,
+    n_V: int = 8,
     cn2_low: float = _LOG_SPAN_CN2_LOW,
     cn2_high: float = _LOG_SPAN_CN2_HIGH,
     V_low_km: float = _LOG_SPAN_V_LOW_KM,
     V_high_km: float = _LOG_SPAN_V_HIGH_KM,
+    cancel_token: threading.Event | None = None,
 ) -> AtmosphericEnvelopeGrid:
     """Sweep Cn² (log) × V (log) → engagement margin.
 
@@ -210,10 +241,14 @@ def compute_atmospheric_envelope(
         orchestrator runs the whole chain per cell — same trajectory
         loop the kinematic envelope uses, just with different
         atmosphere inputs.
-      n_cn2, n_V: grid dimensions. Defaults 10×10 → 100 orchestrator
-        runs. Tests pass smaller grids (3×3) so they finish in seconds.
+      n_cn2, n_V: grid dimensions. Defaults 8×8 → 64 orchestrator
+        runs (was 10×10; reduced 2026-04-26 to match the kinematic
+        envelope and keep typical compute under ~90 s). Tests pass
+        smaller grids (3×3) so they finish in seconds.
       cn2_low / cn2_high: log-space bounds on the x-axis (m^(-2/3)).
       V_low_km / V_high_km: log-space bounds on the y-axis.
+      cancel_token: optional ``threading.Event`` checked between
+        cells; same contract as ``compute_operational_envelope``.
 
     Returns:
       AtmosphericEnvelopeGrid with the axes and per-cell margin matrix.
@@ -224,6 +259,8 @@ def compute_atmospheric_envelope(
     Raises:
       KeyError: when ``base_inputs`` is missing ``engagement_geometry``
         — the envelope is a v2-only feature.
+      concurrent.futures.CancelledError: when ``cancel_token`` is set
+        between cells.
 
     Implementation note: when ``cn2_model == 'HV_5_7'`` the v2 chain
     derives turbulence from ``Cn2_ground`` rather than ``Cn2_value``.
@@ -245,8 +282,16 @@ def compute_atmospheric_envelope(
     n_kills = 0
     n_failures = 0
     for V_km in V_axis:
+        if cancel_token is not None and cancel_token.is_set():
+            raise concurrent.futures.CancelledError(
+                "atmospheric-envelope compute cancelled mid-sweep"
+            )
         row: list[float] = []
         for cn2 in cn2_axis:
+            if cancel_token is not None and cancel_token.is_set():
+                raise concurrent.futures.CancelledError(
+                    "atmospheric-envelope compute cancelled mid-sweep"
+                )
             inputs = {
                 **base_inputs,
                 "V": float(V_km),

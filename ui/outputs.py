@@ -1265,6 +1265,13 @@ _ENV_RESULT_KEY = "_envelope_result"
 _ENV_INPUTS_KEY = "_envelope_inputs"
 _ENV_START_KEY = "_envelope_start_at"
 _ENV_ERROR_KEY = "_envelope_error"
+# threading.Event paired with each future. When the user changes
+# inputs or hits Cancel, we ``set()`` the event so the worker stops
+# at the next cell-loop boundary and frees its slot in the
+# ThreadPoolExecutor. ``Future.cancel()`` alone is insufficient —
+# Python's ThreadPool can't kill a running task without
+# cooperation from the worker.
+_ENV_CANCEL_TOKEN_KEY = "_envelope_cancel_token"
 
 
 def _envelope_state_machine(
@@ -1303,26 +1310,39 @@ def _envelope_state_machine(
     """
     import time
     import concurrent.futures
+    import threading
 
     job_key = f"{_ENV_JOB_KEY}_{kind}"
     result_key = f"{_ENV_RESULT_KEY}_{kind}"
     inputs_key = f"{_ENV_INPUTS_KEY}_{kind}"
     start_key = f"{_ENV_START_KEY}_{kind}"
     error_key = f"{_ENV_ERROR_KEY}_{kind}"
+    cancel_token_key = f"{_ENV_CANCEL_TOKEN_KEY}_{kind}"
 
     ss = st.session_state
     # Defaults — using setdefault keeps the keys present across reruns,
     # which helps Streamlit's session-state diff stay clean.
-    for k in (job_key, result_key, inputs_key, start_key, error_key):
+    for k in (job_key, result_key, inputs_key, start_key, error_key,
+              cancel_token_key):
         ss.setdefault(k, None)
 
-    # ── Input change → cancel pending job and clear cached result.
+    # ── Input change → set cancel token AND drop our reference to
+    # the old job. Setting the token causes the worker to raise
+    # CancelledError at its next inter-cell check, freeing the slot
+    # in ~1-2 seconds. Without this, the worker keeps running until
+    # all 64 cells finish, eating CPU and a worker slot — symptom
+    # the user sees as "everything was stuck again" when they
+    # tweaked a sidebar input.
     if ss[inputs_key] != frozen:
         ss[inputs_key] = frozen
         old_job = ss[job_key]
+        old_token: threading.Event | None = ss[cancel_token_key]
         if old_job is not None and not old_job.done():
-            old_job.cancel()
+            old_job.cancel()  # polite first
+            if old_token is not None:
+                old_token.set()  # cooperative second
         ss[job_key] = None
+        ss[cancel_token_key] = None
         ss[result_key] = None
         ss[error_key] = None
         ss[start_key] = None
@@ -1408,15 +1428,21 @@ def _envelope_state_machine(
         if job is not None and not job.done():
             elapsed = max(0.0, time.time() - (ss[start_key] or time.time()))
             st.info(
-                f"⏳ Computing in the background — {elapsed:.0f} s "
-                f"elapsed of an estimated 1–2 minutes for {n_cells} "
+                f"Computing in the background — {elapsed:.0f} s "
+                f"elapsed of an estimated 30–90 s for {n_cells} "
                 f"engagements. You can keep using other plots and "
                 f"tabs while this runs; the section will refresh "
                 f"automatically when the result is ready."
             )
             if st.button("Cancel", key=f"_envelope_cancel_{kind}"):
+                # Set the cancel token so the worker stops at the
+                # next cell boundary and frees its executor slot.
+                cancel_token: threading.Event | None = ss[cancel_token_key]
+                if cancel_token is not None:
+                    cancel_token.set()
                 job.cancel()
                 ss[job_key] = None
+                ss[cancel_token_key] = None
                 ss[start_key] = None
                 # Natural button-click rerun.
             return
@@ -1425,7 +1451,11 @@ def _envelope_state_machine(
         st.caption(button_caption)
         if st.button("Compute envelope", key=f"_envelope_btn_{kind}"):
             from ui.background_jobs import submit_compute
-            ss[job_key] = submit_compute(compute_fn, dict(frozen))
+            # Create a cancel token, store it alongside the future,
+            # and pass it through to the compute function.
+            cancel_token = threading.Event()
+            ss[cancel_token_key] = cancel_token
+            ss[job_key] = submit_compute(compute_fn, dict(frozen), cancel_token)
             ss[start_key] = time.time()
             ss[error_key] = None
             # Natural button-click rerun — next pass reads the new
@@ -1446,16 +1476,17 @@ def _operational_envelope_fragment(frozen: tuple) -> None:
         intro_2d_key="plot_k_intro",
         intro_3d_key="plot_k_3d_intro",
         button_caption=(
-            "Computes a 10 × 10 (R_detect × v_tgt) grid of "
-            "engagement outcomes. Runs in the background — you can "
-            "keep using other tabs and plots while it computes."
+            "Computes an 8 × 8 (R_detect × v_tgt) grid of "
+            "engagement outcomes (64 full-trajectory runs). Runs in "
+            "the background — you can keep using other tabs and "
+            "plots while it computes."
         ),
-        compute_fn=lambda inputs: compute_operational_envelope(
-            inputs, n_R=10, n_v=10,
+        compute_fn=lambda inputs, cancel_token: compute_operational_envelope(
+            inputs, n_R=8, n_v=8, cancel_token=cancel_token,
         ),
         plot_2d_fn=plots.plot_k_operational_envelope,
         plot_3d_fn=plots.plot_k_operational_envelope_3d,
-        n_cells=100,
+        n_cells=64,
     )
 
 
@@ -1473,15 +1504,16 @@ def _atmospheric_envelope_fragment(frozen: tuple) -> None:
         intro_3d_key="plot_m_3d_intro",
         button_caption=(
             "Holds R_detect and v_tgt fixed; sweeps Cn² × visibility "
-            "on a 10 × 10 grid. Runs in the background — you can "
-            "keep using other tabs and plots while it computes."
+            "on an 8 × 8 grid (64 full-trajectory runs). Runs in the "
+            "background — you can keep using other tabs and plots "
+            "while it computes."
         ),
-        compute_fn=lambda inputs: compute_atmospheric_envelope(
-            inputs, n_cn2=10, n_V=10,
+        compute_fn=lambda inputs, cancel_token: compute_atmospheric_envelope(
+            inputs, n_cn2=8, n_V=8, cancel_token=cancel_token,
         ),
         plot_2d_fn=plots.plot_m_atmospheric_envelope,
         plot_3d_fn=plots.plot_m_atmospheric_envelope_3d,
-        n_cells=100,
+        n_cells=64,
     )
 
 
