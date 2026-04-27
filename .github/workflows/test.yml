@@ -30,9 +30,34 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt
       - name: Run SPEC validation + cross-module + properties
+        # Exclude golden (separate job) and e2e (separate job — slow
+        # Streamlit AppTest renders shouldn't gate the physics suite).
         run: |
           pytest tests/ -v --tb=short \
-            --ignore=tests/test_golden.py
+            --ignore=tests/test_golden.py \
+            -m "not e2e"
+
+  e2e:
+    name: End-to-end UI (Streamlit AppTest)
+    runs-on: ubuntu-latest
+    # The e2e tests render the full Streamlit script via AppTest —
+    # ~60-120 s per test on the canonical scenario. They guard
+    # against UI-flow regressions (envelope spinner, run-analysis
+    # budget, auth gate) that the unit tests can't catch.
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+      - name: Run end-to-end Streamlit AppTest suite
+        run: pytest tests/ -v --tb=short -m e2e
 
   golden:
     name: Golden-output regression
