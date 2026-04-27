@@ -3767,48 +3767,52 @@ def plot_n_jitter_sensitivity(curve) -> go.Figure:
     fig = go.Figure()
 
     # ── Layer 1: three safety-zone vrects (green / amber / red) ──
-    # Pattern mirrors plot_e_engagement_margin_vs_range:
-    # _hex_to_rgba(palette["status.*"], alpha=0.12) at "below" layer.
+    # New zone semantics (v3.3):
+    #   green  → τ_BT < 0.5 × dwell      (comfortable margin)
+    #   amber  → 0.5 × dwell ≤ τ_BT < dwell, OR approaching no-kill
+    #   red    → τ_BT ≥ dwell, OR I_avg below useful flux threshold
+    # The amber zone gives the user a "warning" band that's visible
+    # even when the curve doesn't reach dwell before going no-kill.
     ok_rgba = _hex_to_rgba(palette["status.ok"], alpha=0.12)
     warn_rgba = _hex_to_rgba(palette["status.warn"], alpha=0.12)
     err_rgba = _hex_to_rgba(palette["status.error"], alpha=0.12)
 
-    safe_x1 = curve.kill_threshold_urad
-    risky_x1 = curve.no_kill_threshold_urad
+    # Boundary 1 (green→amber): the warning threshold (½ dwell).
+    # If the curve never reaches ½ dwell, there's no warning to show
+    # → green spans all the way to the boundary 2.
+    warning_x = curve.warning_threshold_urad
 
-    # Decide each band's [x0, x1]. Bands with zero width are omitted.
-    if safe_x1 is None and risky_x1 is None:
-        # No kill threshold reached and no no-kill region in the
-        # swept range — entire range is safe.
-        green_x0, green_x1 = x_min, x_max
-        amber_x0 = amber_x1 = None
-        red_x0 = red_x1 = None
-    elif safe_x1 is None and risky_x1 is not None:
-        # Curve never crosses dwell, but I_avg drops below threshold
-        # at some σ_jit (rare combination — implies dwell ≫ τ_BT
-        # floor, but σ_jit can still kill the laser via PIB collapse).
-        # Safe up to no-kill, then infeasible.
-        green_x0, green_x1 = x_min, risky_x1
-        amber_x0 = amber_x1 = None
-        red_x0, red_x1 = risky_x1, x_max
-    elif safe_x1 is not None and risky_x1 is None:
-        # Curve crosses dwell within range, but no-kill never
-        # engages. Safe up to kill, then risky to end.
-        green_x0, green_x1 = x_min, safe_x1
-        amber_x0, amber_x1 = safe_x1, x_max
-        red_x0 = red_x1 = None
+    # Boundary 2 (amber→red): the EFFECTIVE kill threshold = the
+    # smaller of (a) where curve crosses dwell, (b) where I_avg drops
+    # below useful threshold. Whichever comes first stops being
+    # operationally feasible. If neither is set, no red zone.
+    kill_candidates = [
+        v for v in (curve.kill_threshold_urad, curve.no_kill_threshold_urad)
+        if v is not None
+    ]
+    effective_kill_x = min(kill_candidates) if kill_candidates else None
+
+    # Resolve to concrete band x-ranges (None where not applicable).
+    green_x0 = x_min
+    if warning_x is not None:
+        green_x1 = warning_x
+    elif effective_kill_x is not None:
+        green_x1 = effective_kill_x
     else:
-        # Both thresholds present — full three-zone story.
-        # Guard ordering: kill_threshold should be ≤ no_kill_threshold
-        # but if numerically swapped due to interpolation rounding,
-        # collapse the amber band rather than draw inverted.
-        if safe_x1 > risky_x1:
-            safe_x1 = risky_x1
-        green_x0, green_x1 = x_min, safe_x1
-        amber_x0, amber_x1 = safe_x1, risky_x1
-        red_x0, red_x1 = risky_x1, x_max
+        green_x1 = x_max
 
-    # Add the bands. Each gets a top-of-band annotation.
+    amber_x0 = amber_x1 = None
+    if warning_x is not None and effective_kill_x is not None:
+        amber_x0, amber_x1 = warning_x, effective_kill_x
+    elif warning_x is not None and effective_kill_x is None:
+        amber_x0, amber_x1 = warning_x, x_max
+    # else: no warning OR no kill → no amber band
+
+    red_x0 = red_x1 = None
+    if effective_kill_x is not None:
+        red_x0, red_x1 = effective_kill_x, x_max
+
+    # Draw the bands. Each gets a top-of-band annotation.
     if green_x1 > green_x0:
         fig.add_vrect(
             x0=green_x0, x1=green_x1,
@@ -3847,26 +3851,34 @@ def plot_n_jitter_sensitivity(curve) -> go.Figure:
         ),
     ))
 
-    # Y-axis range bookkeeping. We bound y so the curve is always
-    # visible — a long dwell on a slow-target scenario (e.g. 70 s)
-    # would otherwise flatten the curve into the bottom strip.
+    # Y-axis range. The curve is now continuous (v3.3) — it keeps
+    # climbing past dwell into the infeasible region as I_avg drops.
+    # We want the user to see the curve crossing the dwell line,
+    # so cap y at ~1.5 × dwell. Cells past that just exit the top
+    # of the chart (Plotly clips them naturally).
     finite_tau = [t for t in tau if not math.isnan(t)]
 
-    if finite_tau:
-        max_tau = max(finite_tau)
-        # Cap y-axis at the smaller of (5×curve max) and (1.5 × max
-        # of curve & dwell). Prevents both squashing and over-tall.
-        y_top_curve_only = max_tau * 5.0
-        y_top_with_dwell = max(max_tau, dwell) * 1.5
-        y_top = min(y_top_curve_only, y_top_with_dwell)
-        # Always keep a visible curve floor of 1 s so very fast
-        # scenarios still show the curve as a trend, not a flat line.
-        y_top = max(y_top, max_tau * 1.5, 1.0)
+    if dwell > 0:
+        # Anchor y_top to dwell so the dwell line is always visible
+        # with ~50 % headroom above. Curve cells beyond this get
+        # clipped — the red zone communicates that they're infeasible.
+        y_top = dwell * 1.5
+        # If the curve floor is unusually high (e.g. low-power
+        # scenario where even σ=0 needs many seconds), make sure
+        # the curve floor isn't ABOVE the y_top. Bump y_top to
+        # max(1.5 × dwell, 1.2 × min_visible_curve_value).
+        if finite_tau:
+            min_tau = min(finite_tau)
+            if min_tau >= y_top:
+                y_top = max(y_top, min_tau * 2.0)
         y_range = [0.0, y_top]
+    elif finite_tau:
+        # No dwell available (degenerate scenario) — scale to curve.
+        y_top = max(finite_tau) * 1.5
+        y_range = [0.0, max(y_top, 1.0)]
     else:
-        # Every cell was NaN — fallback explanatory message.
-        y_top = max(dwell * 1.5, 1.0) if dwell > 0 else 10.0
-        y_range = [0.0, y_top]
+        # Every cell was NaN AND no dwell — fallback frame.
+        y_range = [0.0, 10.0]
 
     # ── Layer 3: horizontal dashed teal line at y = available_dwell.
     if dwell > 0 and dwell <= y_range[1]:

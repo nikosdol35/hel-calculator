@@ -146,21 +146,41 @@ def test_finite_cells_monotone_non_decreasing():
 
 def test_extreme_sigma_jit_is_no_kill():
     """At σ_jit = 500 mrad (the v3.2 upper bound), the spot-wander
-    envelope is 2 · 0.5 · 1500 = 1500 m. PIB collapses to ~0;
-    surface flux is well below the no-kill threshold."""
+    envelope is 2 · 0.5 · 1500 = 1500 m. PIB collapses to near 0;
+    surface flux is well below the no-kill threshold so the cell
+    is flagged in no_kill_mask. v3.3: τ_BT is still computed
+    (lumped-mass theoretical value), not NaN — the plot uses the
+    continuous curve to show the user what burn-through would
+    require if there were no radiation losses."""
     curve = compute_jitter_sensitivity(_merged_result(), n_points=25)
     assert curve.no_kill_mask[-1] is True
-    assert math.isnan(curve.tau_BT_axis_s[-1])
+    # τ_BT is computed even in no-kill region (huge but finite).
+    assert not math.isnan(curve.tau_BT_axis_s[-1])
+    assert curve.tau_BT_axis_s[-1] > curve.available_dwell_s
 
 
 def test_no_kill_threshold_set_when_no_kill_engaged():
     """no_kill_threshold_urad is the smallest σ_jit at which the
     cell is in the no-kill region. For the canonical 3 kW scenario
-    it kicks in around ~180 µrad — within the 1 µrad → 500 mrad
+    it kicks in around ~250 µrad — within the 1 µrad → 500 mrad
     range."""
     curve = compute_jitter_sensitivity(_merged_result(), n_points=25)
     assert curve.no_kill_threshold_urad is not None
     assert 50.0 < curve.no_kill_threshold_urad < 1.0e4
+
+
+def test_warning_threshold_set_below_kill_threshold():
+    """v3.3: warning_threshold_urad marks where τ_BT first reaches
+    half the available dwell — this is the green→amber boundary.
+    It must lie strictly below the kill threshold (where τ_BT
+    reaches full dwell) and below the no-kill threshold."""
+    curve = compute_jitter_sensitivity(_merged_result(), n_points=25)
+    assert curve.warning_threshold_urad is not None
+    assert curve.warning_threshold_urad > 0
+    if curve.kill_threshold_urad is not None:
+        assert curve.warning_threshold_urad < curve.kill_threshold_urad
+    if curve.no_kill_threshold_urad is not None:
+        assert curve.warning_threshold_urad < curve.no_kill_threshold_urad
 
 
 # ---------------------------------------------------------------------------

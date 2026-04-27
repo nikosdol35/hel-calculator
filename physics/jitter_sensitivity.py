@@ -75,11 +75,12 @@ class JitterSensitivityCurve:
     lumped-mass approximation used for the curve).
     """
     sigma_jit_axis_urad: tuple[float, ...]    # log-spaced (v3.2, 2026-04-27)
-    tau_BT_axis_s: tuple[float, ...]          # NaN in no-kill cells
+    tau_BT_axis_s: tuple[float, ...]          # continuous; NaN only when E_fail/I_avg undefined
     no_kill_mask: tuple[bool, ...]            # True where I_avg < threshold
     available_dwell_s: float
-    kill_threshold_urad: float | None         # σ_jit where curve == dwell
-    no_kill_threshold_urad: float | None      # smallest σ_jit at which I_avg < threshold
+    warning_threshold_urad: float | None      # smallest σ_jit where τ_BT ≥ 0.5 × dwell (green→amber)
+    kill_threshold_urad: float | None         # σ_jit where curve crosses dwell (amber→red on time)
+    no_kill_threshold_urad: float | None      # smallest σ_jit at which I_avg < threshold (amber→red on flux)
     current_sigma_jit_urad: float             # for the star
     current_tau_BT_s: float                   # PDE-accurate; from the chain
 
@@ -229,19 +230,23 @@ def compute_jitter_sensitivity(
         I_avg_aim_wpm2 = P_aim_w / bucket_area_m2 if bucket_area_m2 > 0 else 0.0
         I_avg_aim_wpcm2 = I_avg_aim_wpm2 * 1.0e-4   # W/m² → W/cm²
 
-        # No-kill regime: surface can't reach T_fail when radiation
-        # losses outpace absorption. Same threshold as Plot J.
-        if (E_fail_jpm2 is None
-                or I_avg_aim_wpcm2 < _USEFUL_FLUX_THRESHOLD_WPCM2):
+        # If the material is unknown (E_fail = None) or there's no
+        # flux at all (I_avg = 0), τ_BT is genuinely undefined → NaN.
+        if E_fail_jpm2 is None or I_avg_aim_wpm2 <= 0:
             tau_BT_axis.append(float("nan"))
             no_kill_mask.append(True)
             continue
 
-        # Lumped-mass τ_BT with empirical PDE correction factor.
+        # v3.3 (2026-04-27): always compute τ_BT_lumped, even when
+        # I_avg falls below the no-kill threshold. This gives the
+        # plot a continuous trend curve so the user can see how
+        # τ_BT keeps climbing past the dwell line into the
+        # infeasible region. The no_kill_mask still flags those
+        # cells so the red zone draws over them.
         tau_BT_lumped_s = E_fail_jpm2 / I_avg_aim_wpm2
         tau_BT_s = _LUMPED_TO_PDE_RATIO * tau_BT_lumped_s
         tau_BT_axis.append(tau_BT_s)
-        no_kill_mask.append(False)
+        no_kill_mask.append(I_avg_aim_wpcm2 < _USEFUL_FLUX_THRESHOLD_WPCM2)
 
     # Threshold-detection helpers. Both are linear interpolations
     # between adjacent sweep cells.
@@ -265,18 +270,15 @@ def compute_jitter_sensitivity(
             no_kill_threshold_rad = sigma_axis_rad[i]
             break
 
-    # Kill threshold: the boundary between feasible (τ_BT ≤ dwell)
-    # and infeasible. Two ways infeasibility can kick in as σ_jit
-    # grows: (a) τ_BT exceeds available_dwell, or (b) I_avg drops
-    # below the no-kill threshold. Whichever comes first IS the
-    # kill threshold. Annotation in the plot reads "Kill threshold:
-    # σ_jit ≤ X µrad" — anything beyond X is infeasible.
+    # Kill threshold: smallest σ_jit at which τ_BT ≥ dwell. Found
+    # by linear-interpolating the curve between adjacent cells where
+    # it crosses dwell. The curve is now continuous (v3.3) so
+    # interpolation always works when a crossing exists.
     kill_threshold_rad: float | None = None
     if available_dwell_s > 0:
         for i in range(1, n_points):
             tau_lo = tau_BT_axis[i - 1]
             tau_hi = tau_BT_axis[i]
-            # Case (a): adjacent finite cells where curve crosses dwell.
             if (not math.isnan(tau_lo) and not math.isnan(tau_hi)
                     and tau_lo <= available_dwell_s < tau_hi):
                 kill_threshold_rad = _interp_log_x(
@@ -284,18 +286,30 @@ def compute_jitter_sensitivity(
                     tau_lo, tau_hi, available_dwell_s,
                 )
                 break
-            # Case (b): finite cell → no-kill cell. Threshold is
-            # somewhere in this interval; with the lumped-mass model
-            # we don't know exactly where, so use the no-kill
-            # boundary as a lower-bound proxy.
-            if not math.isnan(tau_lo) and math.isnan(tau_hi):
-                kill_threshold_rad = sigma_axis_rad[i]
+
+    # Warning threshold: smallest σ_jit at which τ_BT ≥ 0.5 × dwell.
+    # Marks where the engagement margin starts shrinking — the
+    # plot uses this as the green→amber boundary so a "you're
+    # approaching the limit" warning band is always visible before
+    # the curve crosses dwell or hits no-kill.
+    _WARNING_FRACTION_OF_DWELL = 0.5
+    warning_threshold_rad: float | None = None
+    if available_dwell_s > 0:
+        warning_target = _WARNING_FRACTION_OF_DWELL * available_dwell_s
+        for i in range(1, n_points):
+            tau_lo = tau_BT_axis[i - 1]
+            tau_hi = tau_BT_axis[i]
+            if (not math.isnan(tau_lo) and not math.isnan(tau_hi)
+                    and tau_lo <= warning_target < tau_hi):
+                warning_threshold_rad = _interp_log_x(
+                    sigma_axis_rad[i - 1], sigma_axis_rad[i],
+                    tau_lo, tau_hi, warning_target,
+                )
                 break
 
-    # If the curve never crossed dwell AND no_kill never engaged,
-    # the kill threshold is undefined (engagement closes for every
-    # σ_jit in the swept range — typical for a very high-power
-    # scenario at close range). kill_threshold_rad stays None.
+    # If neither threshold engages (curve never crosses dwell or
+    # half-dwell, and no_kill never engages), the corresponding
+    # value stays None — the plot then omits that zone boundary.
 
     # Convert all σ_jit values to µrad for the dataclass (display unit).
     rad_to_urad = 1.0e6
@@ -304,6 +318,10 @@ def compute_jitter_sensitivity(
         tau_BT_axis_s=tuple(tau_BT_axis),
         no_kill_mask=tuple(no_kill_mask),
         available_dwell_s=available_dwell_s,
+        warning_threshold_urad=(
+            warning_threshold_rad * rad_to_urad
+            if warning_threshold_rad is not None else None
+        ),
         kill_threshold_urad=(
             kill_threshold_rad * rad_to_urad
             if kill_threshold_rad is not None else None
