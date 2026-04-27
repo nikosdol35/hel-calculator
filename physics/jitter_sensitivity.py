@@ -189,6 +189,13 @@ def compute_jitter_sensitivity(
     current_tau_BT_s = float(base_inputs.get("tau_BT") or 0.0)
     current_sigma_jit_rad = float(base_inputs.get("sigma_jit", 0.0))
 
+    # Extend the sweep upper bound if the user's σ_jit lies past the
+    # default range — otherwise the curve would stop short of the
+    # star and the threshold-zone bands would only reflect the
+    # swept region, not what the user is actually looking at.
+    if current_sigma_jit_rad > sigma_jit_high_rad / 1.2:
+        sigma_jit_high_rad = current_sigma_jit_rad * 1.2
+
     # ── Sweep loop ─────────────────────────────────────────────────
     sigma_axis_rad = _lin_space(
         sigma_jit_low_rad, sigma_jit_high_rad, n_points,

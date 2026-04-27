@@ -3754,14 +3754,12 @@ def plot_n_jitter_sensitivity(curve) -> go.Figure:
     tau = list(curve.tau_BT_axis_s)
     dwell = curve.available_dwell_s
 
-    # Dynamic x-axis upper bound. Default to the swept range upper
-    # bound, but expand if the user's σ_jit exceeds 1/1.2 of it so
-    # the star is always rendered on-chart.
+    # x-axis matches the swept range. The curve module has already
+    # extended `sigma_jit_high_rad` to cover the user's σ_jit when
+    # it lies past the default range, so the curve always reaches
+    # the star's x-coordinate (no gap on the right side).
     x_min = 0.0
     x_max = sigma[-1]
-    if (curve.current_sigma_jit_urad
-            and curve.current_sigma_jit_urad > x_max / 1.2):
-        x_max = curve.current_sigma_jit_urad * 1.2
 
     fig = go.Figure()
 
@@ -3911,12 +3909,21 @@ def plot_n_jitter_sensitivity(curve) -> go.Figure:
             and not math.isnan(curve.current_tau_BT_s)):
         # Clamp star to the y-range so it stays visible.
         star_y = min(curve.current_tau_BT_s, y_range[1] * 0.95)
+        # Place the "Current scenario" label on the side that's
+        # away from the right edge to avoid colliding with the
+        # "Available dwell" annotation (anchored bottom-right).
+        # If the star sits in the right ~30% of the plot, put the
+        # label on its left; otherwise on its right.
+        if curve.current_sigma_jit_urad > 0.7 * x_max:
+            text_position = "top left"
+        else:
+            text_position = "top right"
         fig.add_trace(go.Scatter(
             x=[curve.current_sigma_jit_urad],
             y=[star_y],
             mode="markers+text",
             text=["Current scenario"],
-            textposition="top right",
+            textposition=text_position,
             marker=dict(
                 size=16, color=palette["fg.primary"],
                 line=dict(color=palette["bg.base"], width=2),
