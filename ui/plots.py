@@ -1346,6 +1346,8 @@ def plot_g_spot_vs_bucket(
     sweep: list[dict] | None,
     *,
     d_aim: float | None,
+    reference_range: float | None = None,
+    current_w_total_m: float | None = None,
 ) -> go.Figure:
     """At-a-glance: is the 1/e² spot still inside the aimpoint bucket?
 
@@ -1361,6 +1363,10 @@ def plot_g_spot_vs_bucket(
     is a diagnostic ("which broadening term dominates?") while this
     plot is a verdict ("does the energy land in the bucket?"). They
     deliberately overlap on `w_total` but answer different things.
+
+    When ``reference_range`` and ``current_w_total_m`` are passed, a
+    "Current scenario" star marks the user's spot diameter at their
+    detection range, plus a vertical reference line at that range.
 
     Renders a frame with the "infeasible geometry" advisory when
     ``sweep`` is None/empty or ``d_aim`` is missing/non-positive.
@@ -1449,6 +1455,43 @@ def plot_g_spot_vs_bucket(
             ),
         )
     )
+
+    # Vertical reference-range line at the user's R_detect.
+    if reference_range is not None and reference_range > 0:
+        fig.add_vline(
+            x=reference_range / 1000.0,
+            line=dict(color=palette["data.reference"], width=1.2, dash="dash"),
+            annotation_text="Reference range",
+            annotation_position="top right",
+            annotation_font=dict(color=palette["fg.secondary"], size=11),
+        )
+
+    # "Current scenario" star at (reference_range, current spot dia).
+    if (reference_range is not None and reference_range > 0
+            and current_w_total_m is not None
+            and math.isfinite(current_w_total_m) and current_w_total_m > 0):
+        current_d_cm = 2.0 * current_w_total_m * 100.0
+        fig.add_trace(
+            go.Scatter(
+                x=[reference_range / 1000.0],
+                y=[current_d_cm],
+                mode="markers+text",
+                text=["Current scenario"],
+                textposition="top left",
+                marker=dict(
+                    size=16, color=palette["fg.primary"],
+                    line=dict(color=palette["bg.base"], width=2),
+                    symbol="star",
+                ),
+                name="You are here",
+                hovertemplate=(
+                    f"R_detect = {reference_range / 1000.0:.2f} km · "
+                    f"spot = {current_d_cm:.1f} cm · "
+                    f"bucket = {d_aim_cm:.1f} cm<extra></extra>"
+                ),
+                showlegend=False,
+            )
+        )
 
     fig.update_layout(
         title=title,
@@ -1584,6 +1627,8 @@ def plot_e_engagement_margin_vs_range(
     sweep: list[dict] | None,
     *,
     reference_range: float | None = None,
+    current_tau_BT_s: float | None = None,
+    current_dwell_s: float | None = None,
 ) -> go.Figure:
     """Engagement-viability margin curve with verdict bands.
 
@@ -1598,7 +1643,13 @@ def plot_e_engagement_margin_vs_range(
     Plotted on a linear y-axis clamped to ``[-100 %, +200 %]`` so a
     single very-engageable sample does not flatten the rest of the
     curve; values outside the clamp are pinned at the limit so the
-    curve still terminates inside the plot.
+    curve still terminates inside the plot. When clipping happens an
+    annotation calls it out so the flat-at-200 % segment isn't read
+    as a literal plateau.
+
+    When ``current_tau_BT_s`` and ``current_dwell_s`` are passed, a
+    "Current scenario" star marks the user's PDE-accurate margin at
+    ``reference_range``.
 
     Renders the "no burn-through" advisory when every ``tau_BT`` sample
     is non-finite (no finite margin can be computed). When the entire
@@ -1628,9 +1679,15 @@ def plot_e_engagement_margin_vs_range(
 
     margin: list[float] = []
     verdict: list[str] = []
+    any_clipped_high = False
+    any_clipped_low = False
     for tbt, dw in zip(tau_bt, dwell):
         if (math.isfinite(tbt) and tbt > 0 and math.isfinite(dw)):
             m = 100.0 * (dw - tbt) / tbt
+            if m > Y_CEIL:
+                any_clipped_high = True
+            if m < Y_FLOOR:
+                any_clipped_low = True
             margin.append(max(Y_FLOOR, min(Y_CEIL, m)))
             if m >= 30.0:
                 verdict.append("engageable")
@@ -1700,6 +1757,62 @@ def plot_e_engagement_margin_vs_range(
             ),
         )
     )
+
+    # "Current scenario" star at the user's reference range, using
+    # the chain's PDE-accurate τ_BT / dwell.
+    if (reference_range is not None and reference_range > 0
+            and current_tau_BT_s is not None
+            and current_dwell_s is not None
+            and math.isfinite(current_tau_BT_s) and current_tau_BT_s > 0
+            and math.isfinite(current_dwell_s)):
+        current_margin = (
+            100.0 * (current_dwell_s - current_tau_BT_s) / current_tau_BT_s
+        )
+        clamped_margin = max(Y_FLOOR, min(Y_CEIL, current_margin))
+        fig.add_trace(
+            go.Scatter(
+                x=[reference_range / 1000.0],
+                y=[clamped_margin],
+                mode="markers+text",
+                text=["Current scenario"],
+                textposition="bottom right",
+                marker=dict(
+                    size=16, color=palette["fg.primary"],
+                    line=dict(color=palette["bg.base"], width=2),
+                    symbol="star",
+                ),
+                name="You are here",
+                hovertemplate=(
+                    f"R_detect = {reference_range / 1000.0:.2f} km · "
+                    f"margin = {current_margin:+.0f}%<extra></extra>"
+                ),
+                showlegend=False,
+            )
+        )
+
+    # Annotation when any margin value got clipped — without this the
+    # flat-at-200 % segment looks like a literal plateau.
+    if any_clipped_high:
+        fig.add_annotation(
+            xref="paper", yref="paper", x=0.5, y=1.0,
+            xanchor="center", yanchor="bottom",
+            text=(
+                "<i>Values above +200 % clipped — actual margin much "
+                "higher in this region (engagement closes with huge "
+                "spare time)</i>"
+            ),
+            showarrow=False,
+            font=dict(color=palette["fg.tertiary"], size=10),
+        )
+    if any_clipped_low:
+        fig.add_annotation(
+            xref="paper", yref="paper", x=0.5, y=0.0,
+            xanchor="center", yanchor="top",
+            text="<i>Values below −100 % clipped (deeply infeasible)</i>",
+            showarrow=False,
+            font=dict(color=palette["fg.tertiary"], size=10),
+            yshift=-30,
+        )
 
     fig.update_layout(
         title=title,
@@ -2186,7 +2299,12 @@ def plot_j_cumulative_energy_diagnostic(
 # 0 % margin (the kill threshold).
 # ---------------------------------------------------------------------------
 
-def plot_i_outcome_map_vs_R_detect(sweep: list[dict] | None) -> go.Figure:
+def plot_i_outcome_map_vs_R_detect(
+    sweep: list[dict] | None,
+    current_R_m: float | None = None,
+    current_tau_BT_s: float | None = None,
+    current_dwell_s: float | None = None,
+) -> go.Figure:
     """Engagement margin vs detection range — outcome map.
 
     Margin is ``(t_dwell − tau_BT) / tau_BT × 100 %`` at each sweep
@@ -2199,6 +2317,10 @@ def plot_i_outcome_map_vs_R_detect(sweep: list[dict] | None) -> go.Figure:
     (marginal), ``status.error`` < 0 % (not viable). When the curve
     has a finite zero-crossing, an annotation calls it out as the
     "kill threshold".
+
+    When ``current_R_m`` and the chain's headline ``tau_BT`` /
+    ``available_dwell`` are passed, a "you are here" star marks the
+    user's current scenario at that R_detect.
 
     Empty / None sweep → always-render frame fallback.
     """
@@ -2222,6 +2344,8 @@ def plot_i_outcome_map_vs_R_detect(sweep: list[dict] | None) -> go.Figure:
     x_km: list[float] = []
     margin: list[float] = []
     verdict: list[str] = []
+    any_clipped_high = False
+    any_clipped_low = False
     for s in sweep:
         R = float(s.get("range", math.nan))
         tau = s.get("tau_BT")
@@ -2231,6 +2355,10 @@ def plot_i_outcome_map_vs_R_detect(sweep: list[dict] | None) -> go.Figure:
                 or dwell is None or not math.isfinite(float(dwell))):
             continue
         m = 100.0 * (float(dwell) - float(tau)) / float(tau)
+        if m > Y_CEIL:
+            any_clipped_high = True
+        if m < Y_FLOOR:
+            any_clipped_low = True
         x_km.append(R / 1000.0)
         margin.append(max(Y_FLOOR, min(Y_CEIL, m)))
         if m >= 30.0:
@@ -2316,12 +2444,80 @@ def plot_i_outcome_map_vs_R_detect(sweep: list[dict] | None) -> go.Figure:
         )
     )
 
+    # "You are here" star at the user's current scenario, when the
+    # caller passed the chain's R_detect + dwell + tau_BT. Star uses
+    # the chain's PDE-accurate margin, not the lumped sweep cell.
+    if (current_R_m is not None and current_tau_BT_s is not None
+            and current_dwell_s is not None
+            and math.isfinite(current_R_m) and current_R_m > 0
+            and math.isfinite(current_tau_BT_s) and current_tau_BT_s > 0
+            and math.isfinite(current_dwell_s)):
+        current_margin = (
+            100.0 * (current_dwell_s - current_tau_BT_s) / current_tau_BT_s
+        )
+        # Clamp to the visible y-range so the star stays on-chart.
+        clamped_margin = max(Y_FLOOR, min(Y_CEIL, current_margin))
+        fig.add_trace(
+            go.Scatter(
+                x=[current_R_m / 1000.0],
+                y=[clamped_margin],
+                mode="markers+text",
+                text=["Current scenario"],
+                textposition="bottom right",
+                marker=dict(
+                    size=16, color=palette["fg.primary"],
+                    line=dict(color=palette["bg.base"], width=2),
+                    symbol="star",
+                ),
+                name="You are here",
+                hovertemplate=(
+                    f"R_detect = {current_R_m / 1000.0:.2f} km · "
+                    f"margin = {current_margin:+.0f}%<extra></extra>"
+                ),
+                showlegend=False,
+            )
+        )
+
+    # Annotation when any margin value got clipped — without this
+    # the flat segment at +200% looks like a plateau when it's
+    # really "off the top of the chart".
+    if any_clipped_high:
+        fig.add_annotation(
+            xref="paper", yref="paper", x=0.5, y=1.0,
+            xanchor="center", yanchor="bottom",
+            text=(
+                "<i>Values above +200 % clipped — actual margin much "
+                "higher in this region (engagement closes with huge "
+                "spare time)</i>"
+            ),
+            showarrow=False,
+            font=dict(color=palette["fg.tertiary"], size=10),
+        )
+    if any_clipped_low:
+        fig.add_annotation(
+            xref="paper", yref="paper", x=0.5, y=0.0,
+            xanchor="center", yanchor="top",
+            text="<i>Values below −100 % clipped (deeply infeasible)</i>",
+            showarrow=False,
+            font=dict(color=palette["fg.tertiary"], size=10),
+            yshift=-30,
+        )
+
     fig.update_layout(
         title=title,
         height=height,
         hovermode="x unified",
     )
-    fig.update_xaxes(title_text=xtitle, type="log")
+    # Friendly km tick labels — Plotly's default minor ticks on a
+    # log axis show "4, 5, 6, 7, 8, 9, 1, 2, 3" which strips the
+    # decimals and the unit. Explicit tickvals/ticktext show
+    # "0.5 km", "1 km", "3 km", etc.
+    km_tickvals = [0.1, 0.2, 0.3, 0.5, 1, 2, 3, 5, 10, 20, 30, 50]
+    km_ticktext = [f"{v:g} km" for v in km_tickvals]
+    fig.update_xaxes(
+        title_text=xtitle, type="log",
+        tickvals=km_tickvals, ticktext=km_ticktext,
+    )
     fig.update_yaxes(title_text=ytitle, range=[Y_FLOOR, Y_CEIL])
     return fig
 

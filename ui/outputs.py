@@ -556,7 +556,12 @@ def render_tab_engagement(
         # are gated on the same trajectory_t_pde guard so they appear
         # or disappear together.
         st.plotly_chart(
-            plots.plot_i_outcome_map_vs_R_detect(sweep),
+            plots.plot_i_outcome_map_vs_R_detect(
+                sweep,
+                current_R_m=result.get("R_detect"),
+                current_tau_BT_s=result.get("tau_BT"),
+                current_dwell_s=result.get("available_dwell"),
+            ),
             use_container_width=True,
             config=PLOTLY_MODEBAR_CONFIG,
         )
@@ -582,7 +587,11 @@ def render_tab_engagement(
         # margin field.
         _render_atmospheric_envelope_plot(result)
     st.plotly_chart(
-        plots.plot_g_spot_vs_bucket(sweep, d_aim=d_aim_si),
+        plots.plot_g_spot_vs_bucket(
+            sweep, d_aim=d_aim_si,
+            reference_range=reference_range,
+            current_w_total_m=result.get("w_total"),
+        ),
         use_container_width=True,
         config=PLOTLY_MODEBAR_CONFIG,
     )
@@ -602,31 +611,17 @@ def render_tab_engagement(
     st.plotly_chart(
         plots.plot_e_engagement_margin_vs_range(
             sweep, reference_range=reference_range,
+            current_tau_BT_s=result.get("tau_BT"),
+            current_dwell_s=result.get("available_dwell"),
         ),
         use_container_width=True,
         config=PLOTLY_MODEBAR_CONFIG,
     )
     explanation(EXPLANATIONS["plot_e_intro"], variant="plot")
-    # SPEC v2.0 §8.2 — Plot C is replaced by Plot C' (spot tightening
-    # through trajectory) when the orchestrator emits trajectory series
-    # (v2 trajectory mode). Falls back to the v1 component-breakdown
-    # view for v1.x results.
-    if "trajectory_R" in result and "trajectory_d_spot" in result:
-        st.plotly_chart(
-            plots.plot_c_spot_tightening_through_trajectory(
-                result, d_aim=result.get("d_aim"),
-            ),
-            use_container_width=True,
-            config=PLOTLY_MODEBAR_CONFIG,
-        )
-        explanation(EXPLANATIONS["plot_c_v2_intro"], variant="plot")
-    else:
-        st.plotly_chart(
-            plots.plot_c_beam_diameter_breakdown(sweep),
-            use_container_width=True,
-            config=PLOTLY_MODEBAR_CONFIG,
-        )
-        explanation(EXPLANATIONS["plot_c_intro"], variant="plot")
+    # 2026-04-28: Plot C' (spot tightening through trajectory) and the
+    # v1 fallback (beam-diameter breakdown) hidden per user request —
+    # the spot-vs-bucket plot already conveys the key insight.
+    # Plot constructors remain in ``ui.plots`` for any future use.
     st.plotly_chart(
         plots.plot_d_blooming_distortion_number(
             sweep, reference_range=reference_range,
