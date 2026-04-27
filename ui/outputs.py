@@ -448,7 +448,10 @@ def render_tab_engagement(
         f"Spot & Strehl decomposition — reference range "
         f"{reference_range / 1000:.2f} km"
     )
-    explanation(EXPLANATIONS["engagement_spot_strehl"])
+    # Section intro removed 2026-04-27 per user request — the per-card
+    # inline tooltips already explain each metric, so a separate intro
+    # paragraph above is redundant. EXPLANATIONS["engagement_spot_strehl"]
+    # kept in labels.py as an orphan key for possible future use.
 
     by = result["by_module"]
 
@@ -497,11 +500,11 @@ def render_tab_engagement(
             sig_figs=4,
         )
 
-    st.caption(
-        "Angles are full-angle (Siegman convention). The peak-vs-diffraction-"
-        "limit ratio is S_TB · (w_diff / w_total)² — a direct comparison "
-        "against the turbulence- and blooming-free baseline."
-    )
+    # Footer caption removed 2026-04-27 per user request — the same
+    # information is already in the inline tooltips on the seven cards
+    # above (peak-vs-diffraction-limit ratio, Strehl decompositions,
+    # angular-error sources). Repeating it as a paragraph below was
+    # redundant.
 
     # --- Range-sweep plots --------------------------------------------------
     # Import the plots module and the modebar config locally — keeps the
@@ -1718,17 +1721,9 @@ def _render_jitter_animation(result: dict) -> None:
         fig, use_container_width=True, config=PLOTLY_MODEBAR_CONFIG,
     )
 
-    # Honest caption when the wander is geometrically smaller than
-    # the spot itself — common at default σ_jit values.
-    if frames.envelope_radius_m < 0.5 * frames.spot_radius_m:
-        st.caption(
-            f"Tip — at the current σ_jit, the wander envelope "
-            f"({frames.envelope_radius_m * 1000:.1f} mm) is smaller than "
-            f"the spot itself ({frames.spot_radius_m * 1000:.1f} mm), "
-            f"so the visible wander is subtle. Try increasing σ_jit "
-            f"in the Beam director panel (e.g. 50–100 µrad) to see a "
-            f"more pronounced jitter footprint."
-        )
+    # Tip-caption (small-wander hint) removed 2026-04-27 per user
+    # request. The visualizer's main caption already invites users
+    # to bump σ_jit if they want a more dramatic wander.
 
 
 def _frozen_inputs_for_envelope(result: dict) -> tuple | None:
