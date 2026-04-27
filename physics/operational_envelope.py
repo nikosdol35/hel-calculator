@@ -92,6 +92,58 @@ def _lin_space(low: float, high: float, n: int) -> tuple[float, ...]:
     return tuple(low + i * step for i in range(n))
 
 
+# Envelope sweeps skip cells with simulated dwell windows above
+# this threshold. M8's PDE wall-clock cost scales linearly with
+# simulated dwell time at roughly 24:1 on a typical CPU, so a 5-min
+# dwell already costs ~12 s/cell on local hardware (~30 s on
+# Streamlit Cloud's shared CPU). Above that is operationally
+# unusual for C-UAS scenarios anyway — typical engagements close
+# in 5–90 s; we don't need to populate envelope cells for
+# multi-thousand-second engagements.
+_ENVELOPE_MAX_DWELL_S = 300.0
+
+
+def _cell_skipped_for_envelope(R_m: float, v_tgt_mps: float,
+                               base_inputs: dict) -> bool:
+    """Decide whether to skip a cell in an envelope sweep — the
+    dwell-window guard.
+
+    Returns True for cells the envelope sweep should NOT run the
+    full chain on. Skipped cells are marked NaN in the grid (gray
+    on the heatmap) and counted under ``n_failures``.
+
+    Skipped cases:
+      1. ``R ≤ R_min`` — no dwell window; engagement is degenerate.
+      2. ``v_tgt_mps ≤ 0`` — defer; defensive (unreachable in
+         normal sweeps).
+      3. ``(R - R_min) / v_tgt > _ENVELOPE_MAX_DWELL_S`` — dwell
+         window too long for the envelope's compute budget. M8's
+         PDE integrates step-by-step in simulated time at ~24:1
+         wall-clock ratio, so a 7950 s engagement (e.g. 12 km @
+         1 m/s on a 3 kW laser) costs ~5 minutes wall-clock per
+         cell. Five such cells in a 36-cell grid would be ~25 min
+         compute on Streamlit Cloud. Cells with dwell >5 simulated
+         minutes are operationally unusual anyway.
+
+    Wall-clock cost: ~5 µs per call (one division + one compare).
+    vs up to ~5 minutes per cell when M8's PDE integrates a
+    multi-thousand-second engagement. This is THE fix for the
+    user-reported 9+ minute envelope sweeps on Streamlit Cloud
+    (2026-04-27).
+    """
+    R_min = float(base_inputs.get("R_min", 100))
+    if R_m <= R_min:
+        return True   # No dwell window
+    if v_tgt_mps <= 0:
+        return False   # Defer; defensive (unreachable in normal sweeps)
+    dwell_s = (R_m - R_min) / v_tgt_mps
+    if dwell_s <= 0:
+        return True
+    if dwell_s > _ENVELOPE_MAX_DWELL_S:
+        return True
+    return False
+
+
 def _engagement_margin_pct(result: dict) -> float:
     """Compute engagement margin in percent from a v2 result dict.
 
@@ -179,6 +231,17 @@ def compute_operational_envelope(
                 raise concurrent.futures.CancelledError(
                     "operational-envelope compute cancelled mid-sweep"
                 )
+            # Dwell-window short-circuit: skip cells with very long
+            # dwell windows that would cause M8's PDE to integrate
+            # for many minutes per cell. See
+            # ``_cell_skipped_for_envelope`` — closed-form, ~5 µs
+            # per call, eliminates ~5 min/cell M8 wall-clock for
+            # the long-dwell corner. Cells are marked NaN (gray on
+            # the heatmap) and counted as failures.
+            if _cell_skipped_for_envelope(float(R), float(v), base_inputs):
+                row.append(math.nan)
+                n_failures += 1
+                continue
             inputs = {**base_inputs, "R_detect": float(R), "v_tgt": float(v)}
             try:
                 result = run_full_chain(inputs)
@@ -284,6 +347,18 @@ def compute_atmospheric_envelope(
     cn2_axis = _log_space(cn2_low, cn2_high, n_cn2)
     V_axis = _log_space(V_low_km, V_high_km, n_V)
 
+    # The dwell-window short-circuit only depends on the user's
+    # current R_detect / v_tgt — not on V or Cn². For the
+    # atmospheric envelope the kinematics are fixed and only the
+    # atmosphere varies, so the skip check is a single binary
+    # decision: either the whole heatmap renders (kinematics fit
+    # in the envelope budget) or it's all-NaN.
+    R_for_check = float(base_inputs.get("R_detect", 0.0))
+    v_for_check = float(base_inputs.get("v_tgt", 0.0))
+    kinematics_skipped = _cell_skipped_for_envelope(
+        R_for_check, v_for_check, base_inputs,
+    )
+
     grid: list[tuple[float, ...]] = []
     n_kills = 0
     n_failures = 0
@@ -292,12 +367,20 @@ def compute_atmospheric_envelope(
             raise concurrent.futures.CancelledError(
                 "atmospheric-envelope compute cancelled mid-sweep"
             )
+
         row: list[float] = []
         for cn2 in cn2_axis:
             if cancel_token is not None and cancel_token.is_set():
                 raise concurrent.futures.CancelledError(
                     "atmospheric-envelope compute cancelled mid-sweep"
                 )
+            if kinematics_skipped:
+                # User's R_detect/v_tgt is outside the envelope's
+                # compute budget — atmospheric variations don't
+                # change that. Mark every cell as NaN.
+                row.append(math.nan)
+                n_failures += 1
+                continue
             inputs = {
                 **base_inputs,
                 "V": float(V_km),

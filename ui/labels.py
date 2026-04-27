@@ -1090,10 +1090,11 @@ EXPLANATIONS: dict[str, str] = {
         "full engagement analysis and colour-codes the result. "
         "Computing the grid runs in the background — you can keep "
         "using other plots and tabs while it computes. Typical "
-        "runtime is 1 to 3 minutes on first click; some scenarios "
-        "(weak laser, long range, slow targets) push to 4 to 5 min "
-        "as corner cells hit the burn-through PDE cap. Changing any "
-        "sidebar input cancels the running compute."
+        "runtime is 30 to 90 seconds on first click. Cells with "
+        "very long dwell windows (slow target × long range, more "
+        "than 5 simulated minutes of engagement) are out of the "
+        "envelope's compute budget and are rendered gray. Changing "
+        "any sidebar input cancels the running compute."
     ),
     "plot_k_intro": (
         "Each cell is one engagement at a different (detection range, "
@@ -1119,7 +1120,7 @@ EXPLANATIONS: dict[str, str] = {
         "from heavy fog to crystal clear, turbulence from negligible to "
         "near-surface desert noon. Same 6-by-6 grid, runs in the "
         "background like the operational envelope above (typically "
-        "1 to 3 minutes on first click; you can keep using other plots "
+        "30 to 90 seconds on first click; you can keep using other plots "
         "while it computes)."
     ),
     "plot_m_intro": (
