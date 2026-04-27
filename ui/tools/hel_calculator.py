@@ -469,7 +469,14 @@ R_high = min(50_000.0, R_selected * 2.0)
 # fall below the lower bound. Clamp.
 if R_high <= R_low:
     R_high = R_low + 100.0
-N_samples = 30
+# Sweep size — reduced 2026-04-26 from 30 to 15. The sweep runs
+# the full v2 trajectory chain at every sample point and blocks the
+# main script during compute (~1-2 s per sample); 30 samples gave a
+# 30-60 s Run Analysis wait that the user reported as "stuck." 15
+# samples cuts that roughly in half while keeping range-sweep plots
+# (A, B, C, D, E, G) visually smooth — Plotly interpolates between
+# them.
+N_samples = 15
 step = (R_high - R_low) / (N_samples - 1)
 ranges = tuple(R_low + i * step for i in range(N_samples))
 
