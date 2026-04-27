@@ -37,6 +37,8 @@ References:
 
 from __future__ import annotations
 
+import os
+
 import streamlit as st
 
 from ui import theme
@@ -54,7 +56,20 @@ def require_login() -> None:
     already authed in this session. Otherwise renders the centered
     login card and calls ``st.stop()`` so the caller never runs past
     the gate on the same render pass.
+
+    **Test bypass.** When ``HEL_TEST_MODE=1`` is set in the
+    environment, the gate is silently skipped — the auth flag is
+    flipped to True and we return without rendering any login UI.
+    Used by ``tests/test_engagement_tab_e2e.py`` (Streamlit
+    ``AppTest``) so the test can exercise the page flow without
+    needing a secrets file. Production deployments do not set this
+    variable; the env-var check is a single line and does not bypass
+    in any other scenario.
     """
+    if os.environ.get("HEL_TEST_MODE") == "1":
+        st.session_state[_AUTH_KEY] = True
+        return
+
     if st.session_state.get(_AUTH_KEY):
         return
 

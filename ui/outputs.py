@@ -1458,9 +1458,9 @@ def _envelope_state_machine(
             ss[job_key] = submit_compute(compute_fn, dict(frozen), cancel_token)
             ss[start_key] = time.time()
             ss[error_key] = None
-            # Explicit fragment rerun: Streamlit's natural button-click
-            # rerun renders State D one more time before the new state
-            # is read at the top of the function. Without this rerun,
+            # Explicit rerun: Streamlit's natural button-click rerun
+            # renders State D one more time before the new state is
+            # read at the top of the function. Without this rerun,
             # the spinner only appears on the next 2-second polling
             # tick — long enough that the user perceives "nothing
             # happened." Safe to call here because the stable
@@ -1470,7 +1470,20 @@ def _envelope_state_machine(
             # Re-compute paths is what caused the prior "Bad setIn
             # index" reconciliation issue; we keep it confined to
             # this single click path.)
-            st.rerun(scope="fragment")
+            #
+            # Try fragment-scope first (cheaper — only the fragment
+            # reruns, parent script untouched). Fall back to full
+            # rerun when scope="fragment" is not allowed in the
+            # current execution context — most notably under
+            # Streamlit's ``AppTest`` framework, which runs the
+            # script synchronously and never establishes the
+            # fragment-only rerun context that scope="fragment"
+            # requires.
+            from streamlit.errors import StreamlitAPIException
+            try:
+                st.rerun(scope="fragment")
+            except StreamlitAPIException:
+                st.rerun()
 
 
 @st.fragment(run_every="2s")
