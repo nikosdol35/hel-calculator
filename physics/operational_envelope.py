@@ -10,10 +10,13 @@ Pure module — no Streamlit imports. The orchestrator handles the
 trajectory loop; this helper only sweeps the inputs and collects
 the per-cell margin.
 
-Cost: n_R × n_v orchestrator calls. Default 8×8 = 64 cells, ~30–90 s
-on the canonical scenario. Caller (Streamlit UI) wraps in
-``@st.cache_data`` so the heatmap is computed once per session per
-input set.
+Cost: n_R × n_v orchestrator calls. Default 6×6 = 36 cells. On a
+local laptop the canonical 3 kW scenario finishes in ~30–60 s; on
+Streamlit Cloud's free-tier shared CPU, expect 1–3 minutes (some
+scenarios with weak-laser / long-range / slow-target combinations
+push to 4–5 min because corner cells hit M8's 60 s PDE cap).
+Caller (Streamlit UI) wraps in ``@st.cache_data`` so the heatmap
+is computed once per session per input set.
 
 **Cancellation contract.** The optional ``cancel_token`` argument
 takes a ``threading.Event``. When set, the cell-loop checks it
@@ -111,8 +114,8 @@ def _engagement_margin_pct(result: dict) -> float:
 
 def compute_operational_envelope(
     base_inputs: dict,
-    n_R: int = 8,
-    n_v: int = 8,
+    n_R: int = 6,
+    n_v: int = 6,
     R_low_m: float = _LOG_SPAN_R_LOW_M,
     R_high_m: float = _LOG_SPAN_R_HIGH_M,
     v_low_mps: float = _LIN_SPAN_V_LOW_MPS,
@@ -125,11 +128,13 @@ def compute_operational_envelope(
       base_inputs: full v2 input dict. Must include ``engagement_geometry``
         (the envelope only makes sense in trajectory mode); ``R_detect``
         and ``v_tgt`` are overridden per cell.
-      n_R, n_v: grid dimensions. Defaults 8×8 → 64 orchestrator runs
-        (was 10×10 = 100; reduced 2026-04-26 because the corner
-        cells dominated total compute time and 64 cells is plenty
-        of resolution for a heatmap). Tests pass smaller grids
-        (3×3) so they finish in seconds.
+      n_R, n_v: grid dimensions. Defaults 6×6 → 36 orchestrator runs
+        (was 8×8 = 64, originally 10×10 = 100). Reduced again on
+        2026-04-27 because Streamlit Cloud's shared CPU is ~2–3×
+        slower than local; 36 cells keeps Cloud compute in the
+        1–3 minute range while still providing usable heatmap
+        resolution. Tests pass smaller grids (3×3) so they finish
+        in seconds.
       R_low_m / R_high_m: log-space bounds on the x-axis.
       v_low_mps / v_high_mps: linear-space bounds on the y-axis.
       cancel_token: optional ``threading.Event`` checked between
@@ -225,8 +230,8 @@ _LOG_SPAN_V_HIGH_KM = 50.0
 
 def compute_atmospheric_envelope(
     base_inputs: dict,
-    n_cn2: int = 8,
-    n_V: int = 8,
+    n_cn2: int = 6,
+    n_V: int = 6,
     cn2_low: float = _LOG_SPAN_CN2_LOW,
     cn2_high: float = _LOG_SPAN_CN2_HIGH,
     V_low_km: float = _LOG_SPAN_V_LOW_KM,
@@ -241,10 +246,11 @@ def compute_atmospheric_envelope(
         orchestrator runs the whole chain per cell — same trajectory
         loop the kinematic envelope uses, just with different
         atmosphere inputs.
-      n_cn2, n_V: grid dimensions. Defaults 8×8 → 64 orchestrator
-        runs (was 10×10; reduced 2026-04-26 to match the kinematic
-        envelope and keep typical compute under ~90 s). Tests pass
-        smaller grids (3×3) so they finish in seconds.
+      n_cn2, n_V: grid dimensions. Defaults 6×6 → 36 orchestrator
+        runs (was 8×8, originally 10×10). Reduced 2026-04-27 to
+        match the kinematic envelope and keep Cloud compute in
+        the 1–3 minute range. Tests pass smaller grids (3×3) so
+        they finish in seconds.
       cn2_low / cn2_high: log-space bounds on the x-axis (m^(-2/3)).
       V_low_km / V_high_km: log-space bounds on the y-axis.
       cancel_token: optional ``threading.Event`` checked between
