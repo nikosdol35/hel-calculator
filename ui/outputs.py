@@ -1429,9 +1429,11 @@ def _envelope_state_machine(
             elapsed = max(0.0, time.time() - (ss[start_key] or time.time()))
             st.info(
                 f"Computing in the background — {elapsed:.0f} s "
-                f"elapsed of an estimated 30–90 s for {n_cells} "
-                f"engagements. You can keep using other plots and "
-                f"tabs while this runs; the section will refresh "
+                f"elapsed. Typical runtime is 1–3 minutes for "
+                f"{n_cells} engagements on Streamlit Cloud (some "
+                f"scenarios push to 4–5 min when corner cells hit "
+                f"the M8 PDE cap). You can keep using other plots "
+                f"and tabs while this runs; the section will refresh "
                 f"automatically when the result is ready."
             )
             if st.button("Cancel", key=f"_envelope_cancel_{kind}"):
@@ -1500,17 +1502,17 @@ def _operational_envelope_fragment(frozen: tuple) -> None:
         intro_2d_key="plot_k_intro",
         intro_3d_key="plot_k_3d_intro",
         button_caption=(
-            "Computes an 8 × 8 (R_detect × v_tgt) grid of "
-            "engagement outcomes (64 full-trajectory runs). Runs in "
+            "Computes a 6 × 6 (R_detect × v_tgt) grid of "
+            "engagement outcomes (36 full-trajectory runs). Runs in "
             "the background — you can keep using other tabs and "
             "plots while it computes."
         ),
         compute_fn=lambda inputs, cancel_token: compute_operational_envelope(
-            inputs, n_R=8, n_v=8, cancel_token=cancel_token,
+            inputs, n_R=6, n_v=6, cancel_token=cancel_token,
         ),
         plot_2d_fn=plots.plot_k_operational_envelope,
         plot_3d_fn=plots.plot_k_operational_envelope_3d,
-        n_cells=64,
+        n_cells=36,
     )
 
 
@@ -1528,16 +1530,16 @@ def _atmospheric_envelope_fragment(frozen: tuple) -> None:
         intro_3d_key="plot_m_3d_intro",
         button_caption=(
             "Holds R_detect and v_tgt fixed; sweeps Cn² × visibility "
-            "on an 8 × 8 grid (64 full-trajectory runs). Runs in the "
+            "on a 6 × 6 grid (36 full-trajectory runs). Runs in the "
             "background — you can keep using other tabs and plots "
             "while it computes."
         ),
         compute_fn=lambda inputs, cancel_token: compute_atmospheric_envelope(
-            inputs, n_cn2=8, n_V=8, cancel_token=cancel_token,
+            inputs, n_cn2=6, n_V=6, cancel_token=cancel_token,
         ),
         plot_2d_fn=plots.plot_m_atmospheric_envelope,
         plot_3d_fn=plots.plot_m_atmospheric_envelope_3d,
-        n_cells=64,
+        n_cells=36,
     )
 
 

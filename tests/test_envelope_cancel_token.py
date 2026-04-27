@@ -161,18 +161,18 @@ def test_atmospheric_envelope_no_token_runs_to_completion():
 # ---------------------------------------------------------------------------
 # Default grid size locked at 8×8
 # ---------------------------------------------------------------------------
-def test_operational_envelope_default_grid_8x8():
-    """Default n_R / n_v are 8 (was 10; reduced 2026-04-26 because
-    the corner cells dominated total compute time and 64 cells is
-    plenty of resolution for a heatmap)."""
+def test_operational_envelope_default_grid_6x6():
+    """Default n_R / n_v are 6 (was 8 → 6 on 2026-04-27 because
+    Streamlit Cloud's CPU is ~2-3x slower than local; 36 cells
+    keeps Cloud compute in 1-3 minute range)."""
     import inspect
     sig = inspect.signature(compute_operational_envelope)
-    assert sig.parameters["n_R"].default == 8
-    assert sig.parameters["n_v"].default == 8
+    assert sig.parameters["n_R"].default == 6
+    assert sig.parameters["n_v"].default == 6
 
 
-def test_atmospheric_envelope_default_grid_8x8():
+def test_atmospheric_envelope_default_grid_6x6():
     import inspect
     sig = inspect.signature(compute_atmospheric_envelope)
-    assert sig.parameters["n_cn2"].default == 8
-    assert sig.parameters["n_V"].default == 8
+    assert sig.parameters["n_cn2"].default == 6
+    assert sig.parameters["n_V"].default == 6
