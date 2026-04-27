@@ -1458,8 +1458,19 @@ def _envelope_state_machine(
             ss[job_key] = submit_compute(compute_fn, dict(frozen), cancel_token)
             ss[start_key] = time.time()
             ss[error_key] = None
-            # Natural button-click rerun — next pass reads the new
-            # state and renders the pending placeholder.
+            # Explicit fragment rerun: Streamlit's natural button-click
+            # rerun renders State D one more time before the new state
+            # is read at the top of the function. Without this rerun,
+            # the spinner only appears on the next 2-second polling
+            # tick — long enough that the user perceives "nothing
+            # happened." Safe to call here because the stable
+            # `st.container()` anchor (set above) keeps the widget
+            # tree reconcilable across the State D → State C
+            # transition. (Reintroducing this rerun on Cancel /
+            # Re-compute paths is what caused the prior "Bad setIn
+            # index" reconciliation issue; we keep it confined to
+            # this single click path.)
+            st.rerun(scope="fragment")
 
 
 @st.fragment(run_every="2s")
