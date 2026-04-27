@@ -1054,20 +1054,21 @@ EXPLANATIONS: dict[str, str] = {
         "make the wander obvious."
     ),
     "plot_n_intro_pre": (
-        "How burn-through time scales with pointing jitter at your "
-        "current detection range, on linear axes. The background "
-        "shows three zones: green = safe (τ_BT below dwell), amber "
-        "= risky (τ_BT exceeds dwell, target escapes), red = "
-        "infeasible (spot too wide, laser can't reach burn-through). "
-        "The white star is your scenario."
+        "How burn-through time scales with pointing jitter across "
+        "the full operational range (1 µrad → 500 mrad). The "
+        "coloured background shows three zones: green = safe "
+        "(τ_BT below dwell), amber = risky (τ_BT exceeds dwell, "
+        "target escapes), red = infeasible (spot too wide, laser "
+        "can't reach burn-through). The white star is your "
+        "scenario. Drag the chart to zoom in; double-click to reset."
     ),
     "plot_n_intro": (
         "Approximate scaling — the curve uses a fast lumped-mass "
         "τ_BT for the sweep, while the white star is your scenario's "
-        "PDE-accurate value (matches the headline τ_BT). Below the "
-        "kill threshold, jitter has negligible impact on burn-through; "
-        "above it, τ_BT grows rapidly until the engagement stops "
-        "closing or the laser can no longer deposit useful flux."
+        "PDE-accurate value (matches the headline τ_BT). The x-axis "
+        "is logarithmic so the full range from realistic (1 µrad) "
+        "to extreme (500 mrad) jitter fits in one frame. Use the "
+        "mouse to drag-zoom into any decade for finer detail."
     ),
     "plot_k_intro_pre": (
         "Strategic view: a 6×6 grid that re-runs the full engagement "

@@ -1,7 +1,8 @@
 """Tests for the jitter-sensitivity sweep behind Plot N.
 
 PR: feature/plot-n-jitter-sensitivity (2026-04-27).
-v3 update: linear σ_jit axis (0 → 200 µrad, 20 cells).
+v3.2 update: log σ_jit axis (1 µrad → 500 mrad, 25 cells) covering
+the full operational envelope.
 
 Plot N shows τ_BT scaling vs σ_jit at fixed kinematics. The sweep
 deliberately uses two simplifications to hit the <1 ms compute
@@ -71,23 +72,23 @@ def _merged_result(**overrides) -> dict:
 def test_returns_curve_dataclass():
     """compute_jitter_sensitivity returns a JitterSensitivityCurve
     with axes of length n_points and the no-kill mask aligned."""
-    curve = compute_jitter_sensitivity(_merged_result(), n_points=20)
+    curve = compute_jitter_sensitivity(_merged_result(), n_points=25)
     assert isinstance(curve, JitterSensitivityCurve)
-    assert len(curve.sigma_jit_axis_urad) == 20
-    assert len(curve.tau_BT_axis_s) == 20
-    assert len(curve.no_kill_mask) == 20
+    assert len(curve.sigma_jit_axis_urad) == 25
+    assert len(curve.tau_BT_axis_s) == 25
+    assert len(curve.no_kill_mask) == 25
 
 
-def test_axis_linear_spaced():
-    """σ_jit axis is linear-spaced from 0 µrad to 200 µrad (v3)."""
-    curve = compute_jitter_sensitivity(_merged_result(), n_points=20)
+def test_axis_log_spaced():
+    """σ_jit axis is log-spaced from 1 µrad to 500 mrad (v3.2)."""
+    curve = compute_jitter_sensitivity(_merged_result(), n_points=25)
     axis = curve.sigma_jit_axis_urad
-    assert axis[0] == pytest.approx(0.0, abs=1e-6)
-    assert axis[-1] == pytest.approx(200.0, rel=1e-3)
-    # Linear spacing: difference between adjacent points is constant.
-    diff_first = axis[1] - axis[0]
-    diff_last = axis[-1] - axis[-2]
-    assert diff_first == pytest.approx(diff_last, rel=1e-6)
+    assert axis[0] == pytest.approx(1.0, rel=1e-3)
+    assert axis[-1] == pytest.approx(5.0e5, rel=1e-3)
+    # Log spacing: ratio between adjacent points is constant.
+    ratio_first = axis[1] / axis[0]
+    ratio_last = axis[-1] / axis[-2]
+    assert ratio_first == pytest.approx(ratio_last, rel=1e-6)
 
 
 def test_runs_well_under_one_second():
@@ -113,17 +114,10 @@ def test_low_sigma_regime_nearly_flat():
     flat. The two cells deepest in the flat regime should be
     within ~5 % of each other.
 
-    The default v3 linear range (0 → 200 µrad) crosses the knee
-    very early — even cell 1 (~10 µrad) starts feeling the jitter
-    contribution. To exercise the genuine flat regime, this test
-    uses a tighter sweep (0 → 3 µrad) so cells 0 + 1 sit at σ = 0
-    and σ ≈ 0.16 µrad, both deep below the canonical 17 µrad knee."""
-    curve = compute_jitter_sensitivity(
-        _merged_result(),
-        n_points=20,
-        sigma_jit_low_rad=0.0,
-        sigma_jit_high_rad=3.0e-6,
-    )
+    With v3.2's log axis (1 µrad → 500 mrad, 25 cells), cell 0
+    sits at σ = 1 µrad and cell 1 at σ ≈ 1.7 µrad — both well
+    below the canonical knee (~17 µrad)."""
+    curve = compute_jitter_sensitivity(_merged_result(), n_points=25)
     early = [curve.tau_BT_axis_s[i] for i in range(2)]   # cells 0 + 1
     assert all(not math.isnan(t) for t in early)
     mean = sum(early) / len(early)
@@ -136,7 +130,7 @@ def test_low_sigma_regime_nearly_flat():
 def test_finite_cells_monotone_non_decreasing():
     """As σ_jit grows, τ_BT_lumped grows (PIB shrinks → I_avg
     shrinks → τ_BT grows). Ignore no-kill cells (NaN)."""
-    curve = compute_jitter_sensitivity(_merged_result(), n_points=20)
+    curve = compute_jitter_sensitivity(_merged_result(), n_points=25)
     finite_pairs = [
         (curve.tau_BT_axis_s[i - 1], curve.tau_BT_axis_s[i])
         for i in range(1, len(curve.tau_BT_axis_s))
@@ -151,11 +145,10 @@ def test_finite_cells_monotone_non_decreasing():
 
 
 def test_extreme_sigma_jit_is_no_kill():
-    """At σ_jit = 200 µrad (the v3 upper bound), the spot-wander
-    envelope is 2 · 200e-6 · 1500 = 0.6 m. For the canonical 3 kW
-    / 100 mm aperture scenario, PIB drops below ~0.005 and surface
-    flux falls below the 1 W/cm² no-kill threshold."""
-    curve = compute_jitter_sensitivity(_merged_result(), n_points=20)
+    """At σ_jit = 500 mrad (the v3.2 upper bound), the spot-wander
+    envelope is 2 · 0.5 · 1500 = 1500 m. PIB collapses to ~0;
+    surface flux is well below the no-kill threshold."""
+    curve = compute_jitter_sensitivity(_merged_result(), n_points=25)
     assert curve.no_kill_mask[-1] is True
     assert math.isnan(curve.tau_BT_axis_s[-1])
 
@@ -163,10 +156,11 @@ def test_extreme_sigma_jit_is_no_kill():
 def test_no_kill_threshold_set_when_no_kill_engaged():
     """no_kill_threshold_urad is the smallest σ_jit at which the
     cell is in the no-kill region. For the canonical 3 kW scenario
-    it kicks in around ~180 µrad — within the v3 0→200 µrad range."""
-    curve = compute_jitter_sensitivity(_merged_result(), n_points=20)
+    it kicks in around ~180 µrad — within the 1 µrad → 500 mrad
+    range."""
+    curve = compute_jitter_sensitivity(_merged_result(), n_points=25)
     assert curve.no_kill_threshold_urad is not None
-    assert 50.0 < curve.no_kill_threshold_urad < 200.0
+    assert 50.0 < curve.no_kill_threshold_urad < 1.0e4
 
 
 # ---------------------------------------------------------------------------
@@ -176,7 +170,7 @@ def test_kill_threshold_set_when_curve_crosses_dwell():
     """For the canonical scenario, τ_BT eventually exceeds dwell.
     kill_threshold_urad must be a finite value in the climbing
     portion of the curve."""
-    curve = compute_jitter_sensitivity(_merged_result(), n_points=20)
+    curve = compute_jitter_sensitivity(_merged_result(), n_points=25)
     assert curve.kill_threshold_urad is not None
     assert curve.kill_threshold_urad > curve.sigma_jit_axis_urad[0]
     assert curve.kill_threshold_urad <= curve.sigma_jit_axis_urad[-1]
@@ -186,7 +180,7 @@ def test_kill_threshold_at_or_before_no_kill_threshold():
     """The kill threshold marks the boundary between feasible and
     infeasible. It can never be ABOVE the no-kill threshold (which
     is itself a hard infeasibility line)."""
-    curve = compute_jitter_sensitivity(_merged_result(), n_points=20)
+    curve = compute_jitter_sensitivity(_merged_result(), n_points=25)
     if (curve.kill_threshold_urad is not None
             and curve.no_kill_threshold_urad is not None):
         assert (

@@ -3720,25 +3720,29 @@ def plot_jitter_target_animation(
 # ---------------------------------------------------------------------------
 
 def plot_n_jitter_sensitivity(curve) -> go.Figure:
-    """Plot of τ_BT vs σ_jit on linear axes with three colored
-    safety-zone bands (Plot N v3, 2026-04-27).
+    """Plot of τ_BT vs σ_jit on a log x-axis spanning 1 µrad to
+    500 mrad, with three colored safety-zone bands (Plot N v3.2,
+    2026-04-27).
 
     Layers (bottom to top):
-      1. Three colored vrects:
-           green  (0 → kill_threshold)        — Safe
-           amber  (kill_threshold → no-kill)  — Risky
-           red    (no-kill → x_max)           — Infeasible
+      1. Three colored vrects (always drawn when their physics is
+         defined):
+           green  (1 µrad → kill_threshold)        — Safe
+           amber  (kill_threshold → no-kill)       — Risky
+           red    (no-kill → 500 mrad)             — Infeasible
          Mirrors the Plot K (engagement-margin) idiom.
       2. Orange τ_BT curve (solid + markers; NaN cells dropped).
       3. Horizontal dashed teal line at y = available_dwell.
       4. Vertical dashed line at the kill threshold + label.
       5. White "you are here" star at the user's σ_jit + chain τ_BT.
 
-    None / empty curve → always-render frame fallback.
+    Plotly's default mouse pan/zoom is enabled — drag to zoom into
+    any decade, double-click to reset. None / empty curve → always-
+    render frame fallback.
     """
     height = PLOT_HEIGHTS["hero"]
     title = "Burn-through time vs Jitter"
-    xtitle = "σ_jit (µrad)"
+    xtitle = "σ_jit"
     ytitle = "τ_BT (s)"
 
     if (curve is None
@@ -3754,12 +3758,11 @@ def plot_n_jitter_sensitivity(curve) -> go.Figure:
     tau = list(curve.tau_BT_axis_s)
     dwell = curve.available_dwell_s
 
-    # x-axis matches the swept range. The curve module has already
-    # extended `sigma_jit_high_rad` to cover the user's σ_jit when
-    # it lies past the default range, so the curve always reaches
-    # the star's x-coordinate (no gap on the right side).
-    x_min = 0.0
-    x_max = sigma[-1]
+    # Fixed log x-axis range covering the full operational envelope.
+    # The user's σ_jit always falls within 1 µrad → 500 mrad, so the
+    # star is always on-chart.
+    x_min = 1.0           # µrad
+    x_max = 5.0e5         # 500 mrad in µrad
 
     fig = go.Figure()
 
@@ -3904,22 +3907,24 @@ def plot_n_jitter_sensitivity(curve) -> go.Figure:
         )
 
     # ── Layer 5: "you are here" star.
-    if (curve.current_sigma_jit_urad >= 0
+    if (curve.current_sigma_jit_urad > 0
             and curve.current_tau_BT_s > 0
             and not math.isnan(curve.current_tau_BT_s)):
-        # Clamp star to the y-range so it stays visible.
+        # Clamp star to chart edges so it stays visible at any σ_jit.
+        # Sub-µrad → x = 1; super-500-mrad → x = 5e5. The hover
+        # tooltip carries the actual value.
+        star_x = max(x_min, min(curve.current_sigma_jit_urad, x_max))
         star_y = min(curve.current_tau_BT_s, y_range[1] * 0.95)
-        # Place the "Current scenario" label on the side that's
-        # away from the right edge to avoid colliding with the
-        # "Available dwell" annotation (anchored bottom-right).
-        # If the star sits in the right ~30% of the plot, put the
-        # label on its left; otherwise on its right.
-        if curve.current_sigma_jit_urad > 0.7 * x_max:
+        # Place the "Current scenario" label away from the right
+        # edge to avoid collision with the dwell annotation.
+        # On log scale: right of midpoint = right half (log-scale).
+        log_mid = math.sqrt(x_min * x_max)
+        if star_x > log_mid:
             text_position = "top left"
         else:
             text_position = "top right"
         fig.add_trace(go.Scatter(
-            x=[curve.current_sigma_jit_urad],
+            x=[star_x],
             y=[star_y],
             mode="markers+text",
             text=["Current scenario"],
@@ -3931,8 +3936,8 @@ def plot_n_jitter_sensitivity(curve) -> go.Figure:
             ),
             name="You are here",
             hovertemplate=(
-                f"σ_jit %{{x:.1f}} µrad · τ_BT "
-                f"{curve.current_tau_BT_s:.2f} s "
+                f"σ_jit {curve.current_sigma_jit_urad:.1f} µrad · "
+                f"τ_BT {curve.current_tau_BT_s:.2f} s "
                 "(PDE-accurate)<extra></extra>"
             ),
             showlegend=False,
@@ -3956,9 +3961,25 @@ def plot_n_jitter_sensitivity(curve) -> go.Figure:
 
     fig.update_layout(
         title=title,
-        hovermode="x unified",
+        hovermode="closest",
     )
-    fig.update_xaxes(title_text=xtitle, range=[x_min, x_max])
+
+    # Friendly tick labels — covers both µrad and mrad units with
+    # explicit unit suffixes so the user doesn't have to mentally
+    # multiply by powers of ten.
+    tickvals = [1, 3, 10, 30, 100, 300, 1000, 3000,
+                10000, 30000, 100000, 300000]
+    ticktext = ["1 µrad", "3 µrad", "10 µrad", "30 µrad",
+                "100 µrad", "300 µrad",
+                "1 mrad", "3 mrad", "10 mrad", "30 mrad",
+                "100 mrad", "300 mrad"]
+    fig.update_xaxes(
+        title_text=xtitle,
+        type="log",
+        range=[math.log10(x_min), math.log10(x_max)],
+        tickvals=tickvals,
+        ticktext=ticktext,
+    )
     fig.update_yaxes(title_text=ytitle, range=y_range)
 
     _apply_default_layout(fig, height=height)
