@@ -498,6 +498,17 @@ select:focus-visible,
   color: var(--accent-primary);
   text-decoration: underline;
 }}
+/* Inline tooltip line beneath the value row (2026-04-27 redesign).
+   Replaces the prior browser-native hover tooltip on the outer div.
+   Visible at first read, no hover required, mobile-friendly. */
+.hel-card-tooltip-inline {{
+  margin-top: 6px;
+  font-size: 12px;
+  line-height: 1.3;
+  color: var(--fg-secondary);
+  opacity: 0.85;
+  word-wrap: break-word;
+}}
 
 /* ---- Skeleton placeholder (pre-first-run) ------------------------------ */
 /* Same silhouette as a real card; a soft pulsing gradient signals "waiting

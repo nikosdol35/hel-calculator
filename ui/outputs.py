@@ -338,12 +338,14 @@ def _build_csv_snapshot(result: dict) -> str:
 def render_tab_overview(result: dict) -> None:
     """Render the Overview tab.
 
-    Reads in one glance: engagement verdict first, then the six KPIs that
-    answer "can I engage this target with this system?" — power in the
-    aimpoint, peak irradiance, burn-through time, available dwell, wall-
-    plug input power, waste heat. Two secondary compute-headroom cards
-    (sustain time, engagements per hour) sit below the primary row so the
-    same tab carries the "can I engage repeatedly?" read.
+    Reads in one glance: engagement verdict first, then the four headline
+    KPIs that answer "can I engage this target with this system?" — power
+    in the aimpoint, peak irradiance, burn-through time, available dwell.
+    Wall-plug input power, waste heat, sustain time, and engagements-per-
+    hour are still computed by M10 (the math tab consumes them) but are
+    intentionally not shown in this tab — they belong to a "can I engage
+    repeatedly?" question that v1's audience doesn't reach for from the
+    front page (hidden 2026-04-27 per user request).
     """
     section_header("Engagement verdict")
     _verdict_chip(result)
@@ -360,41 +362,18 @@ def render_tab_overview(result: dict) -> None:
     i_peak = by["m7"]["I_peak"]
     tau_bt = by["m8"].get("tau_BT")
     dwell = by["m3"].get("available_dwell")
-    p_in = by["m10"]["P_in"]
-    q_waste = by["m10"]["Q_waste"]
 
     section_header("Engagement summary")
     explanation(EXPLANATIONS["overview_summary"])
-    c1, c2, c3 = st.columns(3)
-    with c1: _card("P_aim",   p_aim)
-    with c2: _card("I_peak",  i_peak)
-    with c3: _card("tau_BT",  tau_bt)
-
-    c1, c2, c3 = st.columns(3)
-    with c1: _card("available_dwell", dwell)
-    with c2: _card("P_in",    p_in)
-    with c3: _card("Q_waste", q_waste)
-
-    # --- Secondary row: compute headroom ------------------------------------
-    t_sustain = by["m10"]["t_sustain"]
-    eng_per_hr = by["m10"]["engagements_per_hour"]
-
-    section_header("Compute headroom")
-    explanation(EXPLANATIONS["overview_headroom"])
-    c1, c2 = st.columns(2)
-    with c1:
-        if math.isfinite(t_sustain):
-            _card("t_sustain", t_sustain, size="md")
-        else:
-            metric_card(
-                output_label("t_sustain"),
-                "∞ thermally unlimited",
-                unit="",
-                tooltip=output_tooltip("t_sustain"),
-                size="md",
-            )
-    with c2:
-        _card("engagements_per_hour", eng_per_hr, size="md")
+    # Single row of four headline metrics. Was 3+3 with two cards
+    # (P_in, Q_waste) plus a separate "Compute headroom" section
+    # below; consolidated 2026-04-27 to the four numbers users
+    # actually consult on the Overview tab.
+    c1, c2, c3, c4 = st.columns(4)
+    with c1: _card("P_aim",           p_aim)
+    with c2: _card("I_peak",          i_peak)
+    with c3: _card("tau_BT",          tau_bt)
+    with c4: _card("available_dwell", dwell)
 
     # --- Hero chart: dwell vs burn-through ----------------------------------
     # Local imports keep the unit-test import surface of ui/outputs.py light.

@@ -318,23 +318,29 @@ def metric_card(
         "hel-card-value hel-card-value--md" if size == "md" else "hel-card-value"
     )
 
-    # --- Tooltip via the card's title attribute --------------------------
-    # Escaping the tooltip: a user-supplied tooltip comes from ui/labels.py
-    # which we control, so full HTML escaping is overkill — but we do
-    # replace literal quotes so a stray apostrophe doesn't break the
-    # attribute. If a future tooltip needs HTML, that's a labels.py change.
-    title_attr = (
-        f' title="{tooltip.replace(chr(34), chr(39))}"' if tooltip else ""
+    # --- Inline tooltip line (2026-04-27 redesign) -----------------------
+    # Was previously rendered as a browser-native ``title=`` attribute on
+    # the outer div; users had to discover the tooltip by hovering, and
+    # the floating popup overlapped neighbouring cards. New behaviour:
+    # the tooltip text shows permanently as a small line beneath the
+    # value — visible at first read, no hover required, mobile-friendly,
+    # no overlap onto adjacent cards. Tooltips with empty / None text
+    # render no third div (no awkward gap). All 41 call sites benefit
+    # automatically; no API change.
+    tooltip_inline_html = (
+        f'<div class="hel-card-tooltip-inline">{tooltip}</div>'
+        if tooltip else ""
     )
 
     st.markdown(
-        f'<div class="hel-card"{title_attr}>'
+        f'<div class="hel-card">'
         f'  <div class="hel-card-label">{label}</div>'
         f'  <div class="hel-card-value-row">'
         f'    <span class="{value_class}">{value_html}</span>'
         f'    {unit_html}'
         f'    {est_html}'
         f'  </div>'
+        f'  {tooltip_inline_html}'
         f'</div>',
         unsafe_allow_html=True,
     )

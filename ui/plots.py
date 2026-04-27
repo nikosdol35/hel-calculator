@@ -108,6 +108,43 @@ def _active_palette() -> dict[str, str]:
     return PALETTE_LIGHT if pio.templates.default == "hel_light" else PALETTE_DARK
 
 
+def _apply_default_layout(
+    fig: go.Figure, *, height: int, show_legend: bool = True,
+    extra_top_margin: int = 0,
+) -> None:
+    """Standard layout polish — single source of truth for legend +
+    margin placement across every plot constructor in this module.
+
+    Why this helper exists: prior to 2026-04-27 each plot configured
+    its own legend position, leading to inconsistent placement
+    (some default top-right inside the plot area, some horizontal-
+    above) and frequent overlap with annotations placed via
+    ``annotation_position="top right"``. This helper enforces:
+
+      - **Legend**: horizontal row, anchored ABOVE the plot area
+        in the title margin. Never overlaps the plot region.
+      - **Margins**: `t=70` to make room for the legend; tighter
+        left/right than Plotly defaults to maximise plot area on
+        the typical wide-card layout.
+
+    Heatmaps with no traces (no legend) pass ``show_legend=False``
+    and Plotly skips the legend block entirely. Plots with annotations
+    that need extra clearance can pass ``extra_top_margin``.
+    """
+    fig.update_layout(
+        height=height,
+        margin=dict(l=10, r=10, t=70 + extra_top_margin, b=40),
+    )
+    if show_legend:
+        fig.update_layout(
+            legend=dict(
+                orientation="h",
+                yanchor="bottom", y=1.02,
+                xanchor="right", x=1.0,
+            ),
+        )
+
+
 # ---------------------------------------------------------------------------
 # Series styling — hue + dash + marker for color-blind dual-encoding.
 # ---------------------------------------------------------------------------
@@ -402,7 +439,6 @@ def plot_a_on_target_performance(
     fig.update_layout(
         title=title,
         hovermode="x unified",
-        height=height,
     )
     fig.update_xaxes(title_text=xtitle)
     fig.update_yaxes(
@@ -415,6 +451,7 @@ def plot_a_on_target_performance(
         range=[0, 1.05],
         secondary_y=True,
     )
+    _apply_default_layout(fig, height=height)
     return fig
 
 
@@ -516,10 +553,10 @@ def plot_b_time_to_burnthrough(
     fig.update_layout(
         title=title,
         hovermode="x unified",
-        height=height,
     )
     fig.update_xaxes(title_text=xtitle)
     fig.update_yaxes(title_text=ytitle, type="log")
+    _apply_default_layout(fig, height=height)
     return fig
 
 
@@ -686,10 +723,10 @@ def plot_c_beam_diameter_breakdown(
     fig.update_layout(
         title=title,
         hovermode="x unified",
-        height=height,
     )
     fig.update_xaxes(title_text=xtitle)
     fig.update_yaxes(title_text=ytitle)
+    _apply_default_layout(fig, height=height)
     return fig
 
 
@@ -1416,10 +1453,10 @@ def plot_g_spot_vs_bucket(
     fig.update_layout(
         title=title,
         hovermode="x unified",
-        height=height,
     )
     fig.update_xaxes(title_text=xtitle)
     fig.update_yaxes(title_text=ytitle)
+    _apply_default_layout(fig, height=height)
     return fig
 
 
@@ -2071,7 +2108,11 @@ def plot_j_cumulative_energy_diagnostic(
         fig.add_vrect(**vrect_kwargs)
 
     # Failure-fluence reference line (lumped-mass). On the primary
-    # y-axis in J/cm² for the cumulative-energy curve.
+    # y-axis in J/cm² for the cumulative-energy curve. Annotation
+    # placed at "bottom left" so it doesn't collide with the Kill
+    # vline annotation at "top right" — together with the Useful-
+    # zone vrect at "top left", the three annotations occupy three
+    # distinct corners of the plot.
     if E_fail_jpcm2 is not None and E_fail_jpcm2 > 0:
         hline_kwargs: dict = dict(
             y=E_fail_jpcm2,
@@ -2081,7 +2122,7 @@ def plot_j_cumulative_energy_diagnostic(
             annotation_text=(
                 f"E_fail (lumped-mass) ≈ {E_fail_jpcm2:.0f} J/cm²"
             ),
-            annotation_position="bottom right",
+            annotation_position="bottom left",
             annotation_font=dict(color=palette["fg.secondary"], size=11),
         )
         if have_overlay:
@@ -2105,7 +2146,6 @@ def plot_j_cumulative_energy_diagnostic(
 
     fig.update_layout(
         title=title,
-        height=height,
         hovermode="x unified",
     )
     fig.update_xaxes(title_text=xtitle)
@@ -2117,6 +2157,11 @@ def plot_j_cumulative_energy_diagnostic(
         )
     else:
         fig.update_yaxes(title_text=ytitle)
+    # Standard layout: legend horizontal above the plot area so the
+    # three in-plot annotations (Useful zone / E_fail / Kill) never
+    # collide with it. Pre-2026-04-27 the default top-right legend
+    # overlapped the E_fail label and the Kill marker.
+    _apply_default_layout(fig, height=height, show_legend=have_overlay)
 
     # Auto-zoom the time axis when the kill happens early in the
     # engagement window. Same heuristic as Plot H — proportional to
