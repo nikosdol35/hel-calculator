@@ -1429,12 +1429,13 @@ def _envelope_state_machine(
             elapsed = max(0.0, time.time() - (ss[start_key] or time.time()))
             st.info(
                 f"Computing in the background — {elapsed:.0f} s "
-                f"elapsed. Typical runtime is 1–3 minutes for "
-                f"{n_cells} engagements on Streamlit Cloud (some "
-                f"scenarios push to 4–5 min when corner cells hit "
-                f"the M8 PDE cap). You can keep using other plots "
-                f"and tabs while this runs; the section will refresh "
-                f"automatically when the result is ready."
+                f"elapsed. Typical runtime is 30–90 seconds for "
+                f"{n_cells} engagements on Streamlit Cloud. Cells "
+                f"with very long dwell windows (>5 simulated min) "
+                f"are skipped automatically and rendered gray. You "
+                f"can keep using other plots and tabs while this "
+                f"runs; the section will refresh automatically when "
+                f"the result is ready."
             )
             if st.button("Cancel", key=f"_envelope_cancel_{kind}"):
                 # Set the cancel token so the worker stops at the
