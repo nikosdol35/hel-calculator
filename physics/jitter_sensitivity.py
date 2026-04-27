@@ -6,6 +6,14 @@ as the 'you are here' star.
 
 Pure module — no Streamlit imports.
 
+**v3 (2026-04-27):** the sweep is **linear** in σ_jit (0 → 200 µrad,
+20 cells). The previous v2 release used a 5.7-decade log axis (1 µrad
+→ 500 mrad), which compressed the operationally-meaningful 0–200 µrad
+band into the leftmost 0.5 % of the axis and made the plot unreadable.
+The linear range covers the diffraction knee (~17 µrad for the
+canonical 100 mm aperture at 1.5 km) and all three feasibility zones
+(safe / risky / no-kill) for typical scenarios.
+
 Two deliberate simplifications keep the sweep fast (~ms total instead
 of ~minutes):
 
@@ -27,9 +35,12 @@ actual scenario uses the full chain's PDE-accurate τ_BT for the
 'you are here' star, so the headline metric and the star agree
 even though they sit on slightly different curves.
 
-Cost: ~15 closed-form arithmetic evaluations × 15 cells ≈ <1 ms.
-Wrapped in a Streamlit ``@st.cache_data`` so first-render is
-sub-second; subsequent renders are instant.
+Cost: ~20 closed-form arithmetic evaluations ≈ 30 µs total. The render
+function calls this module directly (no Streamlit cache) — the cost
+is imperceptible compared to the rest of the page render, and going
+through the cache helper introduced a contract bug in v2 (chain
+outputs were dropped before reaching this function, leaving every
+cell at I_avg = 0 and triggering the all-no-kill fallback).
 """
 from __future__ import annotations
 
@@ -62,7 +73,7 @@ class JitterSensitivityCurve:
     coordinate (which uses the chain's PDE-accurate τ_BT, not the
     lumped-mass approximation used for the curve).
     """
-    sigma_jit_axis_urad: tuple[float, ...]    # log-spaced
+    sigma_jit_axis_urad: tuple[float, ...]    # linear-spaced (v3, 2026-04-27)
     tau_BT_axis_s: tuple[float, ...]          # NaN in no-kill cells
     no_kill_mask: tuple[bool, ...]            # True where I_avg < threshold
     available_dwell_s: float
@@ -72,11 +83,12 @@ class JitterSensitivityCurve:
     current_tau_BT_s: float                   # PDE-accurate; from the chain
 
 
-def _log_space(low: float, high: float, n: int) -> tuple[float, ...]:
+def _lin_space(low: float, high: float, n: int) -> tuple[float, ...]:
+    """Linear-spaced grid of n points from low to high (inclusive)."""
     if n < 2:
         return (low,)
-    step = (math.log(high) - math.log(low)) / (n - 1)
-    return tuple(math.exp(math.log(low) + i * step) for i in range(n))
+    step = (high - low) / (n - 1)
+    return tuple(low + i * step for i in range(n))
 
 
 def _e_fail_jpm2(material: str, thickness_m: float, T_amb_k: float) -> float | None:
@@ -106,18 +118,20 @@ def _e_fail_jpm2(material: str, thickness_m: float, T_amb_k: float) -> float | N
 
 def compute_jitter_sensitivity(
     base_inputs: dict,
-    n_points: int = 15,
-    sigma_jit_low_rad: float = 1.0e-6,        # 1 µrad
-    sigma_jit_high_rad: float = 0.5,          # 500 mrad
+    n_points: int = 20,
+    sigma_jit_low_rad: float = 0.0,           # 0 µrad
+    sigma_jit_high_rad: float = 2.0e-4,       # 200 µrad
 ) -> JitterSensitivityCurve:
     """Sweep σ_jit at the user's R_detect, return the τ_BT curve.
 
     Args:
       base_inputs: merged orchestrator-result dict (the same shape
         passed to ``render_tab_engagement``). Must include the v2.0
-        trajectory key ``engagement_geometry``.
-      n_points: grid points (default 15, log-spaced).
-      sigma_jit_low_rad / sigma_jit_high_rad: sweep bounds.
+        trajectory key ``engagement_geometry`` and the chain outputs
+        (``by_module``, ``tau_BT``, ``available_dwell``).
+      n_points: grid points (default 20, linear-spaced).
+      sigma_jit_low_rad / sigma_jit_high_rad: sweep bounds (default
+        0 → 200 µrad).
 
     Returns:
       JitterSensitivityCurve with the curve + user's "you are here"
@@ -176,7 +190,7 @@ def compute_jitter_sensitivity(
     current_sigma_jit_rad = float(base_inputs.get("sigma_jit", 0.0))
 
     # ── Sweep loop ─────────────────────────────────────────────────
-    sigma_axis_rad = _log_space(
+    sigma_axis_rad = _lin_space(
         sigma_jit_low_rad, sigma_jit_high_rad, n_points,
     )
     tau_BT_axis: list[float] = []
@@ -226,16 +240,14 @@ def compute_jitter_sensitivity(
     # Threshold-detection helpers. Both are linear interpolations
     # between adjacent sweep cells.
 
-    def _interp_log_x(x_lo: float, x_hi: float,
+    def _interp_lin_x(x_lo: float, x_hi: float,
                       y_lo: float, y_hi: float, y_target: float) -> float:
-        """Linear interp on log(x) for fixed y_target between (x_lo,
-        y_lo) and (x_hi, y_hi). Used because the x-axis is log."""
+        """Linear interp on x for fixed y_target between (x_lo, y_lo)
+        and (x_hi, y_hi). Used because the x-axis is linear (v3)."""
         if y_hi == y_lo:
             return x_lo
         t = (y_target - y_lo) / (y_hi - y_lo)
-        log_lo = math.log(x_lo)
-        log_hi = math.log(x_hi)
-        return math.exp(log_lo + t * (log_hi - log_lo))
+        return x_lo + t * (x_hi - x_lo)
 
     # No-kill threshold: smallest σ_jit at which the cell is no_kill.
     # When found, every σ_jit ≥ this value falls in the greyed region.
@@ -259,7 +271,7 @@ def compute_jitter_sensitivity(
             # Case (a): adjacent finite cells where curve crosses dwell.
             if (not math.isnan(tau_lo) and not math.isnan(tau_hi)
                     and tau_lo <= available_dwell_s < tau_hi):
-                kill_threshold_rad = _interp_log_x(
+                kill_threshold_rad = _interp_lin_x(
                     sigma_axis_rad[i - 1], sigma_axis_rad[i],
                     tau_lo, tau_hi, available_dwell_s,
                 )

@@ -1055,18 +1055,19 @@ EXPLANATIONS: dict[str, str] = {
     ),
     "plot_n_intro_pre": (
         "How burn-through time scales with pointing jitter at your "
-        "current detection range. The white star is your scenario; "
-        "the vertical dashed line is the kill threshold; the greyed "
-        "region is where the spot is so wide that the laser can't "
-        "deposit enough flux to reach burn-through regardless of "
-        "dwell."
+        "current detection range, on linear axes. The background "
+        "shows three zones: green = safe (τ_BT below dwell), amber "
+        "= risky (τ_BT exceeds dwell, target escapes), red = "
+        "infeasible (spot too wide, laser can't reach burn-through). "
+        "The white star is your scenario."
     ),
     "plot_n_intro": (
         "Approximate scaling — the curve uses a fast lumped-mass "
         "τ_BT for the sweep, while the white star is your scenario's "
         "PDE-accurate value (matches the headline τ_BT). Below the "
-        "kill threshold, jitter has negligible impact; above it, "
-        "τ_BT grows rapidly until the engagement stops closing."
+        "kill threshold, jitter has negligible impact on burn-through; "
+        "above it, τ_BT grows rapidly until the engagement stops "
+        "closing or the laser can no longer deposit useful flux."
     ),
     "plot_k_intro_pre": (
         "Strategic view: a 6×6 grid that re-runs the full engagement "

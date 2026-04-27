@@ -1739,40 +1739,30 @@ def _render_jitter_animation(result: dict) -> None:
 # Compute button or background-job machinery needed at this scale.
 # ---------------------------------------------------------------------------
 
-@st.cache_data(max_entries=8, show_spinner=False)
-def _cached_jitter_sensitivity(frozen_inputs: tuple):
-    """Cache wrapper for the jitter-sensitivity sweep. Memoised on
-    the same frozen-inputs tuple as the envelope plots — anything
-    that affects the chain (laser, atmosphere, target, geometry)
-    invalidates the cache; the actual σ_jit value is part of the
-    tuple too, so changing the user's σ_jit invalidates and re-
-    computes (which is correct — the 'you are here' star moves)."""
-    from physics.jitter_sensitivity import compute_jitter_sensitivity
-    return compute_jitter_sensitivity(dict(frozen_inputs))
-
-
 def _render_jitter_sensitivity(result: dict) -> None:
     """Render Plot N — Burn-through time vs Jitter — at the absolute
     bottom of the Engagement tab.
 
-    Uses the same `_frozen_inputs_for_envelope` helper as the
-    operational/atmospheric envelopes for the cache key (covers all
-    user inputs that matter to the chain).
+    The curve module reads chain outputs (``by_module``, ``tau_BT``,
+    ``available_dwell``) directly from the merged result dict. We do
+    NOT route through ``_frozen_inputs_for_envelope`` because that
+    helper strips chain outputs (it's designed for envelope sweeps
+    that re-run the chain per cell). Compute is sub-millisecond
+    closed-form arithmetic so no cache is needed.
     """
     section_header("Burn-through time vs Jitter")
     explanation(EXPLANATIONS["plot_n_intro_pre"])
 
-    frozen = _frozen_inputs_for_envelope(result)
-    if frozen is None:
+    if "engagement_geometry" not in result:
         st.info(
             "Burn-through-vs-jitter plot is not available for this "
-            "scenario — the current input set is missing required "
-            "v2.0 trajectory keys."
+            "scenario — v2.0 trajectory keys are missing."
         )
         return
 
     try:
-        curve = _cached_jitter_sensitivity(frozen)
+        from physics.jitter_sensitivity import compute_jitter_sensitivity
+        curve = compute_jitter_sensitivity(result)
     except KeyError as exc:
         st.info(f"Burn-through-vs-jitter plot skipped: {exc}")
         return

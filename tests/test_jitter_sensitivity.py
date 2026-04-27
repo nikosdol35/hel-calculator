@@ -1,9 +1,10 @@
 """Tests for the jitter-sensitivity sweep behind Plot N.
 
 PR: feature/plot-n-jitter-sensitivity (2026-04-27).
+v3 update: linear σ_jit axis (0 → 200 µrad, 20 cells).
 
 Plot N shows τ_BT scaling vs σ_jit at fixed kinematics. The sweep
-deliberately uses two simplifications to hit the <1 s compute
+deliberately uses two simplifications to hit the <1 ms compute
 budget:
   1. Lumped-mass τ_BT instead of M8 PDE (~5 % off PDE-accurate).
   2. Skip M6 blooming (w_bloom = 0, S_TB = 1.0) per cell.
@@ -13,7 +14,7 @@ user's "you are here" star uses the chain's PDE-accurate τ_BT, so
 the headline metric and the star agree exactly.
 
 Coverage:
-  - Dataclass shape + log-spaced axis
+  - Dataclass shape + linear-spaced axis (v3)
   - Low-σ_jit regime: τ_BT roughly constant (jitter contribution
     negligible vs diffraction)
   - High-σ_jit regime: τ_BT monotone non-decreasing
@@ -24,6 +25,9 @@ Coverage:
   - Star coordinates use chain values, not approximation
   - v1.x inputs rejected with KeyError
   - Wall-clock budget guard (<1 s on local even for n_points=25)
+  - Regression test for the v2 cache-helper bug: integration path
+    (chain → curve) must yield feasible cells for the canonical
+    scenario (would have caught the all-no-kill bug shipped in v2).
 """
 from __future__ import annotations
 
@@ -67,23 +71,23 @@ def _merged_result(**overrides) -> dict:
 def test_returns_curve_dataclass():
     """compute_jitter_sensitivity returns a JitterSensitivityCurve
     with axes of length n_points and the no-kill mask aligned."""
-    curve = compute_jitter_sensitivity(_merged_result(), n_points=15)
+    curve = compute_jitter_sensitivity(_merged_result(), n_points=20)
     assert isinstance(curve, JitterSensitivityCurve)
-    assert len(curve.sigma_jit_axis_urad) == 15
-    assert len(curve.tau_BT_axis_s) == 15
-    assert len(curve.no_kill_mask) == 15
+    assert len(curve.sigma_jit_axis_urad) == 20
+    assert len(curve.tau_BT_axis_s) == 20
+    assert len(curve.no_kill_mask) == 20
 
 
-def test_axis_log_spaced():
-    """σ_jit axis is log-spaced from 1 µrad to 500 mrad (= 5×10⁵ µrad)."""
-    curve = compute_jitter_sensitivity(_merged_result(), n_points=15)
+def test_axis_linear_spaced():
+    """σ_jit axis is linear-spaced from 0 µrad to 200 µrad (v3)."""
+    curve = compute_jitter_sensitivity(_merged_result(), n_points=20)
     axis = curve.sigma_jit_axis_urad
-    assert axis[0] == pytest.approx(1.0, rel=1e-3)
-    assert axis[-1] == pytest.approx(5.0e5, rel=1e-3)
-    # Log spacing: ratio between adjacent points is constant.
-    ratio_first = axis[1] / axis[0]
-    ratio_last = axis[-1] / axis[-2]
-    assert ratio_first == pytest.approx(ratio_last, rel=1e-6)
+    assert axis[0] == pytest.approx(0.0, abs=1e-6)
+    assert axis[-1] == pytest.approx(200.0, rel=1e-3)
+    # Linear spacing: difference between adjacent points is constant.
+    diff_first = axis[1] - axis[0]
+    diff_last = axis[-1] - axis[-2]
+    assert diff_first == pytest.approx(diff_last, rel=1e-6)
 
 
 def test_runs_well_under_one_second():
@@ -109,11 +113,17 @@ def test_low_sigma_regime_nearly_flat():
     flat. The two cells deepest in the flat regime should be
     within ~5 % of each other.
 
-    Knee for canonical 1.5 km / 50 mm w_diff sits at ~17 µrad, so
-    cells at σ ≈ 1 and 2.5 µrad are clearly below it. The third
-    cell (~6 µrad) starts approaching the knee — excluded from
-    this check."""
-    curve = compute_jitter_sensitivity(_merged_result(), n_points=15)
+    The default v3 linear range (0 → 200 µrad) crosses the knee
+    very early — even cell 1 (~10 µrad) starts feeling the jitter
+    contribution. To exercise the genuine flat regime, this test
+    uses a tighter sweep (0 → 3 µrad) so cells 0 + 1 sit at σ = 0
+    and σ ≈ 0.16 µrad, both deep below the canonical 17 µrad knee."""
+    curve = compute_jitter_sensitivity(
+        _merged_result(),
+        n_points=20,
+        sigma_jit_low_rad=0.0,
+        sigma_jit_high_rad=3.0e-6,
+    )
     early = [curve.tau_BT_axis_s[i] for i in range(2)]   # cells 0 + 1
     assert all(not math.isnan(t) for t in early)
     mean = sum(early) / len(early)
@@ -126,7 +136,7 @@ def test_low_sigma_regime_nearly_flat():
 def test_finite_cells_monotone_non_decreasing():
     """As σ_jit grows, τ_BT_lumped grows (PIB shrinks → I_avg
     shrinks → τ_BT grows). Ignore no-kill cells (NaN)."""
-    curve = compute_jitter_sensitivity(_merged_result(), n_points=15)
+    curve = compute_jitter_sensitivity(_merged_result(), n_points=20)
     finite_pairs = [
         (curve.tau_BT_axis_s[i - 1], curve.tau_BT_axis_s[i])
         for i in range(1, len(curve.tau_BT_axis_s))
@@ -141,10 +151,11 @@ def test_finite_cells_monotone_non_decreasing():
 
 
 def test_extreme_sigma_jit_is_no_kill():
-    """At σ_jit = 500 mrad (the upper bound), the spot-wander
-    envelope is 2 · 0.5 · 1500 = 1500 m. PIB → 0; surface flux
-    is well below the no-kill threshold."""
-    curve = compute_jitter_sensitivity(_merged_result(), n_points=15)
+    """At σ_jit = 200 µrad (the v3 upper bound), the spot-wander
+    envelope is 2 · 200e-6 · 1500 = 0.6 m. For the canonical 3 kW
+    / 100 mm aperture scenario, PIB drops below ~0.005 and surface
+    flux falls below the 1 W/cm² no-kill threshold."""
+    curve = compute_jitter_sensitivity(_merged_result(), n_points=20)
     assert curve.no_kill_mask[-1] is True
     assert math.isnan(curve.tau_BT_axis_s[-1])
 
@@ -152,10 +163,10 @@ def test_extreme_sigma_jit_is_no_kill():
 def test_no_kill_threshold_set_when_no_kill_engaged():
     """no_kill_threshold_urad is the smallest σ_jit at which the
     cell is in the no-kill region. For the canonical 3 kW scenario
-    it kicks in around ~280 µrad."""
-    curve = compute_jitter_sensitivity(_merged_result(), n_points=15)
+    it kicks in around ~180 µrad — within the v3 0→200 µrad range."""
+    curve = compute_jitter_sensitivity(_merged_result(), n_points=20)
     assert curve.no_kill_threshold_urad is not None
-    assert 50.0 < curve.no_kill_threshold_urad < 1.0e4
+    assert 50.0 < curve.no_kill_threshold_urad < 200.0
 
 
 # ---------------------------------------------------------------------------
@@ -165,7 +176,7 @@ def test_kill_threshold_set_when_curve_crosses_dwell():
     """For the canonical scenario, τ_BT eventually exceeds dwell.
     kill_threshold_urad must be a finite value in the climbing
     portion of the curve."""
-    curve = compute_jitter_sensitivity(_merged_result(), n_points=15)
+    curve = compute_jitter_sensitivity(_merged_result(), n_points=20)
     assert curve.kill_threshold_urad is not None
     assert curve.kill_threshold_urad > curve.sigma_jit_axis_urad[0]
     assert curve.kill_threshold_urad <= curve.sigma_jit_axis_urad[-1]
@@ -175,7 +186,7 @@ def test_kill_threshold_at_or_before_no_kill_threshold():
     """The kill threshold marks the boundary between feasible and
     infeasible. It can never be ABOVE the no-kill threshold (which
     is itself a hard infeasibility line)."""
-    curve = compute_jitter_sensitivity(_merged_result(), n_points=15)
+    curve = compute_jitter_sensitivity(_merged_result(), n_points=20)
     if (curve.kill_threshold_urad is not None
             and curve.no_kill_threshold_urad is not None):
         assert (
@@ -236,3 +247,43 @@ def test_missing_material_does_not_crash():
     # All cells should be no-kill.
     assert all(curve.no_kill_mask)
     assert all(math.isnan(t) for t in curve.tau_BT_axis_s)
+
+
+# ---------------------------------------------------------------------------
+# Regression test for the v2 → v3 cache-helper bug
+# ---------------------------------------------------------------------------
+def test_canonical_scenario_yields_feasible_cells():
+    """Regression test for the v2 → v3 cache-helper bug.
+
+    The chain produces a real merged result with a valid τ_BT.
+    compute_jitter_sensitivity on that result must NOT mark every
+    cell as no-kill, and the star's current_tau_BT_s must come from
+    the chain (not zero).
+
+    The shipped v2 plot was failing both checks because the
+    rendering pipeline (_render_jitter_sensitivity →
+    _frozen_inputs_for_envelope → _cached_jitter_sensitivity) was
+    stripping the chain outputs (by_module, tau_BT, available_dwell)
+    from the dict before passing it to this function. With those
+    stripped, every cell saw P_exit = 0 → I_avg = 0 → no-kill, and
+    the star landed at y = 0.
+
+    The v3 fix bypasses the cache entirely and passes the merged
+    result dict directly. This test verifies the integration path
+    end-to-end.
+    """
+    inputs = _v2_inputs()
+    result = run_full_chain(inputs)
+    merged = {**inputs, **result}
+    curve = compute_jitter_sensitivity(merged)
+    assert any(not n for n in curve.no_kill_mask), (
+        "All-no-kill curve for canonical scenario — chain outputs "
+        "may not be reaching the curve module."
+    )
+    assert curve.current_tau_BT_s > 0, (
+        "Star τ_BT is zero — chain's tau_BT not propagated."
+    )
+    # Star τ_BT must equal the chain's tau_BT exactly.
+    assert curve.current_tau_BT_s == pytest.approx(
+        float(merged["tau_BT"]), rel=1e-9,
+    )

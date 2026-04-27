@@ -3720,22 +3720,26 @@ def plot_jitter_target_animation(
 # ---------------------------------------------------------------------------
 
 def plot_n_jitter_sensitivity(curve) -> go.Figure:
-    """6-layer plot of τ_BT vs σ_jit with regime annotations.
+    """Plot of τ_BT vs σ_jit on linear axes with three colored
+    safety-zone bands (Plot N v3, 2026-04-27).
 
     Layers (bottom to top):
-      1. Greyed-out background spanning the no-kill region.
-      2. Amber band fill where curve > available_dwell.
-      3. Orange τ_BT curve (solid + markers).
-      4. Horizontal dashed teal line at y = available_dwell.
-      5. Vertical dashed line at the kill threshold + annotation.
-      6. White "you are here" star at the user's σ_jit + chain τ_BT.
+      1. Three colored vrects:
+           green  (0 → kill_threshold)        — Safe
+           amber  (kill_threshold → no-kill)  — Risky
+           red    (no-kill → x_max)           — Infeasible
+         Mirrors the Plot K (engagement-margin) idiom.
+      2. Orange τ_BT curve (solid + markers; NaN cells dropped).
+      3. Horizontal dashed teal line at y = available_dwell.
+      4. Vertical dashed line at the kill threshold + label.
+      5. White "you are here" star at the user's σ_jit + chain τ_BT.
 
     None / empty curve → always-render frame fallback.
     """
     height = PLOT_HEIGHTS["hero"]
     title = "Burn-through time vs Jitter"
-    xtitle = "σ_jit (µrad, log)"
-    ytitle = "τ_BT (s, log)"
+    xtitle = "σ_jit (µrad)"
+    ytitle = "τ_BT (s)"
 
     if (curve is None
             or not curve.sigma_jit_axis_urad
@@ -3748,54 +3752,88 @@ def plot_n_jitter_sensitivity(curve) -> go.Figure:
     palette = _active_palette()
     sigma = list(curve.sigma_jit_axis_urad)
     tau = list(curve.tau_BT_axis_s)
+    dwell = curve.available_dwell_s
+
+    # Dynamic x-axis upper bound. Default to the swept range upper
+    # bound, but expand if the user's σ_jit exceeds 1/1.2 of it so
+    # the star is always rendered on-chart.
+    x_min = 0.0
+    x_max = sigma[-1]
+    if (curve.current_sigma_jit_urad
+            and curve.current_sigma_jit_urad > x_max / 1.2):
+        x_max = curve.current_sigma_jit_urad * 1.2
 
     fig = go.Figure()
 
-    # ── Layer 1: greyed-out background for the no-kill region.
-    # Plotly's add_vrect spans full y on a log axis, drawn before the
-    # data traces so the curve renders on top of it.
-    if curve.no_kill_threshold_urad is not None:
-        grey_rgba = _hex_to_rgba(palette["bg.surface"], alpha=0.45)
+    # ── Layer 1: three safety-zone vrects (green / amber / red) ──
+    # Pattern mirrors plot_e_engagement_margin_vs_range:
+    # _hex_to_rgba(palette["status.*"], alpha=0.12) at "below" layer.
+    ok_rgba = _hex_to_rgba(palette["status.ok"], alpha=0.12)
+    warn_rgba = _hex_to_rgba(palette["status.warn"], alpha=0.12)
+    err_rgba = _hex_to_rgba(palette["status.error"], alpha=0.12)
+
+    safe_x1 = curve.kill_threshold_urad
+    risky_x1 = curve.no_kill_threshold_urad
+
+    # Decide each band's [x0, x1]. Bands with zero width are omitted.
+    if safe_x1 is None and risky_x1 is None:
+        # No kill threshold reached and no no-kill region in the
+        # swept range — entire range is safe.
+        green_x0, green_x1 = x_min, x_max
+        amber_x0 = amber_x1 = None
+        red_x0 = red_x1 = None
+    elif safe_x1 is None and risky_x1 is not None:
+        # Curve never crosses dwell, but I_avg drops below threshold
+        # at some σ_jit (rare combination — implies dwell ≫ τ_BT
+        # floor, but σ_jit can still kill the laser via PIB collapse).
+        # Safe up to no-kill, then infeasible.
+        green_x0, green_x1 = x_min, risky_x1
+        amber_x0 = amber_x1 = None
+        red_x0, red_x1 = risky_x1, x_max
+    elif safe_x1 is not None and risky_x1 is None:
+        # Curve crosses dwell within range, but no-kill never
+        # engages. Safe up to kill, then risky to end.
+        green_x0, green_x1 = x_min, safe_x1
+        amber_x0, amber_x1 = safe_x1, x_max
+        red_x0 = red_x1 = None
+    else:
+        # Both thresholds present — full three-zone story.
+        # Guard ordering: kill_threshold should be ≤ no_kill_threshold
+        # but if numerically swapped due to interpolation rounding,
+        # collapse the amber band rather than draw inverted.
+        if safe_x1 > risky_x1:
+            safe_x1 = risky_x1
+        green_x0, green_x1 = x_min, safe_x1
+        amber_x0, amber_x1 = safe_x1, risky_x1
+        red_x0, red_x1 = risky_x1, x_max
+
+    # Add the bands. Each gets a top-of-band annotation.
+    if green_x1 > green_x0:
         fig.add_vrect(
-            x0=curve.no_kill_threshold_urad,
-            x1=sigma[-1],
-            fillcolor=grey_rgba, line_width=0,
-            annotation_text=(
-                "no-kill region<br>(spot too wide)"
-            ),
+            x0=green_x0, x1=green_x1,
+            fillcolor=ok_rgba, line_width=0, layer="below",
+            annotation_text="Safe",
+            annotation_position="top left",
+            annotation_font=dict(color=palette["fg.secondary"], size=11),
+        )
+    if amber_x0 is not None and amber_x1 > amber_x0:
+        fig.add_vrect(
+            x0=amber_x0, x1=amber_x1,
+            fillcolor=warn_rgba, line_width=0, layer="below",
+            annotation_text="Risky",
+            annotation_position="top",
+            annotation_font=dict(color=palette["fg.secondary"], size=11),
+        )
+    if red_x0 is not None and red_x1 > red_x0:
+        fig.add_vrect(
+            x0=red_x0, x1=red_x1,
+            fillcolor=err_rgba, line_width=0, layer="below",
+            annotation_text="Infeasible",
             annotation_position="top right",
-            annotation_font=dict(color=palette["fg.secondary"], size=10),
-            layer="below",
+            annotation_font=dict(color=palette["fg.secondary"], size=11),
         )
 
-    # ── Layer 2: amber band where the τ_BT curve exceeds dwell.
-    # Build (x, y) traces tracing the upper edge (curve) and lower
-    # edge (dwell line) of the band, only across cells where curve >
-    # dwell. Plotly fills the closed shape.
-    dwell = curve.available_dwell_s
-    if dwell > 0:
-        band_x: list[float] = []
-        band_curve_y: list[float] = []
-        band_dwell_y: list[float] = []
-        for s, t in zip(sigma, tau):
-            if (not math.isnan(t)) and t > dwell:
-                band_x.append(s)
-                band_curve_y.append(t)
-                band_dwell_y.append(dwell)
-        if band_x:
-            warn_rgba = _hex_to_rgba(palette["status.warn"], alpha=0.18)
-            fig.add_trace(go.Scatter(
-                x=band_x + band_x[::-1],
-                y=band_curve_y + band_dwell_y[::-1],
-                fill="toself",
-                fillcolor=warn_rgba,
-                line=dict(color="rgba(0,0,0,0)"),
-                hoverinfo="skip",
-                name="Engagement infeasible",
-                showlegend=True,
-            ))
-
-    # ── Layer 3: τ_BT curve. Drop NaN cells — Plotly renders gaps.
+    # ── Layer 2: τ_BT curve. Drop NaN cells — Plotly renders gaps.
     s0 = _series_style(0, palette)
     fig.add_trace(go.Scatter(
         x=sigma, y=tau,
@@ -3804,23 +3842,55 @@ def plot_n_jitter_sensitivity(curve) -> go.Figure:
         line=s0["line"], marker=s0["marker"],
         connectgaps=False,
         hovertemplate=(
-            "σ_jit %{x:.2g} µrad · τ_BT %{y:.2f} s<extra></extra>"
+            "σ_jit %{x:.1f} µrad · τ_BT %{y:.2f} s<extra></extra>"
         ),
     ))
 
-    # ── Layer 4: horizontal dashed teal line at y = available_dwell.
-    if dwell > 0:
+    # Y-axis range bookkeeping. We bound y so the curve is always
+    # visible — a long dwell on a slow-target scenario (e.g. 70 s)
+    # would otherwise flatten the curve into the bottom strip.
+    finite_tau = [t for t in tau if not math.isnan(t)]
+
+    if finite_tau:
+        max_tau = max(finite_tau)
+        # Cap y-axis at the smaller of (5×curve max) and (1.5 × max
+        # of curve & dwell). Prevents both squashing and over-tall.
+        y_top_curve_only = max_tau * 5.0
+        y_top_with_dwell = max(max_tau, dwell) * 1.5
+        y_top = min(y_top_curve_only, y_top_with_dwell)
+        # Always keep a visible curve floor of 1 s so very fast
+        # scenarios still show the curve as a trend, not a flat line.
+        y_top = max(y_top, max_tau * 1.5, 1.0)
+        y_range = [0.0, y_top]
+    else:
+        # Every cell was NaN — fallback explanatory message.
+        y_top = max(dwell * 1.5, 1.0) if dwell > 0 else 10.0
+        y_range = [0.0, y_top]
+
+    # ── Layer 3: horizontal dashed teal line at y = available_dwell.
+    if dwell > 0 and dwell <= y_range[1]:
         fig.add_hline(
             y=dwell,
             line=dict(
                 color=palette["data.b"], width=1.5, dash="dash",
             ),
-            annotation_text=f"available_dwell ≈ {dwell:.1f} s",
+            annotation_text=f"Available dwell = {dwell:.1f} s",
             annotation_position="bottom right",
             annotation_font=dict(color=palette["fg.secondary"], size=11),
         )
+    elif dwell > 0:
+        # Dwell line is off-chart (above y_top). Show as annotation.
+        fig.add_annotation(
+            xref="paper", yref="paper", x=0.99, y=0.92,
+            xanchor="right", yanchor="top",
+            text=(
+                f"Available dwell = {dwell:.0f} s (off-chart above)"
+            ),
+            showarrow=False,
+            font=dict(color=palette["fg.secondary"], size=11),
+        )
 
-    # ── Layer 5: vertical kill-threshold line + annotation.
+    # ── Layer 4: vertical kill-threshold line + annotation.
     if curve.kill_threshold_urad is not None:
         fig.add_vline(
             x=curve.kill_threshold_urad,
@@ -3831,17 +3901,19 @@ def plot_n_jitter_sensitivity(curve) -> go.Figure:
                 f"Kill threshold: σ_jit ≤ "
                 f"{curve.kill_threshold_urad:.0f} µrad"
             ),
-            annotation_position="top left",
+            annotation_position="top",
             annotation_font=dict(color=palette["fg.secondary"], size=11),
         )
 
-    # ── Layer 6: "you are here" star.
-    if (curve.current_sigma_jit_urad > 0
+    # ── Layer 5: "you are here" star.
+    if (curve.current_sigma_jit_urad >= 0
             and curve.current_tau_BT_s > 0
             and not math.isnan(curve.current_tau_BT_s)):
+        # Clamp star to the y-range so it stays visible.
+        star_y = min(curve.current_tau_BT_s, y_range[1] * 0.95)
         fig.add_trace(go.Scatter(
             x=[curve.current_sigma_jit_urad],
-            y=[curve.current_tau_BT_s],
+            y=[star_y],
             mode="markers+text",
             text=["Current scenario"],
             textposition="top right",
@@ -3852,70 +3924,35 @@ def plot_n_jitter_sensitivity(curve) -> go.Figure:
             ),
             name="You are here",
             hovertemplate=(
-                "σ_jit %{x:.2g} µrad · τ_BT %{y:.2f} s "
+                f"σ_jit %{{x:.1f}} µrad · τ_BT "
+                f"{curve.current_tau_BT_s:.2f} s "
                 "(PDE-accurate)<extra></extra>"
             ),
             showlegend=False,
         ))
 
-    fig.update_layout(
-        title=title,
-        hovermode="x unified",
-    )
-    fig.update_xaxes(title_text=xtitle, type="log")
-
-    # Bound the y-axis range so the τ_BT curve is always readable.
-    # Without this, scenarios with long dwell windows (e.g. slow
-    # target × long range = thousands of seconds) push the dwell
-    # reference line so high that the curve at 2–100 s squashes
-    # into the bottom strip of the plot — invisible. We pick the
-    # range from the curve's actual data; the dwell line clips if
-    # it's outside.
-    finite_tau = [t for t in tau if not math.isnan(t)]
-    if finite_tau:
-        # Pad ±0.5 decades so the curve breathes on the log axis.
-        y_lo = max(min(finite_tau) * 0.3, 1.0e-2)
-        y_hi = max(finite_tau) * 3.0
-        # If the dwell line fits within ~1.5 decades above the curve,
-        # extend the range to include it (so the user sees both).
-        if dwell > 0 and dwell <= y_hi * 5:
-            y_hi = max(y_hi, dwell * 1.3)
-        fig.update_yaxes(
-            title_text=ytitle, type="log",
-            range=[math.log10(y_lo), math.log10(y_hi)],
-        )
-        # If dwell line is far above the displayed curve (e.g. very
-        # long-dwell scenarios), the hline drawn above is off-screen
-        # — add an in-plot annotation so the user still sees the
-        # value. The hline itself is still drawn; if it's outside
-        # the displayed y-range it just doesn't appear.
-        if dwell > y_hi * 2:
-            fig.add_annotation(
-                xref="paper", yref="paper", x=0.99, y=0.92,
-                xanchor="right", yanchor="top",
-                text=(
-                    f"available_dwell = {dwell:.0f} s "
-                    f"(off-chart above)"
-                ),
-                showarrow=False,
-                font=dict(color=palette["fg.secondary"], size=11),
-            )
-    else:
-        # Every cell was NaN — the plot would be empty. Render an
-        # explanatory message so the user knows what happened.
-        fig.update_yaxes(title_text=ytitle, type="log")
+    # All-no-kill fallback message (defensive — shouldn't fire after
+    # the v3 bug fix unless material is missing or inputs are absurd).
+    if not finite_tau:
         fig.add_annotation(
             xref="paper", yref="paper", x=0.5, y=0.5,
             xanchor="center", yanchor="middle",
             text=(
                 "Engagement is infeasible at every σ_jit in the swept "
                 "range — the laser cannot deposit enough flux to "
-                "reach burn-through. Increase power or shorten range."
+                "reach burn-through. Check material / power / range."
             ),
             showarrow=False,
             font=dict(color=palette["fg.secondary"], size=12),
             align="center",
         )
+
+    fig.update_layout(
+        title=title,
+        hovermode="x unified",
+    )
+    fig.update_xaxes(title_text=xtitle, range=[x_min, x_max])
+    fig.update_yaxes(title_text=ytitle, range=y_range)
 
     _apply_default_layout(fig, height=height)
     return fig
