@@ -357,8 +357,28 @@ h3 {{ font-size: 18px; line-height: 1.35; }}
      ``st.columns(...)`` calls render with clear separation between
      rows without any per-row spacer in the Python layer. */
   margin-bottom: var(--space-4);
+  /* Equal-height cards across an st.columns(...) row (added 2026-04-27).
+     Streamlit's horizontal block is a flex container with stretch
+     children, so ``height: 100%`` lets each card grow to match the
+     tallest sibling in its row. Without this, the inline-tooltip
+     line variation (1-3 lines) produced visible staircase rows.
+     The flex column layout inside the card keeps label/value/tooltip
+     stacked top-to-bottom regardless of how tall the card stretches.
+     ``min-height`` is a fallback for any layout where Streamlit's
+     stretching doesn't engage. */
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 130px;
 }}
 .hel-card:hover {{ box-shadow: var(--shadow-2); }}
+/* Streamlit's column wrapper needs to stretch its child to fill the
+   row height for the card's ``height: 100%`` to take effect. The
+   selector targets every column block inside any st.columns(...)
+   row; the inner div Streamlit emits wraps the markdown card. */
+[data-testid="stColumn"] > div[data-testid="stVerticalBlock"] {{
+  height: 100%;
+}}
 
 .hel-section-header {{
   font-size: 18px; font-weight: 600; color: var(--fg-primary);
