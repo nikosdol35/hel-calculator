@@ -3851,6 +3851,89 @@ def plot_n_jitter_sensitivity(curve) -> go.Figure:
         ),
     ))
 
+    # ── Layer 2b: zone-entry markers (v3.4) ──
+    # Highlight (σ_jit, τ_BT) at the green→amber and amber→red
+    # transitions so the user can read the exact values where the
+    # engagement gets risky / infeasible. Uses bigger, distinct-
+    # shape markers (diamonds, in the zone's accent color) with
+    # text labels.
+    def _interp_y_at_x_log(
+        sigma_axis: list[float], tau_axis: list[float], x_target: float,
+    ) -> float | None:
+        """Linear interp on log(x) to find τ at x_target; None if
+        x_target is out of range or brackets a NaN cell."""
+        if x_target <= sigma_axis[0] or x_target >= sigma_axis[-1]:
+            return None
+        for i in range(1, len(sigma_axis)):
+            if sigma_axis[i - 1] <= x_target <= sigma_axis[i]:
+                x_lo, x_hi = sigma_axis[i - 1], sigma_axis[i]
+                y_lo, y_hi = tau_axis[i - 1], tau_axis[i]
+                if math.isnan(y_lo) or math.isnan(y_hi):
+                    return None
+                t = (math.log(x_target) - math.log(x_lo)) / (
+                    math.log(x_hi) - math.log(x_lo)
+                )
+                return y_lo + t * (y_hi - y_lo)
+        return None
+
+    # Green→amber marker: at (warning_x, ½ × dwell), if defined.
+    if warning_x is not None and dwell > 0:
+        warn_y = 0.5 * dwell
+        fig.add_trace(go.Scatter(
+            x=[warning_x],
+            y=[warn_y],
+            mode="markers+text",
+            text=[f"  Enters Risky<br>  σ={warning_x:.0f} µrad · τ={warn_y:.1f} s"],
+            textposition="middle right",
+            marker=dict(
+                size=13,
+                color=palette["status.warn"],
+                line=dict(color=palette["bg.base"], width=1.5),
+                symbol="diamond",
+            ),
+            textfont=dict(color=palette["fg.secondary"], size=10),
+            name="Enters Risky",
+            hovertemplate=(
+                f"Risky entry: σ_jit = {warning_x:.1f} µrad · "
+                f"τ_BT = {warn_y:.2f} s<extra></extra>"
+            ),
+            showlegend=False,
+        ))
+
+    # Amber→red marker: at (effective_kill_x, y), where y is dwell
+    # if the curve crossed dwell, or interpolated from the curve if
+    # the boundary is no_kill_threshold (flux-limited).
+    if effective_kill_x is not None and dwell > 0:
+        if (curve.kill_threshold_urad is not None
+                and effective_kill_x == curve.kill_threshold_urad):
+            kill_y = dwell                  # by definition
+        else:
+            kill_y = _interp_y_at_x_log(sigma, tau, effective_kill_x)
+        if kill_y is not None:
+            fig.add_trace(go.Scatter(
+                x=[effective_kill_x],
+                y=[kill_y],
+                mode="markers+text",
+                text=[
+                    f"  Enters Infeasible<br>"
+                    f"  σ={effective_kill_x:.0f} µrad · τ={kill_y:.1f} s"
+                ],
+                textposition="middle right",
+                marker=dict(
+                    size=13,
+                    color=palette["status.error"],
+                    line=dict(color=palette["bg.base"], width=1.5),
+                    symbol="diamond",
+                ),
+                textfont=dict(color=palette["fg.secondary"], size=10),
+                name="Enters Infeasible",
+                hovertemplate=(
+                    f"Infeasible entry: σ_jit = {effective_kill_x:.1f} µrad · "
+                    f"τ_BT = {kill_y:.2f} s<extra></extra>"
+                ),
+                showlegend=False,
+            ))
+
     # Y-axis range. The curve is now continuous (v3.3) — it keeps
     # climbing past dwell into the infeasible region as I_avg drops.
     # We want the user to see the curve crossing the dwell line,
