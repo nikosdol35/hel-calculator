@@ -31,11 +31,21 @@ from dataclasses import dataclass
 import numpy as np
 
 
-# Animation-shape constants. Locked at the SPEC §8.7 review.
-_DEFAULT_DT_S = 0.005           # 5 ms per frame
+# Animation-shape constants. Tuned 2026-04-26 (v2) to land the figure
+# JSON well under Streamlit Cloud's reverse-proxy WebSocket message
+# cap (~4 MB observed). The original 600 frames × 96 px × 6 traces
+# pushed ~28 MB and produced "Failed to process WebSocket message
+# (404)" errors that froze the sidebar and downstream plots.
+#
+# Final budget (300 × 48² × dynamic-only frame deduplication):
+#   Heatmap data:  300 × 48² × ~3 B JSON = ~2.0 MB
+#   Spot + comet:  300 × ~5 KB each = ~3.0 MB
+#   Static layers (1×, lifted to figure level): ~10 KB
+#   Total figure JSON: ~3-4 MB. Well under proxy limit.
+_DEFAULT_DT_S = 0.005           # 5 ms per frame (smooth OU motion)
 _DEFAULT_TAU_CORR_S = 0.010     # 10 ms electromechanical bandwidth
-_DEFAULT_N_FRAMES = 600         # 3-second total visualization
-_DEFAULT_GRID_PIXELS = 96
+_DEFAULT_N_FRAMES = 300         # 1.5-second loop (was 600 / 3-second)
+_DEFAULT_GRID_PIXELS = 48       # 48×48 (was 96×96)
 _DEFAULT_SEED = 42
 
 # Burn-through marker fade window — annotation present from
