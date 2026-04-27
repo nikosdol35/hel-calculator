@@ -457,7 +457,7 @@ OUTPUT_LABELS: dict[str, LabelEntry] = {
     },
     "I_avg_aim_max": {
         "label":   "Average aim irradiance (trajectory max)",
-        "tooltip": "Maximum bucket-averaged irradiance reached during the engagement; the M8 PDE boundary flux peaks at this value.",
+        "tooltip": "Peak bucket-averaged irradiance during the engagement. The burn-through PDE boundary flux peaks here.",
         "unit":    "W/cm²",
     },
     "PIB": {
@@ -496,29 +496,29 @@ OUTPUT_LABELS: dict[str, LabelEntry] = {
     },
     "R_at_dwell_end": {
         "label":   "Slant at engagement-end",
-        "tooltip": "Slant range at the moment the engagement window ends — the user's standoff range R_min for tracker-supported engagements; the unchanged slant range in backward-compat mode.",
+        "tooltip": "Slant range at the end of the engagement window — typically R_min if the target reaches it before kill.",
         "unit":    "km",
     },
     "R_at_kill": {
         "label":   "Slant range at kill",
-        "tooltip": "Slant range at the moment burn-through happens. None when no kill occurs within the engagement window.",
+        "tooltip": "Slant range at the moment burn-through happens. None when no kill occurs in the engagement window.",
         "unit":    "km",
     },
     "margin": {
         "label":   "Engagement margin",
-        "tooltip": "(available_dwell − time-to-burn-through) / time-to-burn-through. Positive means dwell exceeds the lethality requirement.",
+        "tooltip": "(available_dwell − tau_BT) / tau_BT × 100 %. Positive: dwell exceeds the lethality requirement.",
         "unit":    "%",
     },
 
     # -- Safety (Safety tab) --------------------------------------------------
     "NOHD_tophat": {
         "label":   "NOHD (top-hat)",
-        "tooltip": "Nominal Ocular Hazard Distance under the top-hat convention. Cite this for safety cases that use the uniform-irradiance assumption.",
+        "tooltip": "Nominal Ocular Hazard Distance under the top-hat (uniform-irradiance) convention. Cite for safety cases.",
         "unit":    "km",
     },
     "NOHD_gausspeak": {
         "label":   "NOHD (Gaussian-peak)",
-        "tooltip": "Nominal Ocular Hazard Distance under the Gaussian on-axis peak convention. The more conservative of the two.",
+        "tooltip": "Nominal Ocular Hazard Distance under the Gaussian on-axis peak — the more conservative of the two.",
         "unit":    "km",
     },
     "laser_class": {
@@ -540,7 +540,7 @@ OUTPUT_LABELS: dict[str, LabelEntry] = {
     },
     "t_sustain": {
         "label":   "Sustain time",
-        "tooltip": "How long the system can keep firing before coolant ΔT exceeds the allowable limit. Infinite if Q_cool ≥ Q_waste.",
+        "tooltip": "How long the system can keep firing before coolant ΔT exceeds the limit. Infinite if Q_cool ≥ Q_waste.",
         "unit":    "s",
     },
     "engagements_per_hour": {
@@ -555,7 +555,7 @@ OUTPUT_LABELS: dict[str, LabelEntry] = {
     # math-tab coverage test required them.
     "engagement_viable": {
         "label":   "Engagement viable",
-        "tooltip": "True when the system can sustain output long enough to defeat the target before the cooling loop saturates.",
+        "tooltip": "True when the system can sustain output long enough to defeat the target before cooling saturates.",
         "unit":    "",
     },
     "m67_iteration_count": {
@@ -604,7 +604,7 @@ OUTPUT_LABELS: dict[str, LabelEntry] = {
     # -- Blooming diagnostics (Engagement tab advanced) ----------------------
     "N_D": {
         "label":   "Blooming distortion number",
-        "tooltip": "Gebhardt's dimensionless blooming distortion number. N_D ≳ 30 indicates the model is being pushed outside its validity range.",
+        "tooltip": "Gebhardt's dimensionless blooming distortion number. N_D > 30 means the model is outside validity range.",
         "unit":    "",
     },
 
@@ -676,14 +676,14 @@ OUTPUT_LABELS: dict[str, LabelEntry] = {
     # -- M8 target-effects diagnostics (Target-effects tab) ------------------
     "E_delivered": {
         "label":   "Energy delivered",
-        "tooltip": "Cumulative absorbed energy at the target surface up to burn-through or the end of the integration window.",
+        "tooltip": "Cumulative absorbed energy at the target up to burn-through or the end of the integration window.",
         "unit":    "J",
     },
 
     # -- M9 safety diagnostics (Safety tab) ----------------------------------
     "MPE": {
         "label":   "Maximum Permissible Exposure",
-        "tooltip": "ANSI Z136.1 maximum permissible ocular exposure irradiance for the configured wavelength and exposure time.",
+        "tooltip": "ANSI Z136.1 maximum permissible ocular exposure irradiance at the configured wavelength + exposure.",
         "unit":    "W/m²",
     },
 
@@ -697,12 +697,12 @@ OUTPUT_LABELS: dict[str, LabelEntry] = {
     # -- DRI Analyzer outputs (independent of HEL chain) ---------------------
     "dri_R_detection_m": {
         "label":   "Detection range",
-        "tooltip": "Range at which the chosen target is detected at the user's probability — minimum of geometric (Johnson) range and atmospheric (Koschmieder) range.",
+        "tooltip": "Detection range at the user's probability — smaller of geometric (Johnson) and atmospheric limits.",
         "unit":    "km",
     },
     "dri_R_recognition_m": {
         "label":   "Recognition range",
-        "tooltip": "Range at which the target is recognised (object class) — fewer cycles than identification, more than detection.",
+        "tooltip": "Recognition range (object-class identification) — fewer cycles than full ID, more than detection.",
         "unit":    "km",
     },
     "dri_R_identification_m": {
@@ -712,12 +712,12 @@ OUTPUT_LABELS: dict[str, LabelEntry] = {
     },
     "dri_R_atm_m": {
         "label":   "Atmospheric range ceiling",
-        "tooltip": "Koschmieder visual range — the contrast-limited maximum range any DRI level can achieve at this visibility and target contrast.",
+        "tooltip": "Koschmieder visual range — the contrast-limited ceiling on any DRI level for this visibility.",
         "unit":    "km",
     },
     "dri_alpha_per_km": {
         "label":   "Atmospheric extinction (α)",
-        "tooltip": "Total extinction coefficient (Kruse + Kim aerosol; tabulated thermal). Each km of path attenuates by exp(-α).",
+        "tooltip": "Total extinction coefficient (Kruse + Kim aerosol). Each km of path attenuates by exp(-α).",
         "unit":    "/km",
     },
     "dri_h_target_m": {
@@ -727,7 +727,7 @@ OUTPUT_LABELS: dict[str, LabelEntry] = {
     },
     "dri_ifov_pixel_rad": {
         "label":   "Per-pixel IFOV",
-        "tooltip": "Instantaneous field of view of one pixel — the geometric resolution limit before optics and atmosphere blur.",
+        "tooltip": "Per-pixel instantaneous field of view — geometric resolution limit before optics and atmosphere blur.",
         "unit":    "µrad",
     },
     "dri_theta_diff_rad": {
@@ -742,7 +742,7 @@ OUTPUT_LABELS: dict[str, LabelEntry] = {
     },
     "dri_ifov_eff_rad": {
         "label":   "Effective IFOV",
-        "tooltip": "Pixel + diffraction + turbulence in quadrature (RSS) — the effective angular resolution at the converged path length.",
+        "tooltip": "Pixel + diffraction + turbulence blur in quadrature — effective angular resolution at the target.",
         "unit":    "µrad",
     },
 }
@@ -999,13 +999,9 @@ VERDICT_EXPLANATIONS: dict[str, str] = {
 EXPLANATIONS: dict[str, str] = {
     # --- Overview tab -----------------------------------------------------
     "overview_summary": (
-        "These six numbers summarise the whole engagement. Power at the "
-        "aimpoint is what actually lands on the target after atmospheric "
-        "losses and beam spreading; peak irradiance is the brightest point "
-        "in that spot. Time to burn-through is how long that flux must be "
-        "held to defeat the target; available dwell is how long the "
-        "geometry lets you hold the aim. Wall-plug input power and waste "
-        "heat size the generator and cooling plant."
+        "The four headline metrics for this engagement: how much power "
+        "lands on the aimpoint, how bright the peak is, how long the "
+        "burn-through takes, and how long the dwell window holds it."
     ),
     "overview_headroom": (
         "Sustain time is how long the laser can keep shooting before "
@@ -1016,277 +1012,194 @@ EXPLANATIONS: dict[str, str] = {
         "volley-engage."
     ),
     "overview_margin_plot": (
-        "The two bars compare the same quantity (time, seconds) side by "
-        "side: available dwell on the left, time to burn-through on the "
-        "right. When the right bar is shorter, the beam defeats the "
-        "target before the geometry runs out and the engagement is "
-        "feasible; when it is taller, the dwell runs out first and the "
-        "engagement is not."
+        "Side-by-side bars of burn-through time vs available dwell. The "
+        "gap between them is your time margin — wide green is "
+        "comfortable, thin amber is risky, red means the dwell ran out "
+        "first."
     ),
     # --- Engagement tab ---------------------------------------------------
     "engagement_spot_strehl": (
-        "This section splits the delivered spot at the reference range "
-        "into its four angular-error sources and compares the achieved "
-        "peak intensity against a perfect beam. Diffraction is the "
-        "floor every beam has; the other three — beam-quality excess "
-        "(imperfect optics), turbulence (atmosphere), and jitter (mount "
-        "shake) — add on top of it. The final card shows how close the "
-        "system gets to a diffraction-limited, turbulence-free, "
-        "blooming-free baseline: a ratio of 1.0 is perfect; the value "
-        "shown is this system's share of theoretical best."
+        "Why is the on-target spot bigger than physics-of-light says it "
+        "has to be? The four metrics break the spot into its angular-"
+        "error sources (diffraction, optics, atmosphere, mount shake). "
+        "The 'Peak vs diffraction limit' ratio shows how close to ideal "
+        "the system gets — 1.0 is perfect."
     ),
     "plot_a_intro": (
-        "Each curve point is a separate full-trajectory engagement that "
-        "starts at the indicated detection range. The brightest point in "
-        "the beam spot is read at the moment of detection. The gray "
-        "reference line is what a perfect diffraction-limited beam would "
-        "deliver; the solid curve is what this system actually delivers "
-        "after atmosphere and broadening. The three right-axis curves "
-        "(dimensionless, 0 to 1) are the fraction of power that lands "
-        "inside the aimpoint, the thermal-blooming Strehl (how much "
-        "blooming dims the peak), and atmospheric transmission."
+        "Peak irradiance landing on the target at every detection "
+        "range. The dashed gray line is what a perfect diffraction-"
+        "limited beam would deliver; the solid line is what this "
+        "system actually delivers. The right-axis curves show what "
+        "fraction of power reaches the bucket."
     ),
     "plot_b_intro": (
-        "Each curve point is a separate full-trajectory engagement "
-        "starting at the indicated detection range, with the orange "
-        "curve showing the trajectory burn-through time and the teal "
-        "curve showing how long the dwell window allows. Wherever the "
-        "burn-through curve sits below the dwell curve, the engagement "
-        "is feasible; where it rises above, the dwell runs out first. "
-        "The headline τ_BT shown above on the page is the value of this "
-        "curve at your configured detection range."
+        "Trajectory burn-through time and available dwell window at "
+        "every detection range. Where burn-through (orange) sits below "
+        "dwell (teal), the engagement closes. The headline τ_BT shown "
+        "above is this curve at your configured detection range."
     ),
     "plot_c_intro": (
-        "Each curve point is a separate full-trajectory engagement at "
-        "the indicated detection range; the spot diameter is read at "
-        "the moment of detection. The chart decomposes that spot into "
-        "five physical contributors: diffraction (an ideal beam spreads "
-        "too), beam-quality excess (imperfect optics), turbulence "
-        "(atmosphere), thermal blooming (the beam heats the air it "
-        "passes through), and jitter (mount shake). At short range the "
-        "diffraction floor dominates; at long range turbulence and "
-        "jitter grow fastest, with blooming kicking in once the on-path "
-        "power density is high."
+        "Spot diameter broken into its five physical sources: "
+        "diffraction (always present), beam-quality excess (imperfect "
+        "optics), turbulence, thermal blooming, and jitter. At short "
+        "range the diffraction floor dominates; at long range "
+        "turbulence and jitter take over."
     ),
     "jitter_animation_intro": (
-        "The bright filled circle is where the laser is hitting RIGHT "
-        "NOW. The dashed inner circle is the bucket you're aiming at; "
-        "the dotted outer circle is where the spot is statistically "
-        "expected to wander due to jitter. The Inferno heat map "
-        "underneath shows where energy has actually been deposited — "
-        "watch how the spot paints a wider area than its instantaneous "
-        "footprint, and how that smearing is exactly what makes jitter "
-        "lengthen the burn-through time. The animation loops "
-        "continuously; pause and scrub to study the motion. Spot "
-        "sizes, range, and in-bucket power are pinned to SPEC §3 "
-        "M5/M7; the random-walk model itself is illustrative "
-        "(10 ms correlation time, typical 100 Hz electromechanical "
-        "bandwidth)."
+        "The bright filled circle is where the laser is hitting right "
+        "now. The dashed inner circle is the bucket; the dotted outer "
+        "ring is where the spot wanders due to jitter. The Inferno "
+        "heat map underneath shows where energy has actually been "
+        "deposited. Try increasing σ_jit (Beam director panel) to "
+        "make the wander obvious."
     ),
     "plot_k_intro_pre": (
-        "This is the strategic view of the engagement. For every "
-        "combination of detection range (200 m to 12 km) and target "
-        "velocity (1 to 100 m/s) in a 6-by-6 grid, the tool runs a "
-        "full engagement analysis and colour-codes the result. "
-        "Computing the grid runs in the background — you can keep "
-        "using other plots and tabs while it computes. Typical "
-        "runtime is 30 to 90 seconds on first click. Cells with "
-        "very long dwell windows (slow target × long range, more "
-        "than 5 simulated minutes of engagement) are out of the "
-        "envelope's compute budget and are rendered gray. Changing "
-        "any sidebar input cancels the running compute."
+        "Strategic view: a 6×6 grid that re-runs the full engagement "
+        "at every (detection range × target velocity) pair, colour-"
+        "coded by margin. Runs in the background; ~30–90 s on "
+        "Streamlit Cloud. Cells with very long dwell windows (>5 "
+        "simulated min) are skipped and rendered gray. Changing any "
+        "sidebar input cancels the running compute."
     ),
     "plot_k_intro": (
-        "Each cell is one engagement at a different (detection range, "
-        "target velocity) pair. Green cells closed the engagement with "
-        "margin to spare; amber cells closed it with little margin; red "
-        "cells did not close in time. The white star is your current "
-        "scenario's position on the envelope. The boundary between red "
-        "and green tells you the operational envelope of your system "
-        "for the configured target."
+        "Each cell is one full-trajectory engagement. Green = closed "
+        "with margin; amber = barely closed; red = dwell ran out. The "
+        "white star is your current scenario — the boundary between "
+        "green and red is your operational envelope."
     ),
     "plot_k_3d_intro": (
-        "Same data as the heatmap above, lifted into a 3D surface — "
-        "rotate it to read the gradient. Steep slopes mark regimes where "
-        "a small change in detection range or target velocity flips the "
-        "engagement outcome; flat plateaus mark regimes where the kill "
-        "is robust to those inputs. Useful for spotting the kinematic "
-        "knee where the engagement transitions from comfortably-closed "
-        "to marginal."
+        "Same data as the heatmap, lifted into a 3D surface. Rotate "
+        "to read the gradient: steep slopes mark regimes where small "
+        "input changes flip the engagement outcome; flat plateaus "
+        "mark robust regimes."
     ),
     "plot_m_intro_pre": (
-        "Holds the kinematics fixed (your current detection range and "
-        "target velocity) and sweeps the atmosphere instead — visibility "
-        "from heavy fog to crystal clear, turbulence from negligible to "
-        "near-surface desert noon. Same 6-by-6 grid, runs in the "
-        "background like the operational envelope above (typically "
-        "30 to 90 seconds on first click; you can keep using other plots "
-        "while it computes)."
+        "Holds your kinematics fixed and sweeps the atmosphere "
+        "instead — fog to clear visibility, calm to violent "
+        "turbulence. 6×6 grid, runs in the background like the "
+        "operational envelope above (~30–90 s)."
     ),
     "plot_m_intro": (
-        "Each cell is one engagement at a different (turbulence Cn², "
-        "visibility V) pair. Strong turbulence broadens the spot and "
-        "starves the bucket; low visibility cuts the on-target power via "
-        "Beer-Lambert extinction. Green-to-red boundaries tell you "
-        "which weather regimes the engagement survives — the white star "
-        "is your current scenario."
+        "Each cell is one engagement under different atmospheric "
+        "conditions. The colour pattern shows which weather regimes "
+        "you can engage in; the star is your current scenario."
     ),
     "plot_m_3d_intro": (
-        "Same atmospheric envelope lifted into a 3D surface. Rotate to "
-        "see the ridge where the two extinction mechanisms (turbulence "
-        "spot-broadening vs Beer-Lambert contrast loss) trade off. The "
-        "high-margin plateau shows the weather window the system is "
-        "comfortable in; the cliff edges show where degradation stacks "
-        "up faster than the budget can absorb."
+        "Same atmospheric grid as a 3D surface. Useful for seeing "
+        "the trade-off between visibility loss (Beer-Lambert "
+        "extinction) and turbulence (spot broadening) at a glance."
     ),
     "plot_j_intro": (
-        "This chart shows how much of the engagement window was "
-        "actually delivering useful damage. The rising curve is the "
-        "total absorbed energy versus time; the dashed red reference "
-        "is roughly how much energy would be needed to heat the "
-        "target through to its failure temperature. The green-shaded "
-        "useful zone marks the part of the engagement where the "
-        "irradiance was high enough to matter — earlier than that "
-        "the target was too far away for the laser to deliver real "
-        "damage."
+        "Cumulative energy absorbed by the target through the "
+        "engagement. The green band marks the moments when irradiance "
+        "was high enough to matter; the dashed red line is the energy "
+        "needed for burn-through. Use it to see whether the engagement "
+        "was time-budget-limited or power-limited."
     ),
     "plot_i_intro": (
-        "This chart answers the question 'at what detection range "
-        "does the engagement actually close?' The curve is the "
-        "engagement margin (the time budget left over once the "
-        "burn-through is finished) at every detection range from very "
-        "close to very far. The kill threshold marker shows the "
-        "shortest detection range at which the engagement still closes "
-        "with margin to spare."
+        "Engagement margin (time left over after burn-through) at "
+        "every detection range. The kill-threshold marker shows the "
+        "closest range you must detect by to still close the "
+        "engagement with margin."
     ),
     "plot_h_intro": (
-        "This is the engagement second-by-second. The top panel shows "
-        "how the slant range to the target shrinks through the "
-        "engagement; the second panel shows the on-target irradiance "
-        "rising as the spot tightens at closer ranges; the third panel "
-        "shows the front-face temperature climbing toward the "
-        "material's failure threshold; and the bottom panel shows the "
-        "cumulative absorbed energy. The vertical green dashed line on "
-        "every panel marks the kill moment — when the surface first "
-        "reaches the failure temperature."
+        "The engagement second-by-second. Top: how the slant range "
+        "shrinks. Middle two: irradiance rising and surface "
+        "temperature climbing toward failure. Bottom: cumulative "
+        "absorbed energy. The green dashed line marks the kill "
+        "moment — where the surface first reaches the failure "
+        "temperature."
     ),
     "plot_c_v2_intro": (
-        "This chart shows how the beam spot at the target tightens as the "
-        "target closes during the engagement. The horizontal reference is "
-        "the aimpoint bucket diameter; the amber band marks the part of "
-        "the trajectory where the spot is wider than the bucket and most "
-        "of the beam is missing the aimpoint. As the target gets closer, "
-        "the diffraction-limited spot shrinks and the spot eventually "
-        "fits inside the bucket — at which point on-target intensity "
-        "rises rapidly."
+        "Spot diameter through the engagement as the target closes. "
+        "The amber band marks the part of the trajectory where the "
+        "spot is wider than the bucket — most of the beam is missing "
+        "the aimpoint there."
     ),
     "plot_d_intro": (
-        "Each curve point is a full-trajectory engagement at the "
-        "indicated detection range; the distortion number is read at "
-        "the start of the engagement. Below the green band the air "
-        "doesn't heat enough to bend the beam appreciably. Inside the "
-        "unshaded middle band, blooming scaling is well-understood. The "
-        "red band marks where the model stops being trustworthy — if "
-        "the curve enters it, the spot-size and Strehl numbers above "
-        "are best-effort engineering estimates."
+        "Thermal-blooming distortion number at each detection range. "
+        "Green: blooming negligible. Unshaded middle: model is well-"
+        "understood. Red: model has stopped being trustworthy — the "
+        "spot-size and Strehl numbers in that region are best-effort "
+        "estimates."
     ),
     "plot_e_intro": (
-        "Each curve point is a full-trajectory engagement at the "
-        "indicated detection range; this chart turns the time budget "
-        "into a pass-or-fail margin. Green means the dwell window "
-        "comfortably exceeds the burn-through time; amber means it just "
-        "barely covers it (small disturbance and the engagement fails); "
-        "red means the target moves through the field before the laser "
-        "can finish the job."
+        "Engagement margin as a percentage at every detection range. "
+        "Green = comfortable, amber = small disturbance kills it, "
+        "red = dwell runs out before burn-through. Same data the "
+        "burn-through curve above shows, framed as pass/fail margin."
     ),
     "plot_g_intro": (
-        "Each curve point is a full-trajectory engagement at the "
-        "indicated detection range; the spot diameter is read at the "
-        "moment of detection and compared to the aimpoint bucket the "
-        "user is shooting for. The amber band marks where the spot has "
-        "grown larger than the bucket — beyond that range less than "
-        "86 % of the energy is hitting the part of the target that "
-        "matters, and the engagement is wasting power on the "
-        "surroundings."
+        "Spot diameter at the target vs the aimpoint bucket diameter. "
+        "The amber band marks ranges where the spot has grown larger "
+        "than the bucket — most of the beam is missing the part of "
+        "the target that matters."
     ),
     "math_intro": (
-        "Every number this tool prints has a formula behind it, a citation "
-        "behind that formula, and an assumption set you should know about. "
-        "This tab shows them all in one place: each metric, its formula in "
-        "textbook notation, its value for your current run, and a "
-        "plain-language explanation. Toggle to Full view for the substituted "
-        "values, the literature citation, the line of code that computes it, "
-        "and any flagged assumptions."
+        "Every number this tool prints has a formula behind it, a "
+        "citation behind that formula, and an assumption set you "
+        "should know about. This tab shows them all in one place: "
+        "each metric, its formula, its value for your current run, "
+        "and a plain-language explanation."
     ),
 
     # --- DRI Analyzer tab -------------------------------------------------
     "dri_intro": (
-        "This tab is independent of the laser-engagement chain. Given a "
-        "passive electro-optical sensor and an atmosphere, it returns the "
-        "ranges at which an operator can detect, recognise, and identify a "
-        "given target — using the Johnson criteria as the discrimination "
-        "rule. The headline numbers are computed at the narrow field of "
-        "view (NFOV); the plots below sweep the field of view from NFOV out "
-        "to WFOV so you can see how the ranges trade against zoom."
+        "DRI Analyzer is independent of the laser-engagement chain. "
+        "Given a passive electro-optical sensor and an atmosphere, it "
+        "returns the ranges at which an operator can detect, "
+        "recognise, and identify a given target — using the Johnson "
+        "criteria as the discrimination rule."
     ),
     "dri_methodology": (
-        "Each range is the smaller of two limits. The geometric Johnson "
-        "limit asks: at what range does the target subtend enough cycles "
-        "across the sensor for the chosen task? The atmospheric limit asks: "
-        "at what range does atmospheric extinction reduce the target's "
-        "contrast below the visual threshold? At long ranges, atmospheric "
-        "turbulence (Cn²) and lens diffraction add an extra angular blur "
-        "that further degrades the geometric limit — these are combined in "
-        "quadrature and folded into the effective per-pixel field of view. "
-        "The path length is solved self-consistently because the turbulence "
-        "blur depends on the answer."
+        "Each range is the smaller of two limits: geometric (does the "
+        "target subtend enough pixels-across-target for the chosen "
+        "task?) and atmospheric (does extinction reduce contrast "
+        "below the visual threshold?). At long ranges, turbulence "
+        "and lens diffraction add an extra angular blur that further "
+        "degrades the geometric limit."
     ),
     "dri_plot_fov_intro": (
-        "How the DRI distance changes as you zoom the camera. At narrow "
-        "FOV (high zoom) each pixel covers a smaller angle, so the target "
-        "subtends more cycles and the geometric Johnson range is longer — "
-        "until atmospheric extinction caps it. The dashed line shows the "
-        "atmospheric ceiling; the solid curve is the geometric limit; the "
-        "shaded area marks the regime where atmosphere dominates."
+        "Detection / Recognition / Identification ranges as the "
+        "camera zooms from narrow to wide field of view. The smaller "
+        "of two limits applies: geometric (Johnson-criteria pixels-"
+        "on-target) or atmospheric (visibility extinction)."
     ),
     "dri_plot_target_size_intro": (
-        "Range vs target critical dimension at the narrow field of view. "
-        "Bigger targets are easier — Johnson cycles scale linearly with "
-        "h = √(W·H). The atmospheric ceiling does not; that's why the "
-        "curves flatten at the largest sizes."
+        "How DRI ranges scale with target size. Bigger targets are "
+        "seen further; the curve is roughly linear in target "
+        "dimension because pixels-on-target scales geometrically "
+        "with target span."
     ),
     "dri_plot_atmospheric_transmission_intro": (
-        "Atmospheric transmission τ = exp(−α·R) at the user's wavelength "
-        "and visibility. Useful for reading the Koschmieder envelope "
-        "behind the DRI ranges."
+        "Atmospheric transmission vs slant range, computed via the "
+        "Kruse-Kim aerosol model. Where the curve drops below "
+        "1/e ≈ 0.37, more than two-thirds of the radiance has been "
+        "scattered or absorbed."
     ),
     "dri_plot_cn2_intro": (
-        "How the DRI distance varies across the seven Cn² preset levels. "
-        "Stronger turbulence (left) shrinks all three ranges; very weak "
-        "turbulence (right) lets the geometric Johnson limit dominate."
+        "DRI ranges as a function of turbulence strength Cn². Mild "
+        "turbulence barely affects the geometric limit; strong "
+        "turbulence (sunlit summer afternoon) collapses identification "
+        "range first."
     ),
     "dri_plot_heatmap_intro": (
-        "Two-dimensional sweep: detection range as a function of both the "
-        "field of view and the target size. Useful for picking the FOV "
-        "that maximises range against a class of targets."
+        "Detection range as a function of camera FOV and target "
+        "size. Each cell is one full DRI calculation. Hot colours = "
+        "longer detection ranges; cool colours = sensor or atmosphere "
+        "is the binding constraint."
     ),
     "dri_plot_3d_operational_envelope_intro": (
-        "Same data as the heatmap above, lifted into a 3D surface so the "
-        "curvature reads at a glance. The plateau on the high-zoom / "
-        "small-target corner is where atmospheric extinction caps the "
-        "geometric Johnson advantage; the steep drop-off on the wide-FOV "
-        "side is where each pixel covers too much angle to resolve the "
-        "target. Drag to rotate, scroll to zoom."
+        "3D surface of detection range over (FOV × target size). "
+        "Same data as the heatmap, lifted for gradient reading. "
+        "Rotate to find the knee where geometry stops being the "
+        "binding limit and atmospheric extinction kicks in."
     ),
     "dri_plot_3d_atmospheric_envelope_intro": (
-        "Detection range as a function of the two atmospheric extinction "
-        "mechanisms — turbulence (Cn², log x-axis) and visibility (km, "
-        "y-axis) — at the user's narrow field of view and target size. "
-        "Strong turbulence with clear visibility lives on the upper-right; "
-        "low visibility with calm air lives on the lower-left. The ridge "
-        "where neither mechanism dominates marks the operating regime "
-        "where additional improvement on either axis would help the most. "
-        "Drag to rotate, scroll to zoom."
+        "3D surface of detection range over (Cn² × visibility). "
+        "Shows the saddle between turbulence-limited and contrast-"
+        "limited regimes — the ridge is where neither dominates and "
+        "small changes in either input flip the binding constraint."
     ),
 }
 
