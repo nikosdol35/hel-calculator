@@ -59,6 +59,11 @@ def test_math_content_entries_have_required_fields():
         "tau_atm", "PIB_fraction", "S_TB", "N_D",
         "duty_cycle_limit",      # 0..1 dimensionless
         "m67_iteration_count",   # integer count
+        # Phase C.1 (2026-04-28): Engagement-tab decomposition metrics
+        # added so per-card "Show formula" disclosures fire on every
+        # spot/Strehl card. S_opt is dimensionless (Strehl ratio);
+        # peak_irradiance_ratio is dimensionless (irradiance ratio).
+        "S_opt", "peak_irradiance_ratio",
     }
     for key, entry in MATH_CONTENT.items():
         assert entry.display_name, f"{key}: missing display_name"
@@ -127,6 +132,12 @@ def test_pr1_modules_present():
         # M3 contract update (SPEC v2.0); lives logically with the
         # other M3 entries.
         "R_at_dwell_end",
+        # Phase C.1 (2026-04-28): Engagement-tab decomposition metrics
+        # added so per-card "Show formula" disclosures fire on every
+        # angular-error card. theta_diff_pure (M1) and theta_M2_excess
+        # (M1) are the diffraction split; theta_jit (M2) is the
+        # pointing-jitter contribution.
+        "theta_diff_pure", "theta_M2_excess", "theta_jit",
     }
     actual = set(MATH_CONTENT.keys())
     assert expected_pr1_keys.issubset(actual), (
@@ -494,6 +505,15 @@ def test_pr4_walkthrough_steps_cover_every_metric():
         # summary scalars over the trajectory time series and the
         # walkthrough's per-step structure doesn't fit them naturally.
         "I_peak_max", "I_avg_aim_max",
+        # Phase C.1 (2026-04-28): UI-computed decomposition metrics
+        # added so per-card "Show formula" disclosures fire on every
+        # Engagement-tab card. These are derived in render_tab_engagement
+        # from chain outputs (theta_diff, w_turb, sigma_jit, S_TB,
+        # w_diff, w_total) — not orchestrator outputs themselves, so
+        # the worked-example walkthrough doesn't reference them
+        # directly. Their constituent parts ARE in the walkthrough.
+        "theta_diff_pure", "theta_M2_excess", "theta_turb", "theta_jit",
+        "S_opt", "peak_irradiance_ratio",
     }
     missing_from_walkthrough = expected - referenced
     assert not missing_from_walkthrough, (
@@ -602,7 +622,15 @@ def test_complete_metric_count():
     # scalar metrics).
     output_keys = {k for k in output_keys if not k.startswith("trajectory_")}
 
-    math_keys = set(MATH_CONTENT.keys())
+    # Phase C.1 (2026-04-28): UI-computed decomposition metrics live
+    # in MATH_CONTENT but aren't orchestrator outputs — they're
+    # derived in `render_tab_engagement` for the angular-error and
+    # Strehl decomposition cards. Excluded from the symmetry check.
+    ui_computed_keys = {
+        "theta_diff_pure", "theta_M2_excess", "theta_turb", "theta_jit",
+        "S_opt", "peak_irradiance_ratio",
+    }
+    math_keys = set(MATH_CONTENT.keys()) - ui_computed_keys
 
     missing_in_math = output_keys - math_keys
     extra_in_math = math_keys - output_keys
@@ -613,7 +641,7 @@ def test_complete_metric_count():
     )
     assert not extra_in_math, (
         f"MATH_CONTENT has {len(extra_in_math)} key(s) the orchestrator "
-        f"does not emit: {extra_in_math}"
+        f"does not emit (and which aren't UI-computed): {extra_in_math}"
     )
 
 

@@ -189,6 +189,11 @@ INPUT_LABELS: dict[str, LabelEntry] = {
         "tooltip": "Surface air temperature; feeds both the blooming dn/dT path and the atmospheric model.",
         "unit":    "°C",
     },
+    "P_atm": {
+        "label":   "Atmospheric pressure",
+        "tooltip": "Sea-level atmospheric pressure; feeds the blooming dn/dT path. 101325 Pa = 1 atm.",
+        "unit":    "Pa",
+    },
     "cn2_model": {
         "label":   "Turbulence profile",
         "tooltip": "Model for the refractive-index structure constant Cn² along the slant path.",
@@ -404,6 +409,11 @@ OUTPUT_LABELS: dict[str, LabelEntry] = {
     "S_total": {
         "label":   "Strehl — total",
         "tooltip": "Combined Strehl factor applied to the on-axis irradiance.",
+        "unit":    "",
+    },
+    "peak_irradiance_ratio": {
+        "label":   "Peak vs diffraction limit",
+        "tooltip": "Effective peak-irradiance ratio against the diffraction-limited, turbulence- and blooming-free baseline.",
         "unit":    "",
     },
 

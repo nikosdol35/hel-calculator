@@ -226,6 +226,206 @@ def _entries() -> dict[str, MetricEntry]:
         also_in=(),
     ))
 
+    # ---- Engagement-tab decomposition metrics (UI-computed, not chain
+    # outputs) — added Phase C.1, 2026-04-28. These are the four angular-
+    # error contributions and the Strehl decomposition that the
+    # Engagement-tab spot/Strehl block displays. Adding MATH_CONTENT
+    # entries here lets every per-card "Show formula" disclosure light
+    # up consistently.
+    rows.append(MetricEntry(
+        key="theta_diff_pure",
+        module="M1",
+        display_name="Diffraction-limited divergence (M²=1)",
+        symbol_latex=r"\theta_\text{diff,pure}",
+        unit_si="rad",
+        formula_latex=r"\theta_\text{diff,pure} = \dfrac{4 \lambda}{\pi \, D}",
+        formula_text="theta_diff_pure = 4 * lambda / (pi * D)",
+        formula_dependencies=(),
+        sensitivity_inputs=("wavelength", "D"),
+        explanation_short=(
+            "The diffraction divergence an ideal Gaussian beam (M²=1) would "
+            "have at this aperture and wavelength. The unbeatable floor on "
+            "beam spread."
+        ),
+        explanation_full=(
+            "Same Siegman full-angle convention as theta_diff, with M² set to "
+            "1.0. Gives you the absolute physical limit before any beam-quality "
+            "imperfections enter. Any real beam diverges by AT LEAST this much; "
+            "M² > 1 inflates it (see theta_M2_excess)."
+        ),
+        citation="Siegman 1986 §17 / SPEC §3 M1",
+        code_ref="ui/outputs.py::render_tab_engagement (theta_diff / M²)",
+        derivation_link="validation/derivations/m1_source.md",
+        provenance=(),
+        assumptions=(
+            "Gaussian beam (TEM_00 mode), no aberrations.",
+        ),
+        primary_tab="Engagement",
+        also_in=(),
+    ))
+
+    rows.append(MetricEntry(
+        key="theta_M2_excess",
+        module="M1",
+        display_name="M²-excess broadening",
+        symbol_latex=r"\theta_{M^2}",
+        unit_si="rad",
+        formula_latex=r"\theta_{M^2} = (M^{2} - 1) \cdot \dfrac{4 \lambda}{\pi \, D}",
+        formula_text="theta_M2_excess = (M^2 - 1) * 4 * lambda / (pi * D)",
+        formula_dependencies=(),
+        sensitivity_inputs=("M2", "wavelength", "D"),
+        explanation_short=(
+            "Extra divergence beyond the M²=1 floor, due to the real beam "
+            "departing from an ideal Gaussian. Equals theta_diff − theta_diff_pure."
+        ),
+        explanation_full=(
+            "The M² beam-quality factor multiplies divergence by M² over the "
+            "ideal-Gaussian limit. This metric isolates the EXCESS — the "
+            "portion of theta_diff attributable to imperfect beam quality. "
+            "M² = 1 → 0 excess; M² = 2 → divergence is 2× the floor; M² = 1.2 "
+            "→ 20 % excess."
+        ),
+        citation="Siegman 1986 §17 / SPEC §3 M1",
+        code_ref="ui/outputs.py::render_tab_engagement",
+        derivation_link="validation/derivations/m1_source.md",
+        provenance=(),
+        assumptions=(
+            "Gaussian-mode formalism; M² captures all departures from ideal.",
+        ),
+        primary_tab="Engagement",
+        also_in=(),
+    ))
+
+    rows.append(MetricEntry(
+        key="theta_turb",
+        module="M5",
+        display_name="Atmospheric-turbulence broadening",
+        symbol_latex=r"\theta_\text{turb}",
+        unit_si="rad",
+        formula_latex=r"\theta_\text{turb} = \dfrac{2 \, w_\text{turb}}{R_\text{slant}}",
+        formula_text="theta_turb = 2 * w_turb / R_slant",
+        formula_dependencies=("w_turb", "R_slant"),
+        sensitivity_inputs=("Cn2_ground", "v_HV", "wavelength", "H_e", "H_t"),
+        explanation_short=(
+            "Equivalent full-angle divergence due to atmospheric turbulence "
+            "along the slant path, evaluated at the reference range."
+        ),
+        explanation_full=(
+            "Re-expresses the SI-meters spot-broadening w_turb as an angular "
+            "spread, by dividing by the slant range. Lets you compare it on "
+            "the same axis as the diffraction and jitter terms. The 2× factor "
+            "converts from 1/e² radius to full-angle 1/e² divergence."
+        ),
+        citation="Andrews & Phillips 2005 §6 / SPEC §3 M5",
+        code_ref="ui/outputs.py::render_tab_engagement",
+        derivation_link="validation/derivations/m5_turbulence.md",
+        provenance=(),
+        assumptions=(
+            "Engineering-form w_turb prefactor (SPEC §10 HIGH UNCERTAINTY).",
+        ),
+        primary_tab="Engagement",
+        also_in=(),
+    ))
+
+    rows.append(MetricEntry(
+        key="theta_jit",
+        module="M2",
+        display_name="Pointing-jitter broadening",
+        symbol_latex=r"\theta_\text{jit}",
+        unit_si="rad",
+        formula_latex=r"\theta_\text{jit} = 2 \, \sigma_\text{jit}",
+        formula_text="theta_jit = 2 * sigma_jit",
+        formula_dependencies=(),
+        sensitivity_inputs=("sigma_jit",),
+        explanation_short=(
+            "Effective full-angle divergence from per-axis pointing jitter. "
+            "Two times the 1-σ RMS angle to convert single-axis sigma to a "
+            "1/e² spread."
+        ),
+        explanation_full=(
+            "σ_jit is the per-axis 1-σ RMS angular jitter at the beam-director "
+            "output (the standard PTU/EO datasheet convention). Multiplying "
+            "by 2 gives the full-angle 1/e² spread that lines up dimensionally "
+            "with the diffraction and turbulence broadening terms."
+        ),
+        citation="SPEC §3 M7 / CLAUDE §7.1 (factor-of-2 convention)",
+        code_ref="ui/outputs.py::render_tab_engagement",
+        derivation_link="validation/derivations/m7_spot.md",
+        provenance=(),
+        assumptions=(
+            "σ_jit is per-axis 1-σ RMS, not 2-D radial RMS.",
+        ),
+        primary_tab="Engagement",
+        also_in=(),
+    ))
+
+    rows.append(MetricEntry(
+        key="S_opt",
+        module="M7",
+        display_name="Strehl — optical aberrations",
+        symbol_latex=r"S_\text{opt}",
+        unit_si="",
+        formula_latex=r"S_\text{opt} = 1.0",
+        formula_text="S_opt = 1.0  (v1: optical aberrations not modelled)",
+        formula_dependencies=(),
+        sensitivity_inputs=(),
+        explanation_short=(
+            "Peak-on-axis irradiance ratio from director optics aberrations. "
+            "Fixed at 1.0 in v1 — aberrations are out of v1 scope (see SPEC "
+            "§10.2)."
+        ),
+        explanation_full=(
+            "S_total = S_TB · S_opt. In v1 the optics are modelled as ideal, "
+            "so S_opt = 1.0 and S_total reduces to the thermal-blooming Strehl "
+            "alone. v2 may add wavefront-error budgets and aberration "
+            "decomposition; that work is deferred (SPEC §10.2)."
+        ),
+        citation="SPEC §3 M7 / SPEC §10.2 (v1 scope)",
+        code_ref="ui/outputs.py::render_tab_engagement (hardcoded 1.0)",
+        derivation_link="",
+        provenance=(),
+        assumptions=(
+            "v1 scope: no optical-aberration modelling. S_opt = 1.0.",
+        ),
+        primary_tab="Engagement",
+        also_in=(),
+    ))
+
+    rows.append(MetricEntry(
+        key="peak_irradiance_ratio",
+        module="M7",
+        display_name="Peak vs diffraction limit",
+        symbol_latex=r"\eta_\text{peak}",
+        unit_si="",
+        formula_latex=(
+            r"\eta_\text{peak} = S_\text{TB} \cdot \dfrac{w_\text{diff}^{2}}"
+            r"{w_\text{total}^{2}}"
+        ),
+        formula_text="eta_peak = S_TB * w_diff^2 / w_total^2",
+        formula_dependencies=("S_TB", "w_diff", "w_total"),
+        sensitivity_inputs=(),
+        explanation_short=(
+            "Effective peak-irradiance ratio against the diffraction-limited, "
+            "turbulence- and blooming-free baseline. 1.0 = perfect."
+        ),
+        explanation_full=(
+            "Combines the thermal-blooming Strehl with the squared spot-radius "
+            "ratio (because peak intensity goes as 1/w²). Tells you what "
+            "fraction of the ideal-system peak intensity you actually deliver "
+            "after all the broadening and aberration losses."
+        ),
+        citation="Siegman 1986 §17 / SPEC §3 M7",
+        code_ref="ui/outputs.py::render_tab_engagement (eff_ratio)",
+        derivation_link="validation/derivations/m7_spot.md",
+        provenance=(),
+        assumptions=(
+            "S_total = S_TB · S_opt; with v1's S_opt = 1.0 the optical "
+            "factor is unity.",
+        ),
+        primary_tab="Engagement",
+        also_in=(),
+    ))
+
     rows.append(MetricEntry(
         key="w0",
         module="M1",

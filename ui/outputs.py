@@ -216,10 +216,15 @@ def _build_formula_details_html(key: str, result: dict | None) -> str | None:
     if not formula_line:
         return None
 
-    # Reuse the Phase A.1 substituted-values builder so the inline
-    # popover and the Math tab's "Show full derivation" expander show
-    # exactly the same numbers — single source of truth.
-    sub_md = _substitute_formula_values(entry, result)
+    # Reuse the Phase A.1 substituted-values builder. Use compact=True
+    # so the popover lists ONLY the formula's literal variables — not
+    # the upstream user inputs from sensitivity_inputs. Phase C.1
+    # (2026-04-28) fix: previously the popover listed every entry's
+    # full sensitivity-input set (e.g. for S_TB it showed P0, eta_opt,
+    # T_ambient, P_atm, RH even though they're not in S_TB's formula),
+    # which confused readers. Math tab's Full view still uses the
+    # non-compact form for the deeper-context view.
+    sub_md = _substitute_formula_values(entry, result, compact=True)
     sub_html = ""
     if sub_md:
         # Convert markdown bullet list to HTML <ul>. Each line starts
@@ -650,17 +655,16 @@ def render_tab_engagement(
     c1, c2, c3 = st.columns(3)
     with c1: _card("S_TB",  s_tb,  sig_figs=4)
     with c2: _card("S_opt", s_opt, sig_figs=4)
-    with c3:
-        metric_card(
-            "Peak vs diffraction limit",
-            eff_ratio,
-            unit="",
-            tooltip=(
-                "Effective peak-irradiance ratio against the diffraction-"
-                "limited, turbulence- and blooming-free baseline."
-            ),
-            sig_figs=4,
-        )
+    # Phase C.1 (2026-04-28): route through _card so the metric picks up
+    # its OUTPUT_LABELS + MATH_CONTENT entries (label, tooltip, formula
+    # popover). Stash the value into result so the substituted-formula
+    # block can find it, even though the metric itself isn't a chain
+    # output (it's UI-computed). Belt-and-braces: also push it into
+    # session_state for any downstream lookup.
+    result["peak_irradiance_ratio"] = eff_ratio
+    if "_current_result" in st.session_state:
+        st.session_state["_current_result"]["peak_irradiance_ratio"] = eff_ratio
+    with c3: _card("peak_irradiance_ratio", eff_ratio, sig_figs=4)
 
     # Footer caption removed 2026-04-27 per user request — the same
     # information is already in the inline tooltips on the seven cards
@@ -1376,7 +1380,9 @@ def _resolve_label_and_unit(key: str) -> tuple[str, str]:
     return "", ""
 
 
-def _substitute_formula_values(entry, result: dict) -> str | None:
+def _substitute_formula_values(
+    entry, result: dict, *, compact: bool = False,
+) -> str | None:
     """Build the 'with current values' substituted-formula block for the
     Full view. Returns None when substitution doesn't make sense
     (categorical metrics, solver-based metrics).
@@ -1393,8 +1399,14 @@ def _substitute_formula_values(entry, result: dict) -> str | None:
         - **S_TB** = 0.9743 — *Strehl ratio from thermal blooming*
         - ...
 
-    The reader can match each substituted value to what it physically
-    represents without leaving the Math tab.
+    Phase C.1 (2026-04-28): added ``compact`` mode. When True, only the
+    formula's *direct* variables (``formula_dependencies``) are listed
+    — the upstream user inputs from ``sensitivity_inputs`` are
+    suppressed. This is the right shape for the per-card "Show formula"
+    popover, where the reader wants to match exactly what's in the
+    formula, not the broader ±10 % perturbation set. Math-tab Full
+    view still uses the non-compact form (default) since that's the
+    deeper context.
     """
     from ui.math_content import MetricEntry
     if not isinstance(entry, MetricEntry):
@@ -1404,17 +1416,29 @@ def _substitute_formula_values(entry, result: dict) -> str | None:
     if entry.formula_text is None:
         return None
 
-    # Walk dependencies + inputs in order, building one bullet per variable.
-    # Skip duplicates: a key appearing in both formula_dependencies and
-    # sensitivity_inputs renders only once (intermediate-value listing wins,
-    # so the reader sees the formula's own variables before the upstream
-    # raw inputs).
+    # Walk dependencies (+ inputs, when not in compact mode), building
+    # one bullet per variable. Skip duplicates: a key appearing in both
+    # lists renders only once.
     seen: set[str] = set()
     bullets: list[str] = []
-    ordered_keys = list(entry.formula_dependencies) + [
-        k for k in entry.sensitivity_inputs
-        if k not in entry.formula_dependencies
-    ]
+    if compact:
+        # Only the formula's literal variables. Used by the per-card
+        # "Show formula" popover where extraneous inputs would confuse
+        # the reader. When the entry has no formula_dependencies (the
+        # formula uses raw inputs directly, e.g. theta_diff_pure =
+        # 4·λ/(π·D)), fall back to sensitivity_inputs so the popover
+        # shows λ and D rather than zero bullets.
+        if entry.formula_dependencies:
+            ordered_keys = list(entry.formula_dependencies)
+        else:
+            ordered_keys = list(entry.sensitivity_inputs)
+    else:
+        # Formula variables AND upstream user inputs — full context for
+        # the Math tab's Full view.
+        ordered_keys = list(entry.formula_dependencies) + [
+            k for k in entry.sensitivity_inputs
+            if k not in entry.formula_dependencies
+        ]
     for key in ordered_keys:
         if key in seen:
             continue
