@@ -1780,7 +1780,7 @@ def plot_e_engagement_margin_vs_range(
             100.0 * (current_dwell_s - current_tau_BT_s) / current_tau_BT_s
         )
         gap_label = (
-            f"  τ_BT = {current_tau_BT_s:.2g} s · "
+            f"  Current scenario: τ_BT = {current_tau_BT_s:.2g} s · "
             f"dwell = {current_dwell_s:.2g} s "
             f"(margin {gap_pct:+.0f}%)"
         )
@@ -1813,9 +1813,13 @@ def plot_e_engagement_margin_vs_range(
         height=height,
     )
     fig.update_xaxes(title_text=xtitle)
+    # Friendly seconds tick labels.
+    s_tickvals = [0.01, 0.03, 0.1, 0.3, 1, 3, 10, 30, 100, 300, 1000, 3000]
+    s_ticktext = [f"{v:g} s" for v in s_tickvals]
     fig.update_yaxes(
         title_text=ytitle, type="log",
         range=[math.log10(y_lo), math.log10(y_hi)],
+        tickvals=s_tickvals, ticktext=s_ticktext,
     )
     return fig
 
@@ -2461,7 +2465,7 @@ def plot_i_outcome_map_vs_R_detect(
             100.0 * (current_dwell_s - current_tau_BT_s) / current_tau_BT_s
         )
         gap_label = (
-            f"  τ_BT = {current_tau_BT_s:.2g} s · "
+            f"  Current scenario: τ_BT = {current_tau_BT_s:.2g} s · "
             f"dwell = {current_dwell_s:.2g} s "
             f"(margin {gap_pct:+.0f}%)"
         )
@@ -2500,9 +2504,16 @@ def plot_i_outcome_map_vs_R_detect(
         title_text=xtitle, type="log",
         tickvals=km_tickvals, ticktext=km_ticktext,
     )
+    # Friendly seconds tick labels — Plotly's default log minor ticks
+    # show just leading digits (1, 2, 5) which strip the unit.
+    s_tickvals = [0.01, 0.03, 0.1, 0.3, 1, 3, 10, 30, 100, 300, 1000, 3000]
+    s_ticktext = [
+        f"{v:g} s" if v >= 1 else f"{v:g} s" for v in s_tickvals
+    ]
     fig.update_yaxes(
         title_text=ytitle, type="log",
         range=[math.log10(y_lo), math.log10(y_hi)],
+        tickvals=s_tickvals, ticktext=s_ticktext,
     )
     return fig
 
