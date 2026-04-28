@@ -4465,22 +4465,39 @@ def plot_p_peak_irradiance_vs_geometry(curves) -> go.Figure:
     fig = go.Figure()
 
     # ── Reference curves (5 angles) ────────────────────────────────
-    # Cycle through data.{a,b,c} + reference; reference curves use
-    # slightly thinner lines (1.6 px) than the user's curve (2.8 px)
-    # so the highlighted scenario stands out.
-    ref_palette_keys = ["data.a", "data.b", "data.c", "data.reference"]
-    ref_dashes = ["solid", "dash", "dot", "dashdot"]
+    # Hand-picked (color, dash, symbol) tuples for the five reference
+    # angles so each curve is visually unambiguous in BOTH color and
+    # dash style — fixes a duplicate-styling bug shipped with the
+    # initial Plot P (idx-mod-4 cycling made 0° and 90° both render
+    # as "amber solid" since the cycle wrapped). Each curve now has
+    # a unique color + dash + marker-symbol triple.
+    geometry_styles = [
+        # 0° head-on — amber solid circle (familiar data-series-A look)
+        {"color_key": "data.a",         "dash": "solid",    "symbol": "circle"},
+        # 30° — teal dash square
+        {"color_key": "data.b",         "dash": "dash",     "symbol": "square"},
+        # 45° — purple dot diamond
+        {"color_key": "data.c",         "dash": "dot",      "symbol": "diamond"},
+        # 60° — gray dashdot cross (the diffraction-reference colour;
+        # makes 60° read as "barely engageable")
+        {"color_key": "data.reference", "dash": "dashdot",  "symbol": "cross"},
+        # 90° perpendicular — accent-blue longdash triangle. Distinct
+        # from amber/teal/purple/gray; the longdash + triangle marker
+        # also reinforces that this curve does NOT close (no
+        # engagement).
+        {"color_key": "accent.primary", "dash": "longdash", "symbol": "triangle-up"},
+    ]
     for idx, (alpha_deg, t_axis, I_axis) in enumerate(curves.reference_curves):
-        color = palette[ref_palette_keys[idx % len(ref_palette_keys)]]
-        dash = ref_dashes[idx % len(ref_dashes)]
+        style = geometry_styles[idx % len(geometry_styles)]
+        color = palette[style["color_key"]]
         legend_label = f"{alpha_deg:.0f}° crossing"
         fig.add_trace(go.Scatter(
             x=list(t_axis),
             y=list(I_axis),
             mode="lines+markers",
             name=legend_label,
-            line=dict(color=color, width=1.6, dash=dash),
-            marker=dict(size=4, color=color),
+            line=dict(color=color, width=1.6, dash=style["dash"]),
+            marker=dict(size=5, color=color, symbol=style["symbol"]),
             connectgaps=False,
             hovertemplate=(
                 f"{alpha_deg:.0f}° · t %{{x:.1f}} s · "
