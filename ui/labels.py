@@ -1053,6 +1053,23 @@ EXPLANATIONS: dict[str, str] = {
         "deposited. Try increasing σ_jit (Beam director panel) to "
         "make the wander obvious."
     ),
+    "plot_o_intro_pre": (
+        "Peak irradiance vs detection range at five reference "
+        "atmospheres plus your current scenario. Cn² is the "
+        "refractive-index structure constant — higher = more "
+        "turbulence, more spot blur, less peak intensity at the "
+        "target. Use this to see how robust your engagement is to "
+        "changing atmospheric conditions."
+    ),
+    "plot_o_intro": (
+        "Curves use a fast M5+M7-only path (skips blooming and "
+        "burn-through, like Plot N's jitter sweep). Only the Cn² "
+        "VALUE varies — the atmospheric model (Constant or HV) "
+        "stays at your sidebar setting. Curves cluster at short "
+        "range (turbulence has small effect) and fan out at long "
+        "range (turbulence dominates). The white star marks your "
+        "scenario's actual position on its curve."
+    ),
     "plot_n_intro_pre": (
         "How burn-through time scales with pointing jitter across "
         "the full operational range (1 µrad → 500 mrad). The "

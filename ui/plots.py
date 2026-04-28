@@ -4288,6 +4288,147 @@ def plot_n_jitter_sensitivity(curve) -> go.Figure:
     return fig
 
 
+# ---------------------------------------------------------------------------
+# Plot O — Peak irradiance vs detection range, family of Cn² curves.
+# Sibling to Plot A: same axes, but with 5 reference Cn² curves plus the
+# user's actual scenario highlighted. Shows how robust the engagement is
+# to changing atmospheric turbulence at a glance.
+# ---------------------------------------------------------------------------
+
+def plot_o_peak_irradiance_vs_cn2(curves) -> go.Figure:
+    """Family-of-curves plot: peak irradiance vs detection range at
+    5 reference Cn² values plus the user's current scenario.
+
+    Mirrors the ``plot_dri_distance_vs_cn2`` multi-trace idiom — one
+    Scatter trace per Cn² level, distinct ``_series_style(idx)`` per
+    line, log-log axes for the wide dynamic range.
+
+    Layers:
+      1. 5 reference Cn² curves (or 4 if duplicate-suppressed),
+         using cyclic data.{a,b,c} palette + dimmed reference colour
+         for the higher indices.
+      2. User's current-scenario curve — thicker, primary colour,
+         drawn last so it sits on top.
+      3. White-bordered "Current scenario" star at the user's R_detect
+         on their actual curve.
+
+    Empty curves → always-render frame fallback.
+    """
+    height = PLOT_HEIGHTS["default"]
+    title = "Peak irradiance — sensitivity to atmospheric turbulence"
+    xtitle = "Detection range R_detect (km, log)"
+    ytitle = "Peak irradiance I_peak (W/cm², log)"
+
+    if (curves is None
+            or not curves.range_axis_km
+            or not curves.reference_curves):
+        return _empty_frame(
+            title=title, xtitle=xtitle, ytitle=ytitle,
+            advisory=ADVISORY["infeasible_geometry"], height=height,
+        )
+
+    palette = _active_palette()
+    fig = go.Figure()
+
+    # ── Layer 1: reference Cn² curves ─────────────────────────────
+    # Cycle through data.{a,b,c} for visual distinction. Reference
+    # curves use slightly thinner lines (1.6 px) than the current-
+    # scenario curve (2.5 px) so the user's line stands out.
+    ref_palette_keys = ["data.a", "data.b", "data.c", "data.reference"]
+    ref_dashes = ["solid", "dash", "dot", "dashdot"]
+    for idx, (label, cn2_value, per_R) in enumerate(curves.reference_curves):
+        color = palette[ref_palette_keys[idx % len(ref_palette_keys)]]
+        dash = ref_dashes[idx % len(ref_dashes)]
+        # Format the legend label with the Cn² in scientific notation.
+        legend_label = f"{label} (Cn² = {cn2_value:.0e} m⁻²/³)"
+        fig.add_trace(go.Scatter(
+            x=list(curves.range_axis_km),
+            y=list(per_R),
+            mode="lines+markers",
+            name=legend_label,
+            line=dict(color=color, width=1.6, dash=dash),
+            marker=dict(size=5, color=color),
+            connectgaps=False,
+            hovertemplate=(
+                f"{label} · R %{{x:.2f}} km · "
+                "I_peak %{y:.2g} W/cm²<extra></extra>"
+            ),
+        ))
+
+    # ── Layer 2: current-scenario curve (highlighted) ─────────────
+    cur_cn2, cur_per_R = curves.current_curve
+    fig.add_trace(go.Scatter(
+        x=list(curves.range_axis_km),
+        y=list(cur_per_R),
+        mode="lines+markers",
+        name=f"Current scenario (Cn² = {cur_cn2:.2e} m⁻²/³)",
+        line=dict(color=palette["fg.primary"], width=2.8),
+        marker=dict(
+            size=7, color=palette["fg.primary"],
+            line=dict(color=palette["bg.base"], width=1.2),
+        ),
+        connectgaps=False,
+        hovertemplate=(
+            "Current · R %{x:.2f} km · "
+            "I_peak %{y:.2g} W/cm²<extra></extra>"
+        ),
+    ))
+
+    # ── Layer 3: "you are here" star at user's R_detect ───────────
+    if (curves.current_R_km > 0
+            and curves.current_I_peak_wpcm2 is not None
+            and not math.isnan(curves.current_I_peak_wpcm2)
+            and curves.current_I_peak_wpcm2 > 0):
+        fig.add_trace(go.Scatter(
+            x=[curves.current_R_km],
+            y=[curves.current_I_peak_wpcm2],
+            mode="markers+text",
+            text=["Current scenario"],
+            textposition="top right",
+            marker=dict(
+                size=16, color=palette["fg.primary"],
+                line=dict(color=palette["bg.base"], width=2),
+                symbol="star",
+            ),
+            textfont=dict(color=palette["fg.primary"], size=11),
+            name="You are here",
+            hovertemplate=(
+                f"R_detect = {curves.current_R_km:.2f} km · "
+                f"I_peak = {curves.current_I_peak_wpcm2:.2g} W/cm² "
+                f"(Cn² = {cur_cn2:.2e})<extra></extra>"
+            ),
+            showlegend=False,
+        ))
+
+    # Friendly km tick labels (mirror the Plot I convention).
+    km_tickvals = [0.1, 0.2, 0.3, 0.5, 1, 2, 3, 5, 10, 20, 30, 50]
+    km_ticktext = [f"{v:g} km" for v in km_tickvals]
+    # Friendly W/cm² tick labels for the log y-axis. I_peak typically
+    # spans 0.01 W/cm² (long range, severe Cn²) to 10000 W/cm²
+    # (close range, pristine Cn²).
+    i_tickvals = [0.001, 0.01, 0.1, 1, 10, 100, 1000, 10000, 100000]
+    i_ticktext = [f"{v:g} W/cm²" for v in i_tickvals]
+
+    fig.update_layout(
+        title=title,
+        height=height,
+        hovermode="closest",
+        legend=dict(
+            orientation="h", yanchor="bottom", y=1.02,
+            xanchor="right", x=1.0,
+        ),
+    )
+    fig.update_xaxes(
+        title_text=xtitle, type="log",
+        tickvals=km_tickvals, ticktext=km_ticktext,
+    )
+    fig.update_yaxes(
+        title_text=ytitle, type="log",
+        tickvals=i_tickvals, ticktext=i_ticktext,
+    )
+    return fig
+
+
 __all__ = [
     "plot_a_on_target_performance",
     "plot_b_time_to_burnthrough",
@@ -4312,6 +4453,7 @@ __all__ = [
     "plot_m_atmospheric_envelope",
     "plot_m_atmospheric_envelope_3d",
     "plot_n_jitter_sensitivity",
+    "plot_o_peak_irradiance_vs_cn2",
     "plot_overview_dwell_vs_burnthrough",
     "plot_target_temperature_envelope",
     "plot_target_material_comparison",

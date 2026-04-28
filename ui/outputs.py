@@ -602,6 +602,11 @@ def render_tab_engagement(
         config=PLOTLY_MODEBAR_CONFIG,
     )
     explanation(EXPLANATIONS["plot_a_intro"], variant="plot")
+    # Plot O — Peak irradiance vs detection range, family of Cn² curves.
+    # Sibling diagnostic to Plot A: same axes, but with 5 reference
+    # atmospheres + the user's actual scenario highlighted. Lightweight
+    # M4+M5+M7-only compute path keeps it sub-second.
+    _render_cn2_family_plot(result)
     st.plotly_chart(
         plots.plot_b_time_to_burnthrough(sweep),
         use_container_width=True,
@@ -1733,6 +1738,46 @@ def _render_jitter_animation(result: dict) -> None:
 # τ_BT — same number as the headline metric. Renders inline; no
 # Compute button or background-job machinery needed at this scale.
 # ---------------------------------------------------------------------------
+
+def _render_cn2_family_plot(result: dict) -> None:
+    """Render Plot O — peak irradiance vs detection range for a
+    family of Cn² atmospheres — directly under Plot A.
+
+    Reads chain outputs (``by_module``) from the merged result dict
+    so M1's w0/zR and M2's P_exit are reused (not recomputed). Per-
+    cell loops M4+M5+M7 only with ``S_TB=1, w_bloom=0`` (skip M6/M8/
+    M9-M11). Sub-second closed-form arithmetic, ~400 ms total —
+    rendered inline without a Compute button.
+    """
+    section_header("Peak irradiance — sensitivity to atmospheric turbulence")
+    explanation(EXPLANATIONS["plot_o_intro_pre"])
+
+    if "engagement_geometry" not in result:
+        st.info(
+            "Cn²-family plot not available for this scenario — "
+            "v2.0 trajectory keys are missing."
+        )
+        return
+
+    try:
+        from physics.cn2_family import compute_cn2_family_curves
+        curves = compute_cn2_family_curves(result)
+    except KeyError as exc:
+        st.info(f"Cn²-family plot skipped: {exc}")
+        return
+    except Exception as exc:  # pragma: no cover — defensive
+        st.warning(f"Cn²-family compute failed: {exc!s}")
+        return
+
+    from ui import plots
+    from ui.theme import PLOTLY_MODEBAR_CONFIG
+
+    fig = plots.plot_o_peak_irradiance_vs_cn2(curves)
+    st.plotly_chart(
+        fig, use_container_width=True, config=PLOTLY_MODEBAR_CONFIG,
+    )
+    explanation(EXPLANATIONS["plot_o_intro"], variant="plot")
+
 
 def _render_jitter_sensitivity(result: dict) -> None:
     """Render Plot N — Burn-through time vs Jitter — at the absolute
