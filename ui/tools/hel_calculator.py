@@ -502,6 +502,15 @@ if url_flags:
         merged.get("assumptions_flagged", [])
     )
 
+# Phase C (2026-04-28): stash the merged result in session_state so
+# `ui.outputs._card()` can pull MATH_CONTENT[key].formula_text +
+# substituted-value strings into per-card "Show formula" disclosures
+# without having to thread `result` through every render call site.
+# Set ONCE here; `_card` reads it from session_state for every metric
+# rendered downstream. Single point of truth — the next chain re-run
+# overwrites it cleanly.
+st.session_state["_current_result"] = merged
+
 # Clear the progress bar — the tabs below are about to fade in.
 progress_slot.empty()
 

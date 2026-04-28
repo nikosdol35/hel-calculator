@@ -251,6 +251,7 @@ def metric_card(
     flag_est: bool = False,
     size: Literal["lg", "md"] = "lg",
     sig_figs: int = 3,
+    formula_details_html: str | None = None,
 ) -> None:
     """Render a labelled KPI card on the current Streamlit surface.
 
@@ -332,6 +333,15 @@ def metric_card(
         if tooltip else ""
     )
 
+    # --- Optional inline "Show formula" disclosure (Phase C, 2026-04-28).
+    # When the caller (typically `_card()` in `ui/outputs.py`) hands us a
+    # pre-built <details>/<summary> HTML block, we append it after the
+    # tooltip line. Native HTML5 disclosure widget — collapsed by default,
+    # one click to expand the formula + this run's substituted values.
+    # Lets users check the math on a metric without leaving the tab they're
+    # on. None / empty string → no formula UI rendered (back-compat).
+    formula_html = formula_details_html or ""
+
     st.markdown(
         f'<div class="hel-card">'
         f'  <div class="hel-card-label">{label}</div>'
@@ -341,6 +351,7 @@ def metric_card(
         f'    {est_html}'
         f'  </div>'
         f'  {tooltip_inline_html}'
+        f'  {formula_html}'
         f'</div>',
         unsafe_allow_html=True,
     )

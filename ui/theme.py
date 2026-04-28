@@ -530,6 +530,68 @@ select:focus-visible,
   word-wrap: break-word;
 }}
 
+/* ---- Inline "Show formula" disclosure (Phase C, 2026-04-28) ----------- */
+/* Native HTML5 <details>/<summary> widget appended below the per-card
+   inline tooltip. Collapsed by default — single click reveals the
+   metric's formula and this-run substituted values, so users can
+   inspect the math without leaving the current tab. */
+.hel-card-formula {{
+  margin-top: 8px;
+  font-size: 12px;
+  line-height: 1.45;
+  color: var(--fg-secondary);
+}}
+.hel-card-formula > summary {{
+  cursor: pointer;
+  user-select: none;
+  color: var(--accent-primary);
+  font-weight: 500;
+  outline: none;
+  padding: 2px 0;
+}}
+.hel-card-formula > summary:hover {{
+  color: var(--accent-primary-hover);
+}}
+.hel-card-formula[open] > summary {{
+  margin-bottom: 6px;
+}}
+.hel-card-formula-body {{
+  padding: 6px 0 4px 8px;
+  border-left: 2px solid var(--border-subtle);
+  padding-left: 10px;
+}}
+.hel-card-formula-code {{
+  display: block;
+  font-family: 'JetBrains Mono', 'Menlo', ui-monospace, monospace;
+  font-size: 12px;
+  color: var(--fg-primary);
+  background: var(--bg-surface);
+  padding: 4px 6px;
+  border-radius: 4px;
+  margin-bottom: 6px;
+  word-break: break-word;
+  white-space: pre-wrap;
+}}
+.hel-card-formula-values {{
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  font-size: 11px;
+}}
+.hel-card-formula-values li {{
+  padding: 1px 0;
+  color: var(--fg-secondary);
+}}
+.hel-card-formula-values strong {{
+  color: var(--fg-primary);
+  font-weight: 600;
+  font-family: 'JetBrains Mono', 'Menlo', ui-monospace, monospace;
+}}
+.hel-card-formula-values em {{
+  color: var(--fg-tertiary);
+  font-style: normal;
+}}
+
 /* ---- Skeleton placeholder (pre-first-run) ------------------------------ */
 /* Same silhouette as a real card; a soft pulsing gradient signals "waiting
    for data" without a spinner. The @keyframes is outside @media

@@ -182,6 +182,96 @@ def _scale(key: str, value: float | None) -> float | None:
     return value * _DISPLAY_SCALE.get(key, 1.0)
 
 
+def _build_formula_details_html(key: str, result: dict | None) -> str | None:
+    """Build the click-to-expand <details> HTML block that shows a
+    metric's formula + substituted values inside its card (Phase C,
+    2026-04-28).
+
+    Returns None when:
+      - the key has no MATH_CONTENT entry (most input-only keys)
+      - the result dict isn't available (chain hasn't run)
+      - the entry is categorical (failure_mode, laser_class) — no
+        meaningful formula to substitute into
+
+    Why a <details>/<summary> disclosure widget rather than a hover
+    popover: the previous tooltip implementation tried hover popovers
+    and ran into overlap problems with neighbouring cards (see comment
+    in ui/components.py:330). Native HTML disclosure is mobile-
+    friendly, doesn't overlap, and requires no JavaScript. Users see a
+    small "▸ Show formula" toggle below the metric value; clicking
+    expands inline. Same UX intent as the user's "hover to see
+    formula" request, but more robust.
+    """
+    if result is None:
+        return None
+    from ui.math_content import MATH_CONTENT
+
+    entry = MATH_CONTENT.get(key)
+    if entry is None or entry.is_categorical:
+        return None
+
+    # The formula text — prefer the ASCII formula_text (single line).
+    # Fallback to formula_latex with a code-block render if no ASCII.
+    formula_line = entry.formula_text or entry.formula_latex or ""
+    if not formula_line:
+        return None
+
+    # Reuse the Phase A.1 substituted-values builder so the inline
+    # popover and the Math tab's "Show full derivation" expander show
+    # exactly the same numbers — single source of truth.
+    sub_md = _substitute_formula_values(entry, result)
+    sub_html = ""
+    if sub_md:
+        # Convert markdown bullet list to HTML <ul>. Each line starts
+        # with "- " — strip the marker and wrap in <li>.
+        items: list[str] = []
+        for line in sub_md.splitlines():
+            if line.startswith("- "):
+                # Strip "- " and convert **key** → <strong>key</strong>,
+                # *label* → <em>label</em>. Cheap manual conversion to
+                # avoid pulling in a markdown lib.
+                inner = line[2:]
+                inner = _md_emphasis_to_html(inner)
+                items.append(f"<li>{inner}</li>")
+        if items:
+            sub_html = "<ul class='hel-card-formula-values'>" + "".join(items) + "</ul>"
+
+    # Escape the formula text for HTML safety (formula_text may contain
+    # < > & symbols that we want rendered literally inside <code>).
+    formula_escaped = (
+        formula_line.replace("&", "&amp;")
+        .replace("<", "&lt;")
+        .replace(">", "&gt;")
+    )
+
+    return (
+        "<details class='hel-card-formula'>"
+        "<summary>Show formula</summary>"
+        f"<div class='hel-card-formula-body'>"
+        f"<code class='hel-card-formula-code'>{formula_escaped}</code>"
+        f"{sub_html}"
+        "</div>"
+        "</details>"
+    )
+
+
+def _md_emphasis_to_html(text: str) -> str:
+    """Convert a small subset of inline markdown to HTML.
+
+    Supports **bold** → <strong>, *italic* → <em>. Used when re-using
+    the Markdown bullets from `_substitute_formula_values()` inside
+    the metric-card formula popover (which is rendered as raw HTML,
+    not Streamlit markdown). Keeps the conversion local — no external
+    markdown dependency for a 2-pattern need.
+    """
+    import re
+    # **bold** → <strong>bold</strong>
+    out = re.sub(r"\*\*([^*]+)\*\*", r"<strong>\1</strong>", text)
+    # *italic* → <em>italic</em>
+    out = re.sub(r"\*([^*]+)\*", r"<em>\1</em>", out)
+    return out
+
+
 def _card(
     key: str,
     value: float | int | str | None,
@@ -197,12 +287,28 @@ def _card(
     String values (material names, failure modes, laser class) pass through
     without scaling or unit appending. Numeric values route through
     ``_DISPLAY_SCALE`` and ``format_value``.
+
+    Phase C (2026-04-28): when the chain's merged result is available
+    in ``st.session_state["_current_result"]`` AND the key has a
+    ``MATH_CONTENT`` entry, an inline "▸ Show formula" disclosure is
+    appended to the card showing the formula + substituted values.
+    The chain's result is set once per page render in
+    ``ui/tools/hel_calculator.py`` so callers don't need to thread it
+    through.
     """
     label = override_label if override_label is not None else output_label(key)
     unit = output_unit(key)
     tooltip = output_tooltip(key) or None
 
     scaled = value if isinstance(value, str) else _scale(key, value)
+
+    # Phase C — build the optional formula-details HTML block. Reads
+    # the current run's result dict from session_state (set once at
+    # the top of the page render). Falls back to None when the chain
+    # hasn't run yet, the key has no MATH_CONTENT entry, or the entry
+    # is categorical.
+    current_result = st.session_state.get("_current_result")
+    formula_details_html = _build_formula_details_html(key, current_result)
 
     metric_card(
         label,
@@ -212,6 +318,7 @@ def _card(
         flag_est=flag_est,
         size=size,
         sig_figs=sig_figs,
+        formula_details_html=formula_details_html,
     )
 
 
