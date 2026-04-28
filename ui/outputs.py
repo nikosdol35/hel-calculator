@@ -1985,6 +1985,16 @@ def _render_metric_row(entry, result: dict, *, view_mode: str) -> None:
     if entry.explanation_short:
         st.markdown(entry.explanation_short)
 
+    # "Also shown in: X" cross-reference badge (Phase A, v3.7).
+    # When the metric appears on tabs other than its primary tab, show
+    # a small caption pointing the reader at those other contexts.
+    # Cheap addition that turns the math tab into a navigable graph
+    # (the user reading I_peak under Engagement learns it's also a
+    # headline on Overview, etc.).
+    if getattr(entry, "also_in", ()):
+        also_pretty = ", ".join(entry.also_in)
+        st.caption(f"Also shown in: {also_pretty}")
+
     # Full-view expander.
     if view_mode == "Full":
         with st.expander("Show full derivation", expanded=False):
@@ -2027,6 +2037,15 @@ def _render_metric_row(entry, result: dict, *, view_mode: str) -> None:
                 _render_sensitivity_bar(entry, result)
 
 
+def _tab_anchor(tab_id: str) -> str:
+    """Slug-case a TAB_ORDER value to a stable HTML anchor id.
+
+    Used by render_tab_math (v3.7+) so the quick-jump list and the
+    section headers share consistent anchor names.
+    """
+    return "tab-" + tab_id.lower().replace(" ", "-")
+
+
 def _matches_search(entry, query: str) -> bool:
     """Filter helper — returns True when the user's free-text query matches
     any of the metric's searchable fields. Case-insensitive substring
@@ -2047,20 +2066,29 @@ def _matches_search(entry, query: str) -> bool:
 def render_tab_math(result: dict) -> None:
     """Render the "How it's calculated" tab.
 
+    v3.7 (Phase A, 2026-04-28): sections are now grouped by **tab-of-
+    origin** (Overview / Engagement / Target effects / Atmosphere /
+    Safety / Diagnostics) instead of by physics module (M1–M11). The
+    new layout matches the user's mental model — "I saw this number
+    on the Engagement tab, where's the formula?" — instead of
+    requiring them to know which physics module computed it.
+
     Sections:
       1. Header + explanation
-      2. View-mode toggle (Simple / Full)
-      3. Search filter
-      4. Quick-jump navigation
-      5. Glossary expander (top-level)
-      6. Per-module sections (anchored markdown headers; PR 1 ships M1-M3)
-      7. (Stubs for PR 2-5 — empty in PR 1.)
+      2. View-mode toggle (Simple / Full) — preserved verbatim in
+         Phase A; revisited in Phase B
+      3. Search filter — preserved verbatim
+      4. Quick-jump navigation — now lists tab-of-origin sections
+      5. Glossary expander — preserved verbatim
+      6. Per-tab sections (anchored markdown headers, ordered by
+         TAB_ORDER from ui.math_content)
+      7. Constants & sources, worked example, markdown export
 
     The user's current run feeds every "Value" cell so the math tab and
     the per-tab metric cards can never disagree on a number.
     """
     from ui.glossary import GLOSSARY
-    from ui.math_content import MATH_CONTENT, MODULE_ORDER, MODULE_TITLES
+    from ui.math_content import MATH_CONTENT, TAB_ORDER, TAB_TITLES
 
     section_header("How it's calculated")
     explanation(EXPLANATIONS["math_intro"])
@@ -2088,12 +2116,14 @@ def render_tab_math(result: dict) -> None:
         )
 
     # --- Quick-jump --------------------------------------------------------
+    # Lists tab-of-origin sections that actually have entries; skips
+    # empty buckets (Diagnostics may be small but never empty in
+    # practice — defensive check is cheap).
     quick_targets: list[str] = ["[Glossary](#glossary)"]
-    for module_id in MODULE_ORDER:
-        # Only list modules that actually have entries in MATH_CONTENT.
-        if any(e.module == module_id for e in MATH_CONTENT.values()):
-            anchor = module_id.lower()
-            quick_targets.append(f"[{module_id}](#{anchor})")
+    for tab_id in TAB_ORDER:
+        if any(e.primary_tab == tab_id for e in MATH_CONTENT.values()):
+            anchor = _tab_anchor(tab_id)
+            quick_targets.append(f"[{TAB_TITLES[tab_id]}](#{anchor})")
     quick_targets.append("[Constants & sources](#constants)")
     quick_targets.append("[Worked example](#worked-example)")
     st.markdown(" · ".join(quick_targets))
@@ -2110,21 +2140,27 @@ def render_tab_math(result: dict) -> None:
         for term, definition in GLOSSARY.items():
             st.markdown(f"**{term}** — {definition}")
 
-    # --- Per-module sections ----------------------------------------------
-    for module_id in MODULE_ORDER:
-        module_entries = [
-            e for e in MATH_CONTENT.values() if e.module == module_id
+    # --- Per-tab sections (Phase A) ---------------------------------------
+    # Group entries by primary_tab and render in TAB_ORDER. Within each
+    # section, entries appear in their MATH_CONTENT-dict insertion order
+    # (which preserves the existing M1 → M2 → … flow within tab groups,
+    # so dependency arrows still read top-to-bottom).
+    for tab_id in TAB_ORDER:
+        section_entries = [
+            e for e in MATH_CONTENT.values() if e.primary_tab == tab_id
         ]
-        if not module_entries:
+        if not section_entries:
             continue
         # Filter by search.
-        visible = [e for e in module_entries if _matches_search(e, search_query)]
+        visible = [e for e in section_entries if _matches_search(e, search_query)]
         if not visible:
             continue
 
-        anchor = module_id.lower()
+        anchor = _tab_anchor(tab_id)
         st.markdown(f"<a id='{anchor}'></a>", unsafe_allow_html=True)
-        st.markdown(f"### {module_id} — {MODULE_TITLES[module_id]}")
+        st.markdown(
+            f"### {TAB_TITLES[tab_id]} — {len(section_entries)} metrics"
+        )
 
         for entry in visible:
             _render_metric_row(entry, result, view_mode=view_mode)

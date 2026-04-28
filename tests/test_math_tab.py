@@ -791,3 +791,68 @@ def test_module_order_covers_every_module_in_content():
             f"MATH_CONTENT references module {m} but MODULE_TITLES "
             f"has no entry for it"
         )
+
+
+# ---------------------------------------------------------------------------
+# Phase A v3.7 (2026-04-28) — tab-of-origin grouping
+# ---------------------------------------------------------------------------
+
+def test_every_entry_has_primary_tab_in_TAB_ORDER():
+    """Every MetricEntry's primary_tab must be a valid TAB_ORDER value.
+    The renderer iterates TAB_ORDER and would skip an entry tagged
+    to an unknown tab — silent invisibility is the worst failure mode."""
+    from ui.math_content import MATH_CONTENT, TAB_ORDER
+
+    for entry in MATH_CONTENT.values():
+        assert entry.primary_tab in TAB_ORDER, (
+            f"{entry.key!r} has primary_tab={entry.primary_tab!r} which is "
+            f"not in TAB_ORDER={TAB_ORDER}"
+        )
+
+
+def test_every_entry_also_in_is_subset_of_TAB_ORDER():
+    """The optional `also_in` tuple must contain only valid TAB_ORDER
+    values. Catches typos in cross-reference badges before they ship."""
+    from ui.math_content import MATH_CONTENT, TAB_ORDER
+
+    valid = set(TAB_ORDER)
+    for entry in MATH_CONTENT.values():
+        for tab in entry.also_in:
+            assert tab in valid, (
+                f"{entry.key!r} has also_in entry {tab!r} not in TAB_ORDER"
+            )
+        # also_in should not include the primary_tab (would be a self-reference).
+        assert entry.primary_tab not in entry.also_in, (
+            f"{entry.key!r} primary_tab {entry.primary_tab!r} also appears "
+            f"in also_in — self-reference, drop it"
+        )
+
+
+def test_TAB_ORDER_buckets_cover_every_entry():
+    """Iterating TAB_ORDER and collecting entries by primary_tab must
+    yield the full MATH_CONTENT set. Guards against entries tagged to
+    a tab that exists but isn't in TAB_ORDER (impossible by construction
+    today, but the test is cheap insurance)."""
+    from ui.math_content import MATH_CONTENT, TAB_ORDER
+
+    bucketed_keys = set()
+    for tab_id in TAB_ORDER:
+        for e in MATH_CONTENT.values():
+            if e.primary_tab == tab_id:
+                bucketed_keys.add(e.key)
+    assert bucketed_keys == set(MATH_CONTENT.keys()), (
+        "TAB_ORDER iteration missed some entries: "
+        f"{set(MATH_CONTENT.keys()) - bucketed_keys}"
+    )
+
+
+def test_TAB_TITLES_covers_every_TAB_ORDER_entry():
+    """Every TAB_ORDER value must have a TAB_TITLES entry — the renderer
+    uses the title as the section header, so a missing entry would
+    crash with KeyError at render time."""
+    from ui.math_content import TAB_ORDER, TAB_TITLES
+
+    for tab_id in TAB_ORDER:
+        assert tab_id in TAB_TITLES, (
+            f"TAB_ORDER includes {tab_id!r} but TAB_TITLES has no entry"
+        )

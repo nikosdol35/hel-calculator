@@ -90,6 +90,19 @@ class MetricEntry:
     provenance: tuple[ProvenanceFlag, ...] = field(default_factory=tuple)
     assumptions: tuple[str, ...] = field(default_factory=tuple)
 
+    # --- Tab-of-origin grouping (Phase A v3.7, 2026-04-28) --------------
+    # Which app tab is this metric primarily shown on? Drives the new
+    # "How it's calculated" tab section grouping (replaces M1-M11
+    # physics-module ordering with a tab-of-origin layout that matches
+    # the user's mental model of "where did I see this number?").
+    #
+    # primary_tab: one of TAB_ORDER values. Default "Diagnostics" is
+    #   the catch-all for purely-instrumental metrics.
+    # also_in: tuple of other TAB_ORDER values where the metric
+    #   surfaces (drives the "Also shown in: X" badge).
+    primary_tab: str = "Diagnostics"
+    also_in: tuple[str, ...] = field(default_factory=tuple)
+
 
 # ---------------------------------------------------------------------------
 # Module-level metadata (used by the renderer for section headers and the
@@ -115,6 +128,40 @@ MODULE_TITLES: dict[str, str] = {
 # subsequent PRs land their content.
 MODULE_ORDER: tuple[str, ...] = (
     "M1", "M2", "M3", "M4", "M5", "M6", "M7", "M8", "M9", "M10", "ORC",
+)
+
+
+# ---------------------------------------------------------------------------
+# Tab-of-origin grouping (Phase A v3.7, 2026-04-28)
+# Replaces the M1-M11 physics-module section ordering in the renderer.
+# Each MetricEntry is tagged with `primary_tab` (the section it lives in)
+# and optionally `also_in` (other tabs where it surfaces — drives the
+# "Also shown in: X" badge).
+#
+# The 6 sections match the 6 actual app tabs the user navigates between.
+# "Diagnostics" is the catch-all for purely instrumental metrics
+# (iteration counts, convergence flags, internal book-keeping).
+# ---------------------------------------------------------------------------
+
+TAB_TITLES: dict[str, str] = {
+    "Overview":       "Overview",
+    "Engagement":     "Engagement",
+    "Target effects": "Target effects",
+    "Atmosphere":     "Atmosphere",
+    "Safety":         "Safety",
+    "Diagnostics":    "Diagnostics",
+}
+
+# Render order — Overview first (the entry tab), then the engagement-
+# oriented tabs the user is most likely to click through, then Safety
+# and Diagnostics for the long-tail use cases.
+TAB_ORDER: tuple[str, ...] = (
+    "Overview",
+    "Engagement",
+    "Target effects",
+    "Atmosphere",
+    "Safety",
+    "Diagnostics",
 )
 
 
@@ -175,6 +222,8 @@ def _entries() -> dict[str, MetricEntry]:
             "Gaussian beam (TEM_00 mode); the M² formalism captures any "
             "departure from the ideal as a single multiplier.",
         ),
+        primary_tab="Engagement",
+        also_in=(),
     ))
 
     rows.append(MetricEntry(
@@ -206,6 +255,8 @@ def _entries() -> dict[str, MetricEntry]:
             "Beam fully fills the exit aperture — under-filling not modelled "
             "in v1.",
         ),
+        primary_tab="Engagement",
+        also_in=(),
     ))
 
     rows.append(MetricEntry(
@@ -234,6 +285,8 @@ def _entries() -> dict[str, MetricEntry]:
         derivation_link="validation/derivations/m1_source.md",
         provenance=(),
         assumptions=(),
+        primary_tab="Engagement",
+        also_in=(),
     ))
 
     rows.append(MetricEntry(
@@ -263,6 +316,8 @@ def _entries() -> dict[str, MetricEntry]:
         provenance=(ProvenanceFlag.CLAUDE_71_INVARIANT,
                     ProvenanceFlag.REPLICATED),
         assumptions=(),
+        primary_tab="Engagement",
+        also_in=(),
     ))
 
     # =========================================================================
@@ -299,6 +354,8 @@ def _entries() -> dict[str, MetricEntry]:
             "Lumped optical-train transmission; v1 does not break out "
             "individual surface losses.",
         ),
+        primary_tab="Diagnostics",
+        also_in=("Overview",),
     ))
 
     # =========================================================================
@@ -336,6 +393,8 @@ def _entries() -> dict[str, MetricEntry]:
             "User-input R is taken to be the slant (line-of-sight) range, "
             "not the horizontal ground range.",
         ),
+        primary_tab="Atmosphere",
+        also_in=("Engagement",),
     ))
 
     rows.append(MetricEntry(
@@ -365,6 +424,8 @@ def _entries() -> dict[str, MetricEntry]:
         derivation_link="validation/derivations/m3_director.md",
         provenance=(),
         assumptions=(),
+        primary_tab="Atmosphere",
+        also_in=(),
     ))
 
     rows.append(MetricEntry(
@@ -399,6 +460,8 @@ def _entries() -> dict[str, MetricEntry]:
             "Flat-Earth geometry; Earth-curvature corrections are not "
             "applied at v1's slant ranges (≤ 50 km).",
         ),
+        primary_tab="Atmosphere",
+        also_in=(),
     ))
 
     rows.append(MetricEntry(
@@ -437,6 +500,8 @@ def _entries() -> dict[str, MetricEntry]:
             "constant v_tgt; no slew-rate, line-of-sight-masking, or "
             "multi-target prioritization model.",
         ),
+        primary_tab="Overview",
+        also_in=("Engagement", "Target effects",),
     ))
 
     rows.append(MetricEntry(
@@ -481,6 +546,8 @@ def _entries() -> dict[str, MetricEntry]:
             "range. The kill range (where the burn-through actually "
             "happens) is reported separately as R_at_kill from M8.",
         ),
+        primary_tab="Atmosphere",
+        also_in=("Engagement",),
     ))
 
     # =========================================================================
@@ -529,6 +596,8 @@ def _entries() -> dict[str, MetricEntry]:
             "in log-log space.",
             "Baseline humidity 60 % per the McClatchey reference atmosphere.",
         ),
+        primary_tab="Atmosphere",
+        also_in=(),
     ))
 
     rows.append(MetricEntry(
@@ -567,6 +636,8 @@ def _entries() -> dict[str, MetricEntry]:
         assumptions=(
             "Sea-level table; humidity-independent.",
         ),
+        primary_tab="Atmosphere",
+        also_in=(),
     ))
 
     rows.append(MetricEntry(
@@ -607,6 +678,8 @@ def _entries() -> dict[str, MetricEntry]:
         assumptions=(
             "5 % absorption / 95 % scattering split — engineering default.",
         ),
+        primary_tab="Atmosphere",
+        also_in=(),
     ))
 
     rows.append(MetricEntry(
@@ -649,6 +722,8 @@ def _entries() -> dict[str, MetricEntry]:
             "Kruse visibility model; q(V) piecewise; 0.55 µm reference "
             "wavelength.",
         ),
+        primary_tab="Atmosphere",
+        also_in=(),
     ))
 
     rows.append(MetricEntry(
@@ -689,6 +764,8 @@ def _entries() -> dict[str, MetricEntry]:
         derivation_link="validation/derivations/m4_atmosphere.md",
         provenance=(),
         assumptions=(),
+        primary_tab="Atmosphere",
+        also_in=(),
     ))
 
     rows.append(MetricEntry(
@@ -724,6 +801,8 @@ def _entries() -> dict[str, MetricEntry]:
             "Single homogeneous-atmosphere α along the slant — no path "
             "stratification by altitude in v1.",
         ),
+        primary_tab="Atmosphere",
+        also_in=(),
     ))
 
     # =========================================================================
@@ -768,6 +847,8 @@ def _entries() -> dict[str, MetricEntry]:
             "HV-5/7 profile; linear-altitude slant-path interpolation; "
             "scipy.integrate.quad numerical integration.",
         ),
+        primary_tab="Engagement",
+        also_in=(),
     ))
 
     rows.append(MetricEntry(
@@ -807,6 +888,8 @@ def _entries() -> dict[str, MetricEntry]:
             "Spherical-wave Kolmogorov regime; isotropic turbulence; "
             "weak-turbulence limit (no scintillation modeling).",
         ),
+        primary_tab="Engagement",
+        also_in=(),
     ))
 
     rows.append(MetricEntry(
@@ -844,6 +927,8 @@ def _entries() -> dict[str, MetricEntry]:
         assumptions=(
             "Engineering long-term form; weak-turbulence regime.",
         ),
+        primary_tab="Engagement",
+        also_in=(),
     ))
 
     # =========================================================================
@@ -900,6 +985,8 @@ def _entries() -> dict[str, MetricEntry]:
             "the heated channel.",
             "Gladstone-Dale dn/dT with T-dependence (CLAUDE §7.1 form).",
         ),
+        primary_tab="Engagement",
+        also_in=(),
     ))
 
     rows.append(MetricEntry(
@@ -937,6 +1024,8 @@ def _entries() -> dict[str, MetricEntry]:
         assumptions=(
             "Smith's empirical Strehl scaling; valid for 5 ≤ N_D ≤ 30.",
         ),
+        primary_tab="Engagement",
+        also_in=(),
     ))
 
     rows.append(MetricEntry(
@@ -988,6 +1077,8 @@ def _entries() -> dict[str, MetricEntry]:
             "Validity envelope 5 ≤ N_D ≤ 30; outside this range the value "
             "still computes but is flagged.",
         ),
+        primary_tab="Engagement",
+        also_in=(),
     ))
 
     # =========================================================================
@@ -1031,6 +1122,8 @@ def _entries() -> dict[str, MetricEntry]:
         assumptions=(
             "Exact-Gaussian propagation (NOT the far-field asymptote).",
         ),
+        primary_tab="Engagement",
+        also_in=(),
     ))
 
     rows.append(MetricEntry(
@@ -1064,6 +1157,8 @@ def _entries() -> dict[str, MetricEntry]:
         assumptions=(
             "σ_jit is per-axis RMS; long-term-average spot convention.",
         ),
+        primary_tab="Engagement",
+        also_in=(),
     ))
 
     rows.append(MetricEntry(
@@ -1112,6 +1207,8 @@ def _entries() -> dict[str, MetricEntry]:
             "Four broadening mechanisms statistically independent — valid "
             "in the long-term-average regime.",
         ),
+        primary_tab="Engagement",
+        also_in=(),
     ))
 
     rows.append(MetricEntry(
@@ -1142,6 +1239,8 @@ def _entries() -> dict[str, MetricEntry]:
         derivation_link="validation/derivations/m7_spot.md",
         provenance=(),
         assumptions=(),
+        primary_tab="Engagement",
+        also_in=(),
     ))
 
     rows.append(MetricEntry(
@@ -1186,6 +1285,8 @@ def _entries() -> dict[str, MetricEntry]:
         assumptions=(
             "Gaussian beam profile at the target (long-term-average).",
         ),
+        primary_tab="Overview",
+        also_in=("Engagement",),
     ))
 
     rows.append(MetricEntry(
@@ -1228,6 +1329,8 @@ def _entries() -> dict[str, MetricEntry]:
             "Gaussian beam against circular aperture; bucket centred on "
             "the aimpoint.",
         ),
+        primary_tab="Engagement",
+        also_in=("Overview",),
     ))
 
     rows.append(MetricEntry(
@@ -1267,6 +1370,8 @@ def _entries() -> dict[str, MetricEntry]:
         derivation_link="validation/derivations/m7_spot.md",
         provenance=(),
         assumptions=(),
+        primary_tab="Overview",
+        also_in=(),
     ))
 
     # =========================================================================
@@ -1336,6 +1441,8 @@ def _entries() -> dict[str, MetricEntry]:
             "window, tau_BT clamps to 60 s and the engagement is "
             "flagged as 'no failure within window'.",
         ),
+        primary_tab="Overview",
+        also_in=("Target effects",),
     ))
 
     rows.append(MetricEntry(
@@ -1376,6 +1483,8 @@ def _entries() -> dict[str, MetricEntry]:
         derivation_link="validation/derivations/m8_thermal.md",
         provenance=(),
         assumptions=(),
+        primary_tab="Target effects",
+        also_in=(),
     ))
 
     rows.append(MetricEntry(
@@ -1424,6 +1533,8 @@ def _entries() -> dict[str, MetricEntry]:
             "Absorbed-energy reporting uses the material-table A_lambda; "
             "see SPEC §10.2 for the HIGH UNCERTAINTY caveat.",
         ),
+        primary_tab="Target effects",
+        also_in=(),
     ))
 
     rows.append(MetricEntry(
@@ -1472,6 +1583,8 @@ def _entries() -> dict[str, MetricEntry]:
             "timeout' or 'engagement_ended_at_R_min' — there is no kill "
             "moment to report.",
         ),
+        primary_tab="Target effects",
+        also_in=(),
     ))
 
     rows.append(MetricEntry(
@@ -1521,6 +1634,8 @@ def _entries() -> dict[str, MetricEntry]:
             "the true continuous-time peak is interpolated to within "
             "~1 % of the sample-based maximum.",
         ),
+        primary_tab="Engagement",
+        also_in=(),
     ))
 
     rows.append(MetricEntry(
@@ -1567,6 +1682,8 @@ def _entries() -> dict[str, MetricEntry]:
             "I_avg_aim sub-sample series; same ~1 % interpolation "
             "caveat as I_peak_max.",
         ),
+        primary_tab="Engagement",
+        also_in=(),
     ))
 
     rows.append(MetricEntry(
@@ -1608,6 +1725,8 @@ def _entries() -> dict[str, MetricEntry]:
         derivation_link="validation/derivations/m8_thermal.md",
         provenance=(),
         assumptions=(),
+        primary_tab="Target effects",
+        also_in=(),
     ))
 
     # =========================================================================
@@ -1666,6 +1785,8 @@ def _entries() -> dict[str, MetricEntry]:
             "Band C (λ > 4 µm) deferred to v2; Band B formulas used as "
             "placeholder there.",
         ),
+        primary_tab="Safety",
+        also_in=(),
     ))
 
     rows.append(MetricEntry(
@@ -1713,6 +1834,8 @@ def _entries() -> dict[str, MetricEntry]:
             "when subtraction would go negative (rare; only for very "
             "tight divergence).",
         ),
+        primary_tab="Safety",
+        also_in=(),
     ))
 
     rows.append(MetricEntry(
@@ -1755,6 +1878,8 @@ def _entries() -> dict[str, MetricEntry]:
         assumptions=(
             "Single-mode Gaussian beam profile.",
         ),
+        primary_tab="Safety",
+        also_in=(),
     ))
 
     rows.append(MetricEntry(
@@ -1795,6 +1920,8 @@ def _entries() -> dict[str, MetricEntry]:
             "CW NIR convention; pulsed and visible-band classifications "
             "are not in v1 scope.",
         ),
+        primary_tab="Safety",
+        also_in=(),
     ))
 
     # =========================================================================
@@ -1829,6 +1956,8 @@ def _entries() -> dict[str, MetricEntry]:
             "Constant wallplug efficiency over the engagement (no warm-"
             "up or thermal-runaway derating).",
         ),
+        primary_tab="Diagnostics",
+        also_in=(),
     ))
 
     rows.append(MetricEntry(
@@ -1855,6 +1984,8 @@ def _entries() -> dict[str, MetricEntry]:
         derivation_link="validation/derivations/m10_power.md",
         provenance=(),
         assumptions=(),
+        primary_tab="Diagnostics",
+        also_in=(),
     ))
 
     rows.append(MetricEntry(
@@ -1902,6 +2033,8 @@ def _entries() -> dict[str, MetricEntry]:
             "Single lumped-mass coolant model; constant Q_waste over "
             "the engagement (P0 not ramped).",
         ),
+        primary_tab="Diagnostics",
+        also_in=(),
     ))
 
     rows.append(MetricEntry(
@@ -1949,6 +2082,8 @@ def _entries() -> dict[str, MetricEntry]:
         assumptions=(
             "Symmetric sustain/recover bookkeeping at the same dT_max.",
         ),
+        primary_tab="Diagnostics",
+        also_in=(),
     ))
 
     rows.append(MetricEntry(
@@ -1993,6 +2128,8 @@ def _entries() -> dict[str, MetricEntry]:
             "engagement may run shorter (tracker breaks lock) or "
             "longer (multiple aimpoints).",
         ),
+        primary_tab="Diagnostics",
+        also_in=(),
     ))
 
     rows.append(MetricEntry(
@@ -2029,6 +2166,8 @@ def _entries() -> dict[str, MetricEntry]:
         derivation_link="validation/derivations/m10_power.md",
         provenance=(),
         assumptions=(),
+        primary_tab="Overview",
+        also_in=(),
     ))
 
     # =========================================================================
@@ -2079,6 +2218,8 @@ def _entries() -> dict[str, MetricEntry]:
             "to a future revision (the loop converges within 10 "
             "iterations across the validated input ranges).",
         ),
+        primary_tab="Diagnostics",
+        also_in=(),
     ))
 
     rows.append(MetricEntry(
@@ -2117,6 +2258,8 @@ def _entries() -> dict[str, MetricEntry]:
         derivation_link="validation/methods/m6_m7_iteration.md",
         provenance=(),
         assumptions=(),
+        primary_tab="Diagnostics",
+        also_in=(),
     ))
 
     rows.append(MetricEntry(
@@ -2159,6 +2302,8 @@ def _entries() -> dict[str, MetricEntry]:
             "Bucket-averaged irradiance — appropriate when M8's 1-D heat "
             "model is the downstream consumer.",
         ),
+        primary_tab="Engagement",
+        also_in=("Overview",),
     ))
 
     return {entry.key: entry for entry in rows}
@@ -2171,6 +2316,8 @@ __all__ = [
     "MATH_CONTENT",
     "MODULE_ORDER",
     "MODULE_TITLES",
+    "TAB_ORDER",
+    "TAB_TITLES",
     "MetricEntry",
     "ProvenanceFlag",
 ]
