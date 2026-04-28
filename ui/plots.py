@@ -2200,6 +2200,10 @@ def plot_j_cumulative_energy_diagnostic(
 
     # Useful-zone shaded background. With the secondary-y figure mode
     # active, ``secondary_y=False`` binds the rect to the primary axis.
+    # The vrect annotation is suppressed — for narrow useful zones
+    # (tens of ms wide on a several-second chart) the annotation
+    # would overlap the E_fail line's annotation. The legend trace
+    # below carries the same information without the overlap risk.
     if (useful_start_t is not None
             and useful_end_t is not None
             and useful_end_t > useful_start_t):
@@ -2207,51 +2211,61 @@ def plot_j_cumulative_energy_diagnostic(
         vrect_kwargs: dict = dict(
             x0=useful_start_t, x1=useful_end_t,
             fillcolor=ok_rgba, line_width=0,
-            annotation_text=(
-                f"Useful zone "
-                f"({useful_end_t - useful_start_t:.2f} s; "
-                f"I_avg ≥ {_USEFUL_FLUX_THRESHOLD_WPM2 * 1e-4:.0f} "
-                f"W/cm²)"
-            ),
-            annotation_position="top left",
-            annotation_font=dict(color=palette["fg.secondary"], size=10),
         )
         if have_overlay:
             vrect_kwargs["secondary_y"] = False
         fig.add_vrect(**vrect_kwargs)
+        # Add a single in-plot caption ABOVE the chart's top edge in
+        # the upper-LEFT corner of the plot area (paper coords) so it
+        # never collides with the per-shape annotations below.
+        useful_duration = useful_end_t - useful_start_t
+        fig.add_annotation(
+            xref="paper", yref="paper", x=0.01, y=1.0,
+            xanchor="left", yanchor="bottom",
+            text=(
+                f"<i>Green band = useful zone ({useful_duration:.2f} s; "
+                f"I_avg ≥ {_USEFUL_FLUX_THRESHOLD_WPM2 * 1e-4:.0f} "
+                f"W/cm²)</i>"
+            ),
+            showarrow=False,
+            font=dict(color=palette["fg.tertiary"], size=10),
+        )
 
-    # Failure-fluence reference line (lumped-mass). On the primary
-    # y-axis in J/cm² for the cumulative-energy curve. Annotation
-    # placed at "bottom left" so it doesn't collide with the Kill
-    # vline annotation at "top right" — together with the Useful-
-    # zone vrect at "top left", the three annotations occupy three
-    # distinct corners of the plot.
+    # Failure-fluence reference line (lumped-mass). Annotation moved
+    # to the upper-RIGHT of the plot area (paper coords) so it stays
+    # clear of the useful-zone caption (top-left) and the Kill marker
+    # (which now anchors to the kill vline's bottom).
     if E_fail_jpcm2 is not None and E_fail_jpcm2 > 0:
         hline_kwargs: dict = dict(
             y=E_fail_jpcm2,
             line=dict(
                 color=palette["status.error"], width=1.5, dash="dash",
             ),
-            annotation_text=(
-                f"E_fail (lumped-mass) ≈ {E_fail_jpcm2:.0f} J/cm²"
-            ),
-            annotation_position="bottom left",
-            annotation_font=dict(color=palette["fg.secondary"], size=11),
         )
         if have_overlay:
             hline_kwargs["secondary_y"] = False
         fig.add_hline(**hline_kwargs)
+        fig.add_annotation(
+            xref="paper", yref="paper", x=0.99, y=1.0,
+            xanchor="right", yanchor="bottom",
+            text=(
+                f"<i>E_fail (lumped-mass) ≈ "
+                f"{E_fail_jpcm2:.0f} J/cm²</i>"
+            ),
+            showarrow=False,
+            font=dict(color=palette["fg.tertiary"], size=10),
+        )
 
-    # Kill-moment vertical marker (when applicable). Spans both
-    # axes; binding to primary keeps the call consistent with the
-    # other shape adds above.
+    # Kill-moment vertical marker (when applicable). Annotation
+    # anchored to the line's BOTTOM so it sits along the time axis
+    # near the kill point — well clear of the top-edge captions.
     if useful_end_t is not None:
         vline_kwargs: dict = dict(
             x=useful_end_t,
             line=dict(color=palette["status.ok"], width=1.5, dash="dash"),
             annotation_text=f"Kill at t = {useful_end_t:.2f} s",
-            annotation_position="top right",
-            annotation_font=dict(color=palette["fg.secondary"], size=11),
+            annotation_position="bottom right",
+            annotation_font=dict(color=palette["status.ok"], size=11),
         )
         if have_overlay:
             vline_kwargs["secondary_y"] = False
@@ -2276,15 +2290,16 @@ def plot_j_cumulative_energy_diagnostic(
     # overlapped the E_fail label and the Kill marker.
     _apply_default_layout(fig, height=height, show_legend=have_overlay)
 
-    # Auto-zoom the time axis when the kill happens early in the
-    # engagement window. Same heuristic as Plot H — proportional to
-    # kill_t with a 1 s absolute minimum, so the two figures stack
-    # cleanly above one another and a fast kill stays visible.
+    # Auto-zoom the time axis to focus on the engagement-relevant
+    # window. v3.6 (2026-04-28): always zoom when there's a kill,
+    # not just when it happens early — for strong scenarios the kill
+    # is quick (e.g. 1.5 s) but t_pde extends to the full available
+    # dwell (e.g. 70 s), leaving 95 % of the chart empty. Zoom to
+    # 2.5× the kill time (with a 1 s minimum) so the kill point and
+    # surrounding time both stay visible.
     t_axis_max = float(t_pde[-1]) if t_pde else 0.0
-    if (useful_end_t is not None
-            and t_axis_max > 0
-            and useful_end_t < 0.3 * t_axis_max):
-        zoom_to = max(useful_end_t * 3.0, useful_end_t + 1.0)
+    if useful_end_t is not None and t_axis_max > 0:
+        zoom_to = max(useful_end_t * 2.5, useful_end_t + 1.0)
         zoom_to = min(zoom_to, t_axis_max)
         fig.update_xaxes(range=[0.0, zoom_to])
     return fig
