@@ -1456,14 +1456,13 @@ def plot_g_spot_vs_bucket(
         )
     )
 
-    # Vertical reference-range line at the user's R_detect.
+    # Vertical reference-range line at the user's R_detect. The
+    # "Current scenario" star (added below) carries the label, so the
+    # line itself stays unannotated to avoid stacking text at the top.
     if reference_range is not None and reference_range > 0:
         fig.add_vline(
             x=reference_range / 1000.0,
             line=dict(color=palette["data.reference"], width=1.2, dash="dash"),
-            annotation_text="Reference range",
-            annotation_position="top right",
-            annotation_font=dict(color=palette["fg.secondary"], size=11),
         )
 
     # "Current scenario" star at (reference_range, current spot dia).
@@ -1733,12 +1732,13 @@ def plot_e_engagement_margin_vs_range(
         line=dict(color=palette["data.reference"], width=1.2, dash="dash"),
     )
     if reference_range is not None and reference_range > 0:
+        # Vertical reference-range line. Annotation suppressed — the
+        # "Current scenario" star (added later, when chain margin is
+        # available) carries the same x-position with a clearer label
+        # that includes the actual margin value.
         fig.add_vline(
             x=reference_range / 1000.0,
             line=dict(color=palette["data.reference"], width=1.2, dash="dash"),
-            annotation_text="Reference range",
-            annotation_position="top right",
-            annotation_font=dict(color=palette["fg.secondary"], size=11),
         )
 
     # Margin curve. Use series-B styling (teal / dash / square) so this
@@ -1759,7 +1759,11 @@ def plot_e_engagement_margin_vs_range(
     )
 
     # "Current scenario" star at the user's reference range, using
-    # the chain's PDE-accurate τ_BT / dwell.
+    # the chain's PDE-accurate τ_BT / dwell. When the actual margin
+    # is way above the chart ceiling (engagement closes with huge
+    # spare time), drop the star slightly below the ceiling and put
+    # the actual numeric margin in the text label so the reader can
+    # always see the real number.
     if (reference_range is not None and reference_range > 0
             and current_tau_BT_s is not None
             and current_dwell_s is not None
@@ -1768,19 +1772,34 @@ def plot_e_engagement_margin_vs_range(
         current_margin = (
             100.0 * (current_dwell_s - current_tau_BT_s) / current_tau_BT_s
         )
-        clamped_margin = max(Y_FLOOR, min(Y_CEIL, current_margin))
+        was_clipped = current_margin > Y_CEIL or current_margin < Y_FLOOR
+        # Place star inside the visible band even when margin is
+        # off-chart, so it doesn't pile up at the very top with the
+        # curve and clipping annotation.
+        if current_margin > Y_CEIL:
+            star_y = Y_CEIL * 0.85   # 170 % when ceiling = 200 %
+        elif current_margin < Y_FLOOR:
+            star_y = Y_FLOOR * 0.85
+        else:
+            star_y = current_margin
+        # Text: always carry the actual numeric margin so the user
+        # reads the real value even when the star itself is clipped.
+        star_text = f"  Current: {current_margin:+.0f}%"
+        if was_clipped:
+            star_text += "  (off-chart)"
         fig.add_trace(
             go.Scatter(
                 x=[reference_range / 1000.0],
-                y=[clamped_margin],
+                y=[star_y],
                 mode="markers+text",
-                text=["Current scenario"],
-                textposition="bottom right",
+                text=[star_text],
+                textposition="middle right",
                 marker=dict(
                     size=16, color=palette["fg.primary"],
                     line=dict(color=palette["bg.base"], width=2),
                     symbol="star",
                 ),
+                textfont=dict(color=palette["fg.primary"], size=11),
                 name="You are here",
                 hovertemplate=(
                     f"R_detect = {reference_range / 1000.0:.2f} km · "
@@ -2446,7 +2465,11 @@ def plot_i_outcome_map_vs_R_detect(
 
     # "You are here" star at the user's current scenario, when the
     # caller passed the chain's R_detect + dwell + tau_BT. Star uses
-    # the chain's PDE-accurate margin, not the lumped sweep cell.
+    # the chain's PDE-accurate margin. When the actual margin is way
+    # above the chart ceiling (engagement closes with huge spare
+    # time), drop the star slightly below the ceiling and put the
+    # actual numeric margin in the text label so the reader can
+    # always see the real number.
     if (current_R_m is not None and current_tau_BT_s is not None
             and current_dwell_s is not None
             and math.isfinite(current_R_m) and current_R_m > 0
@@ -2455,20 +2478,31 @@ def plot_i_outcome_map_vs_R_detect(
         current_margin = (
             100.0 * (current_dwell_s - current_tau_BT_s) / current_tau_BT_s
         )
-        # Clamp to the visible y-range so the star stays on-chart.
-        clamped_margin = max(Y_FLOOR, min(Y_CEIL, current_margin))
+        was_clipped = current_margin > Y_CEIL or current_margin < Y_FLOOR
+        # Place star inside the visible band even when margin is
+        # off-chart, so it doesn't pile up with the curve at the top.
+        if current_margin > Y_CEIL:
+            star_y = Y_CEIL * 0.85
+        elif current_margin < Y_FLOOR:
+            star_y = Y_FLOOR * 0.85
+        else:
+            star_y = current_margin
+        star_text = f"  Current: {current_margin:+.0f}%"
+        if was_clipped:
+            star_text += "  (off-chart)"
         fig.add_trace(
             go.Scatter(
                 x=[current_R_m / 1000.0],
-                y=[clamped_margin],
+                y=[star_y],
                 mode="markers+text",
-                text=["Current scenario"],
-                textposition="bottom right",
+                text=[star_text],
+                textposition="middle right",
                 marker=dict(
                     size=16, color=palette["fg.primary"],
                     line=dict(color=palette["bg.base"], width=2),
                     symbol="star",
                 ),
+                textfont=dict(color=palette["fg.primary"], size=11),
                 name="You are here",
                 hovertemplate=(
                     f"R_detect = {current_R_m / 1000.0:.2f} km · "
