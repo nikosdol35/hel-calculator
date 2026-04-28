@@ -707,7 +707,11 @@ def test_substitute_formula_values_skips_categorical():
 
 def test_substitute_formula_values_real_metric():
     """A real numeric metric returns a non-empty substitution string
-    when the dependencies are present in the result dict."""
+    when the dependencies are present in the result dict.
+
+    Phase A.1 (2026-04-28): output is now a Markdown bullet list.
+    Each bullet contains the symbol + value (+ optional unit) +
+    human label."""
     from ui.math_content import MATH_CONTENT
     from ui.outputs import _substitute_formula_values
 
@@ -715,9 +719,79 @@ def test_substitute_formula_values_real_metric():
     result = {"P0": 3000.0, "D": 0.10, "w0": 0.05}
     sub = _substitute_formula_values(entry, result)
     assert sub is not None
-    assert "P0 = 3000" in sub
-    assert "D = 0.1" in sub
-    assert "w0 = 0.05" in sub
+    # Substring checks now expect the bolded `**key**` markup.
+    assert "**P0**" in sub
+    assert "3000" in sub
+    assert "**D**" in sub
+    assert "0.1" in sub
+    assert "**w0**" in sub
+    assert "0.05" in sub
+    # Each bullet starts with a markdown list marker.
+    assert sub.startswith("- ")
+    # Multi-line: at least 3 entries.
+    assert sub.count("\n") >= 2
+
+
+def test_substitute_formula_values_includes_human_labels():
+    """Phase A.1 requirement: each substituted value carries the
+    human-readable label of what it physically represents, not just
+    the code symbol. Verifies the Phase A.1 promise the user asked
+    for ('S_TB = 0.97 — what is this number?')."""
+    from ui.math_content import MATH_CONTENT
+    from ui.outputs import _substitute_formula_values
+
+    # I_peak depends on P_exit, tau_atm, S_TB, w_total + sensitivity
+    # inputs P0, eta_opt, M2, D, wavelength, sigma_jit, …
+    entry = MATH_CONTENT["I_peak"]
+    result = {
+        "P_exit": 2550.0, "tau_atm": 0.81, "S_TB": 0.97, "w_total": 0.06,
+        "P0": 3000.0, "eta_opt": 0.85, "M2": 1.2, "D": 0.10,
+        "wavelength": 1.07e-6, "sigma_jit": 1e-5, "V": 23.0,
+        "RH": 0.6, "Cn2_ground": 1.7e-14, "v_HV": 21.0,
+        "T_ambient": 300.0, "P_atm": 101325.0,
+    }
+    sub = _substitute_formula_values(entry, result)
+    assert sub is not None
+    # P_exit (output, has MATH_CONTENT entry): the display_name is
+    # "Power leaving the beam director".
+    assert "Power leaving the beam director" in sub
+    # tau_atm (output): display_name "Atmospheric transmission".
+    assert "Atmospheric transmission" in sub
+    # S_TB (output): display_name "Thermal-blooming Strehl" — this is
+    # the key user-pain example from the screenshot.
+    assert "Thermal-blooming Strehl" in sub
+    # P0 (raw input): INPUT_LABELS["P0"]["label"] = "Output power".
+    assert "Output power" in sub
+    # M2 (raw input): "Beam quality (M²)".
+    assert "Beam quality" in sub
+
+
+def test_substitute_formula_values_includes_si_units():
+    """Phase A.1 requirement: each substituted value carries its SI
+    unit so the reader knows whether 2550 is W, mW, or something
+    else. Outputs use MATH_CONTENT.unit_si; raw inputs use the new
+    _INPUT_SI_UNITS lookup."""
+    from ui.math_content import MATH_CONTENT
+    from ui.outputs import _substitute_formula_values
+
+    entry = MATH_CONTENT["I_peak"]
+    result = {
+        "P_exit": 2550.0, "tau_atm": 0.81, "S_TB": 0.97, "w_total": 0.06,
+        "P0": 3000.0, "eta_opt": 0.85, "M2": 1.2, "D": 0.10,
+        "wavelength": 1.07e-6, "sigma_jit": 1e-5, "V": 23.0,
+        "RH": 0.6, "Cn2_ground": 1.7e-14, "v_HV": 21.0,
+        "T_ambient": 300.0, "P_atm": 101325.0,
+    }
+    sub = _substitute_formula_values(entry, result)
+    assert sub is not None
+    # P0 has SI unit "W" per the _INPUT_SI_UNITS lookup.
+    assert "3000 W" in sub
+    # D has SI unit "m".
+    assert "0.1 m" in sub
+    # sigma_jit has SI unit "rad".
+    assert "rad" in sub
+    # v_HV has SI unit "m/s".
+    assert "m/s" in sub
 
 
 # ---------------------------------------------------------------------------

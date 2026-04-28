@@ -120,6 +120,61 @@ _DISPLAY_SCALE: dict[str, float] = {
 }
 
 
+# ---------------------------------------------------------------------------
+# SI units for raw user-input keys (Phase A.1, 2026-04-28).
+# INPUT_LABELS already carries each input's *display* unit (e.g. "kW",
+# "µrad"), but the substituted-formula block in the math-tab Full view
+# shows raw SI values from the chain's `result` dict so the formula stays
+# self-consistent. This dict labels each input with its SI unit so the
+# reader sees `P0 = 3000 W — Laser output power` instead of just
+# `P0 = 3000`. Hand-curated; the test suite covers a representative slice.
+# Empty string = dimensionless.
+# ---------------------------------------------------------------------------
+
+_INPUT_SI_UNITS: dict[str, str] = {
+    # Section 1 — Laser source / M1
+    "P0":         "W",
+    "M2":         "",
+    "D":          "m",
+    "wavelength": "m",
+    # Section 2 — Beam director / M2 + jitter
+    "eta_opt":    "",
+    "sigma_jit":  "rad",
+    # Section 3 — Engagement geometry / M3
+    "H_e":        "m",
+    "H_t":        "m",
+    "v_tgt":      "m/s",
+    "v_perp":     "m/s",
+    "R":          "m",
+    "R_detect":   "m",
+    "R_min":      "m",
+    "engagement_geometry": "",     # categorical
+    # Section 4 — Atmosphere / M4
+    "V":          "km",            # visibility — chain stores it in km
+    "RH":         "",              # fraction
+    "T_ambient":  "K",
+    "P_atm":      "Pa",
+    # Section 4b — Turbulence / M5
+    "cn2_model":  "",              # categorical
+    "Cn2_value":  "m^(-2/3)",
+    "Cn2_ground": "m^(-2/3)",
+    "v_HV":       "m/s",
+    # Section 5 — Aimpoint / target / M7+M8
+    "d_aim":      "m",
+    "material":   "",              # categorical
+    "thickness":  "m",
+    # Section 6 — System resources / M10
+    "eta_wallplug": "",
+    "Q_cool":     "W",
+    "C_thermal":  "J/K",
+    "dT_max":     "K",
+    "t_exp":      "s",
+    "backside_BC": "",             # categorical
+    # SPEC v2.0 / safety-table inputs / M9
+    "A_lambda":   "",              # absorption fraction
+}
+
+
 def _scale(key: str, value: float | None) -> float | None:
     """Scale a SI orchestrator value to the display unit declared in labels.py."""
     if value is None:
@@ -1176,10 +1231,64 @@ def _format_value_for_math_tab(key: str, value: float | int | str | None,
     return format_value(scaled, unit)
 
 
+def _resolve_label_and_unit(key: str) -> tuple[str, str]:
+    """Look up (human-readable label, SI unit) for any variable key
+    appearing in a formula's `formula_dependencies` or
+    `sensitivity_inputs`. Used by `_substitute_formula_values` to
+    annotate each substituted value (Phase A.1, 2026-04-28).
+
+    Lookup order:
+      1. MATH_CONTENT[key] — outputs that have a math-tab entry
+         (display_name + unit_si).
+      2. INPUT_LABELS[key] — raw user inputs (label + _INPUT_SI_UNITS).
+      3. OUTPUT_LABELS[key] — computed metrics without a math entry
+         (label only; unit is the display unit, used as a fallback).
+      4. Fallback: empty label + empty unit.
+    """
+    from ui.labels import INPUT_LABELS, OUTPUT_LABELS
+    from ui.math_content import MATH_CONTENT
+
+    # 1. MATH_CONTENT — primary source for outputs that have a math entry.
+    entry = MATH_CONTENT.get(key)
+    if entry is not None:
+        return entry.display_name, entry.unit_si or ""
+
+    # 2. INPUT_LABELS — raw user inputs.
+    if key in INPUT_LABELS:
+        label = INPUT_LABELS[key].get("label", "")
+        si_unit = _INPUT_SI_UNITS.get(key, "")
+        return label, si_unit
+
+    # 3. OUTPUT_LABELS — computed metrics without a math entry.
+    if key in OUTPUT_LABELS:
+        label = OUTPUT_LABELS[key].get("label", "")
+        # No SI unit available here; leave blank.
+        return label, ""
+
+    # 4. Fallback — defensive.
+    return "", ""
+
+
 def _substitute_formula_values(entry, result: dict) -> str | None:
-    """Build the 'with current values' substituted-formula string for the
+    """Build the 'with current values' substituted-formula block for the
     Full view. Returns None when substitution doesn't make sense
-    (categorical metrics, solver-based metrics)."""
+    (categorical metrics, solver-based metrics).
+
+    Phase A.1 (2026-04-28): output is now a Markdown bullet list, one
+    line per variable, including the human-readable label and SI unit.
+    Each bullet reads:
+
+      - **key** = value unit — *human label*
+
+    Example for I_peak:
+        - **P_exit** = 2550 W — *Beam-director exit power*
+        - **tau_atm** = 0.8087 — *Atmospheric transmission*
+        - **S_TB** = 0.9743 — *Strehl ratio from thermal blooming*
+        - ...
+
+    The reader can match each substituted value to what it physically
+    represents without leaving the Math tab.
+    """
     from ui.math_content import MetricEntry
     if not isinstance(entry, MetricEntry):
         return None
@@ -1187,24 +1296,43 @@ def _substitute_formula_values(entry, result: dict) -> str | None:
         return None
     if entry.formula_text is None:
         return None
-    # PR 1: render a simple "with values" line by listing each input + its
-    # SI numeric value. PR 2 adds proper symbolic substitution into the
-    # LaTeX expression.
-    parts = []
-    for dep in entry.formula_dependencies:
-        v = result.get(dep)
-        if v is None or isinstance(v, (str, bool)):
-            parts.append(f"{dep} = (n/a)")
-        else:
-            parts.append(f"{dep} = {float(v):.4g}")
-    for inp in entry.sensitivity_inputs:
-        v = result.get(inp)
-        if v is None or isinstance(v, (str, bool)):
+
+    # Walk dependencies + inputs in order, building one bullet per variable.
+    # Skip duplicates: a key appearing in both formula_dependencies and
+    # sensitivity_inputs renders only once (intermediate-value listing wins,
+    # so the reader sees the formula's own variables before the upstream
+    # raw inputs).
+    seen: set[str] = set()
+    bullets: list[str] = []
+    ordered_keys = list(entry.formula_dependencies) + [
+        k for k in entry.sensitivity_inputs
+        if k not in entry.formula_dependencies
+    ]
+    for key in ordered_keys:
+        if key in seen:
             continue
-        parts.append(f"{inp} = {float(v):.4g}")
-    if not parts:
+        seen.add(key)
+        v = result.get(key)
+        if v is None or isinstance(v, (str, bool)):
+            # Skip non-numeric / missing values for now — categorical
+            # inputs (cn2_model, material, …) clutter the substitution
+            # block without telling the reader anything about the
+            # number that came out.
+            continue
+        label, si_unit = _resolve_label_and_unit(key)
+        value_text = f"{float(v):.4g}"
+        if si_unit:
+            value_str = f"{value_text} {si_unit}"
+        else:
+            value_str = value_text
+        if label:
+            bullets.append(f"- **{key}** = {value_str} — *{label}*")
+        else:
+            bullets.append(f"- **{key}** = {value_str}")
+
+    if not bullets:
         return None
-    return " · ".join(parts)
+    return "\n".join(bullets)
 
 
 def _render_provenance_badges(entry) -> None:
@@ -1999,9 +2127,13 @@ def _render_metric_row(entry, result: dict, *, view_mode: str) -> None:
     if view_mode == "Full":
         with st.expander("Show full derivation", expanded=False):
             # Substituted formula with this run's values.
+            # Phase A.1: `sub` is now a Markdown bullet list (one bullet
+            # per variable, with label + SI unit); render the heading
+            # and the bullets as separate markdown blocks.
             sub = _substitute_formula_values(entry, result)
             if sub:
-                st.markdown(f"**With this run's values:** {sub}")
+                st.markdown("**With this run's values:**")
+                st.markdown(sub)
 
             # Expert explanation.
             if entry.explanation_full:
