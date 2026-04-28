@@ -53,16 +53,20 @@ def _build_v2_sweep(n_points: int = 6) -> list[dict]:
 
 
 def test_plot_i_smoke():
-    """Plot I renders against a real v2 R_detect sweep."""
+    """Plot I renders against a real v2 R_detect sweep.
+
+    v3.5 (2026-04-28): redesigned to show two curves (τ_BT and
+    available_dwell) on a log y-axis, with feasibility shading
+    instead of horizontal bands.
+    """
     from ui.plots import plot_i_outcome_map_vs_R_detect
     sweep = _build_v2_sweep(n_points=6)
     fig = plot_i_outcome_map_vs_R_detect(sweep)
-    # One curve trace.
-    assert len(fig.data) == 1
-    # Layout shapes: 3 verdict bands (hrects) + 1 zero hline + maybe
-    # the kill-threshold vline → at least 4.
+    # Two curve traces: τ_BT (orange solid) + dwell (teal dashed).
+    assert len(fig.data) == 2
+    # Layout shapes: at least one feasibility vrect.
     n_shapes = len(fig.layout.shapes or [])
-    assert n_shapes >= 4
+    assert n_shapes >= 1
 
 
 def test_plot_i_log_x_axis():
@@ -83,31 +87,23 @@ def test_plot_i_empty_sweep_renders_frame():
 
 
 def test_plot_i_kill_threshold_when_curve_crosses_zero():
-    """When the margin curve crosses zero from below as R_detect
-    increases, Plot I draws a kill-threshold vertical line."""
+    """When τ_BT crosses dwell as R_detect increases, Plot I draws
+    a kill-threshold vertical line."""
     from ui.plots import plot_i_outcome_map_vs_R_detect
     sweep = _build_v2_sweep(n_points=10)
     fig = plot_i_outcome_map_vs_R_detect(sweep)
-    # The kill-threshold annotation produces an extra layout shape
-    # beyond the 3 bands + 1 zero-line. Specifically expect at least
-    # one shape with `xref` referencing a vertical line. We don't
-    # introspect annotation text strictly; the >=5 shape count is
-    # the easy guard.
+    # Layout shapes: feasibility vrects + (when applicable)
+    # kill-threshold vline. At least one shape always.
     n_shapes = len(fig.layout.shapes or [])
-    # 3 bands + 1 zero-line + 1 vline = 5, plus any internal
-    # annotations Plotly adds. >=4 is the minimum expected.
-    assert n_shapes >= 4
+    assert n_shapes >= 1
 
 
-def test_plot_i_y_axis_clamp():
-    """y-axis is fixed to [-100, 200] % per the visual-readability
-    convention."""
+def test_plot_i_log_y_axis():
+    """v3.5: y-axis is log-scaled time (seconds)."""
     from ui.plots import plot_i_outcome_map_vs_R_detect
     sweep = _build_v2_sweep(n_points=6)
     fig = plot_i_outcome_map_vs_R_detect(sweep)
-    lo, hi = fig.layout.yaxis.range
-    assert lo == -100.0
-    assert hi == 200.0
+    assert fig.layout.yaxis.type == "log"
 
 
 def test_plot_i_handles_sweep_with_no_kills():

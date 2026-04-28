@@ -1117,10 +1117,12 @@ EXPLANATIONS: dict[str, str] = {
         "was time-budget-limited or power-limited."
     ),
     "plot_i_intro": (
-        "Engagement margin (time left over after burn-through) at "
-        "every detection range. The kill-threshold marker shows the "
-        "closest range you must detect by to still close the "
-        "engagement with margin."
+        "Two curves on a log time axis: orange is τ_BT (how long "
+        "burn-through takes at that range) and dashed teal is the "
+        "available dwell (how long the target stays in your engagement "
+        "window). Where orange sits below teal the engagement closes "
+        "(green tint); where it crosses above, it doesn't (red tint). "
+        "The crossing point is the kill threshold detection range."
     ),
     "plot_h_intro": (
         "The engagement second-by-second. Top: how the slant range "
@@ -1144,10 +1146,12 @@ EXPLANATIONS: dict[str, str] = {
         "estimates."
     ),
     "plot_e_intro": (
-        "Engagement margin as a percentage at every detection range. "
-        "Green = comfortable, amber = small disturbance kills it, "
-        "red = dwell runs out before burn-through. Same data the "
-        "burn-through curve above shows, framed as pass/fail margin."
+        "Burn-through time vs available dwell, both as functions of "
+        "detection range, on a log time axis. Orange = τ_BT (how long "
+        "the laser needs); teal dashed = dwell window. Green where "
+        "orange sits below teal (engagement closes); red where it "
+        "crosses above (target escapes). The crossing IS the kill "
+        "threshold detection range."
     ),
     "plot_g_intro": (
         "Spot diameter at the target vs the aimpoint bucket diameter. "

@@ -666,25 +666,23 @@ def test_plot_d_empty_sweep_renders_frame():
 
 
 def test_plot_e_engagement_margin_smoke(_engagement_sweep):
-    """Plot E renders one margin curve and at least three verdict bands."""
+    """Plot E renders two curves (τ_BT + dwell) and at least one
+    feasibility vrect (v3.5)."""
     from ui.plots import plot_e_engagement_margin_vs_range
     sweep, _ = _engagement_sweep
     fig = plot_e_engagement_margin_vs_range(sweep, reference_range=1500.0)
-    assert len(fig.data) == 1
-    # Three verdict bands (engageable / marginal / not-viable) plus the
-    # zero reference and the vertical reference-range line, so at least
-    # five layout shapes total.
-    assert len(fig.layout.shapes) >= 3
+    # Two curve traces.
+    assert len(fig.data) == 2
+    # At least one feasibility vrect.
+    assert len(fig.layout.shapes) >= 1
 
 
-def test_plot_e_y_axis_clamped_to_visual_range(_engagement_sweep):
-    """Y-axis fixed range keeps a single very-engageable point from
-    flattening the rest of the curve."""
+def test_plot_e_log_y_axis(_engagement_sweep):
+    """v3.5: y-axis is log time (seconds)."""
     from ui.plots import plot_e_engagement_margin_vs_range
     sweep, _ = _engagement_sweep
     fig = plot_e_engagement_margin_vs_range(sweep)
-    lo, hi = fig.layout.yaxis.range
-    assert lo == -100.0 and hi == 200.0
+    assert fig.layout.yaxis.type == "log"
 
 
 def test_plot_e_empty_sweep_renders_frame():

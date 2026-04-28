@@ -1629,41 +1629,32 @@ def plot_e_engagement_margin_vs_range(
     current_tau_BT_s: float | None = None,
     current_dwell_s: float | None = None,
 ) -> go.Figure:
-    """Engagement-viability margin curve with verdict bands.
+    """τ_BT vs available dwell across detection ranges (linear x).
 
-    Margin is ``(available_dwell − tau_BT) / tau_BT × 100`` (percent),
-    the same quantity the Overview-tab verdict chip displays. Three
-    color-coded bands:
+    v3.5 (2026-04-28): redesigned as a two-curve plot on a log
+    y-axis. The earlier "engagement margin %" framing collapsed to
+    a flat line at +200 % whenever a strong scenario was tested.
+    Two curves on log seconds:
 
-      * ``margin ≥ +30 %`` (status-ok) — engageable
-      * ``0 % ≤ margin < +30 %`` (status-warn) — marginal
-      * ``margin < 0 %`` (status-error) — not viable (dwell too short)
+      - Orange ``τ_BT(R)`` — burn-through time at each range.
+      - Teal dashed ``available dwell(R)`` — engagement window.
 
-    Plotted on a linear y-axis clamped to ``[-100 %, +200 %]`` so a
-    single very-engageable sample does not flatten the rest of the
-    curve; values outside the clamp are pinned at the limit so the
-    curve still terminates inside the plot. When clipping happens an
-    annotation calls it out so the flat-at-200 % segment isn't read
-    as a literal plateau.
+    Where the orange curve sits **below** the teal one, the
+    engagement closes (green tinted region). Where it sits **above**,
+    the target escapes (red tinted region). The crossing point IS
+    the kill threshold.
 
-    When ``current_tau_BT_s`` and ``current_dwell_s`` are passed, a
-    "Current scenario" star marks the user's PDE-accurate margin at
-    ``reference_range``.
-
-    Renders the "no burn-through" advisory when every ``tau_BT`` sample
-    is non-finite (no finite margin can be computed). When the entire
-    sweep is in the ``status.error`` band, the curve stays in red — no
-    special-case rewrite is needed since the band shading already
-    reads the verdict.
+    A "Current scenario" star sits on the τ_BT curve at the user's
+    reference range, with a tooltip showing both τ_BT and dwell.
     """
     height = PLOT_HEIGHTS["default"]
     xtitle = _range_axis_title(sweep)
-    ytitle = "Engagement margin (%)"
+    ytitle = "Time (s, log)"
     title = (
-        "Engagement margin vs detection range" if _is_v2_sweep(sweep)
-        else "Engagement margin vs slant range"
+        "Burn-through time vs dwell window — when does the engagement close?"
+        if _is_v2_sweep(sweep)
+        else "Burn-through time vs dwell window — across slant range"
     )
-    Y_FLOOR, Y_CEIL = -100.0, 200.0
 
     if not sweep:
         return _empty_frame(
@@ -1672,165 +1663,148 @@ def plot_e_engagement_margin_vs_range(
         )
 
     palette = _active_palette()
-    x_km = _x_km(sweep)
-    tau_bt = _get(sweep, "tau_BT")
-    dwell = _get(sweep, "available_dwell")
+    x_km_full = _x_km(sweep)
+    tau_bt_full = _get(sweep, "tau_BT")
+    dwell_full = _get(sweep, "available_dwell")
 
-    margin: list[float] = []
-    verdict: list[str] = []
-    any_clipped_high = False
-    any_clipped_low = False
-    for tbt, dw in zip(tau_bt, dwell):
-        if (math.isfinite(tbt) and tbt > 0 and math.isfinite(dw)):
-            m = 100.0 * (dw - tbt) / tbt
-            if m > Y_CEIL:
-                any_clipped_high = True
-            if m < Y_FLOOR:
-                any_clipped_low = True
-            margin.append(max(Y_FLOOR, min(Y_CEIL, m)))
-            if m >= 30.0:
-                verdict.append("engageable")
-            elif m >= 0.0:
-                verdict.append("marginal")
-            else:
-                verdict.append("not viable")
-        else:
-            margin.append(math.nan)
-            verdict.append("—")
+    # Drop degenerate cells (NaN or non-positive).
+    x_km: list[float] = []
+    tau_axis: list[float] = []
+    dwell_axis: list[float] = []
+    for xk, tbt, dw in zip(x_km_full, tau_bt_full, dwell_full):
+        if (math.isfinite(xk) and xk > 0
+                and math.isfinite(tbt) and tbt > 0
+                and math.isfinite(dw) and dw > 0):
+            x_km.append(xk)
+            tau_axis.append(float(tbt))
+            dwell_axis.append(float(dw))
 
-    if _all_nan(margin):
+    if not x_km:
         return _empty_frame(
             title=title, xtitle=xtitle, ytitle=ytitle,
             advisory=ADVISORY["no_burnthrough"], height=height,
         )
 
+    # Find kill-threshold crossing (smallest R where τ_BT >= dwell).
+    threshold_km: float | None = None
+    for i in range(1, len(tau_axis)):
+        prev_below = tau_axis[i - 1] < dwell_axis[i - 1]
+        curr_below = tau_axis[i] < dwell_axis[i]
+        if prev_below and not curr_below:
+            x_lo, x_hi = x_km[i - 1], x_km[i]
+            gap_lo = dwell_axis[i - 1] - tau_axis[i - 1]
+            gap_hi = dwell_axis[i] - tau_axis[i]
+            if gap_hi != gap_lo and gap_hi <= 0 < gap_lo:
+                t = gap_lo / (gap_lo - gap_hi)
+                threshold_km = x_lo + t * (x_hi - x_lo)
+            else:
+                threshold_km = x_lo
+            break
+
     fig = go.Figure()
 
-    # Verdict bands.
-    ok_rgba = _hex_to_rgba(palette["status.ok"], alpha=0.12)
-    warn_rgba = _hex_to_rgba(palette["status.warn"], alpha=0.12)
-    err_rgba = _hex_to_rgba(palette["status.error"], alpha=0.12)
-    fig.add_hrect(y0=30.0, y1=Y_CEIL,
-                  fillcolor=ok_rgba, line_width=0,
-                  annotation_text="Engageable (≥ 30 %)",
-                  annotation_position="top left",
-                  annotation_font=dict(color=palette["fg.secondary"], size=10))
-    fig.add_hrect(y0=0.0, y1=30.0,
-                  fillcolor=warn_rgba, line_width=0,
-                  annotation_text="Marginal (0–30 %)",
-                  annotation_position="top left",
-                  annotation_font=dict(color=palette["fg.secondary"], size=10))
-    fig.add_hrect(y0=Y_FLOOR, y1=0.0,
-                  fillcolor=err_rgba, line_width=0,
-                  annotation_text="Not viable (< 0 %)",
-                  annotation_position="bottom left",
-                  annotation_font=dict(color=palette["fg.secondary"], size=10))
+    # Y-axis range — log scale needs >0 floor.
+    all_ys = tau_axis + dwell_axis
+    if current_tau_BT_s is not None and current_tau_BT_s > 0:
+        all_ys.append(current_tau_BT_s)
+    if current_dwell_s is not None and current_dwell_s > 0:
+        all_ys.append(current_dwell_s)
+    y_lo = max(min(all_ys) * 0.5, 1e-3)
+    y_hi = max(all_ys) * 2.0
 
-    # Zero-line and reference-range markers.
-    fig.add_hline(
-        y=0.0,
-        line=dict(color=palette["data.reference"], width=1.2, dash="dash"),
-    )
+    # Feasibility shading — green where τ_BT < dwell, red where above.
+    ok_rgba = _hex_to_rgba(palette["status.ok"], alpha=0.10)
+    err_rgba = _hex_to_rgba(palette["status.error"], alpha=0.10)
+    feasible = [d > t for d, t in zip(dwell_axis, tau_axis)]
+    run_start_idx = 0
+    for i in range(1, len(x_km) + 1):
+        at_end = (i == len(x_km))
+        if at_end or feasible[i] != feasible[run_start_idx]:
+            x0 = x_km[run_start_idx]
+            x1 = x_km[i - 1] if at_end else x_km[i]
+            color = ok_rgba if feasible[run_start_idx] else err_rgba
+            fig.add_vrect(
+                x0=x0, x1=x1, fillcolor=color, line_width=0, layer="below",
+            )
+            run_start_idx = i if i < len(x_km) else run_start_idx
+
+    # Threshold marker.
+    if threshold_km is not None:
+        fig.add_vline(
+            x=threshold_km,
+            line=dict(color=palette["fg.tertiary"], width=1.2, dash="dash"),
+            annotation_text=f"Kill threshold ≈ {threshold_km:.2f} km",
+            annotation_position="top",
+            annotation_font=dict(color=palette["fg.secondary"], size=11),
+        )
+
+    # Reference range marker (user's R_detect).
     if reference_range is not None and reference_range > 0:
-        # Vertical reference-range line. Annotation suppressed — the
-        # "Current scenario" star (added later, when chain margin is
-        # available) carries the same x-position with a clearer label
-        # that includes the actual margin value.
         fig.add_vline(
             x=reference_range / 1000.0,
             line=dict(color=palette["data.reference"], width=1.2, dash="dash"),
         )
 
-    # Margin curve. Use series-B styling (teal / dash / square) so this
-    # plot reads as a Plot-B sibling.
-    s1 = _series_style(1, palette)
+    # τ_BT curve (orange solid).
+    s0 = _series_style(0, palette)
     fig.add_trace(
         go.Scatter(
-            x=x_km, y=margin,
+            x=x_km, y=tau_axis,
             mode="lines+markers",
-            name="Engagement margin",
-            line=s1["line"], marker=s1["marker"],
-            customdata=verdict,
-            hovertemplate=(
-                "Range %{x:.2f} km · margin %{y:+.0f}% · "
-                "%{customdata}<extra></extra>"
-            ),
+            name="τ_BT (burn-through time)",
+            line=s0["line"], marker=s0["marker"],
+            hovertemplate="R %{x:.2f} km · τ_BT %{y:.2g} s<extra></extra>",
         )
     )
 
-    # "Current scenario" star at the user's reference range, using
-    # the chain's PDE-accurate τ_BT / dwell. When the actual margin
-    # is way above the chart ceiling (engagement closes with huge
-    # spare time), drop the star slightly below the ceiling and put
-    # the actual numeric margin in the text label so the reader can
-    # always see the real number.
+    # Dwell curve (teal dashed).
+    s1 = _series_style(1, palette)
+    fig.add_trace(
+        go.Scatter(
+            x=x_km, y=dwell_axis,
+            mode="lines+markers",
+            name="Available dwell",
+            line=dict(**{**s1["line"], "dash": "dash"}),
+            marker=s1["marker"],
+            hovertemplate="R %{x:.2f} km · dwell %{y:.2g} s<extra></extra>",
+        )
+    )
+
+    # "Current scenario" star at the user's reference range.
     if (reference_range is not None and reference_range > 0
             and current_tau_BT_s is not None
             and current_dwell_s is not None
             and math.isfinite(current_tau_BT_s) and current_tau_BT_s > 0
-            and math.isfinite(current_dwell_s)):
-        current_margin = (
+            and math.isfinite(current_dwell_s) and current_dwell_s > 0):
+        gap_pct = (
             100.0 * (current_dwell_s - current_tau_BT_s) / current_tau_BT_s
         )
-        was_clipped = current_margin > Y_CEIL or current_margin < Y_FLOOR
-        # Place star inside the visible band even when margin is
-        # off-chart, so it doesn't pile up at the very top with the
-        # curve and clipping annotation.
-        if current_margin > Y_CEIL:
-            star_y = Y_CEIL * 0.85   # 170 % when ceiling = 200 %
-        elif current_margin < Y_FLOOR:
-            star_y = Y_FLOOR * 0.85
-        else:
-            star_y = current_margin
-        # Text: always carry the actual numeric margin so the user
-        # reads the real value even when the star itself is clipped.
-        star_text = f"  Current: {current_margin:+.0f}%"
-        if was_clipped:
-            star_text += "  (off-chart)"
+        gap_label = (
+            f"  τ_BT = {current_tau_BT_s:.2g} s · "
+            f"dwell = {current_dwell_s:.2g} s "
+            f"(margin {gap_pct:+.0f}%)"
+        )
         fig.add_trace(
             go.Scatter(
                 x=[reference_range / 1000.0],
-                y=[star_y],
+                y=[current_tau_BT_s],
                 mode="markers+text",
-                text=[star_text],
-                textposition="middle right",
+                text=[gap_label],
+                textposition="bottom right",
                 marker=dict(
                     size=16, color=palette["fg.primary"],
                     line=dict(color=palette["bg.base"], width=2),
                     symbol="star",
                 ),
                 textfont=dict(color=palette["fg.primary"], size=11),
-                name="You are here",
+                name="Current scenario",
                 hovertemplate=(
                     f"R_detect = {reference_range / 1000.0:.2f} km · "
-                    f"margin = {current_margin:+.0f}%<extra></extra>"
+                    f"τ_BT = {current_tau_BT_s:.2g} s · "
+                    f"dwell = {current_dwell_s:.2g} s<extra></extra>"
                 ),
                 showlegend=False,
             )
-        )
-
-    # Annotation when any margin value got clipped — without this the
-    # flat-at-200 % segment looks like a literal plateau.
-    if any_clipped_high:
-        fig.add_annotation(
-            xref="paper", yref="paper", x=0.5, y=1.0,
-            xanchor="center", yanchor="bottom",
-            text=(
-                "<i>Values above +200 % clipped — actual margin much "
-                "higher in this region (engagement closes with huge "
-                "spare time)</i>"
-            ),
-            showarrow=False,
-            font=dict(color=palette["fg.tertiary"], size=10),
-        )
-    if any_clipped_low:
-        fig.add_annotation(
-            xref="paper", yref="paper", x=0.5, y=0.0,
-            xanchor="center", yanchor="top",
-            text="<i>Values below −100 % clipped (deeply infeasible)</i>",
-            showarrow=False,
-            font=dict(color=palette["fg.tertiary"], size=10),
-            yshift=-30,
         )
 
     fig.update_layout(
@@ -1839,7 +1813,10 @@ def plot_e_engagement_margin_vs_range(
         height=height,
     )
     fig.update_xaxes(title_text=xtitle)
-    fig.update_yaxes(title_text=ytitle, range=[Y_FLOOR, Y_CEIL])
+    fig.update_yaxes(
+        title_text=ytitle, type="log",
+        range=[math.log10(y_lo), math.log10(y_hi)],
+    )
     return fig
 
 
@@ -2324,28 +2301,32 @@ def plot_i_outcome_map_vs_R_detect(
     current_tau_BT_s: float | None = None,
     current_dwell_s: float | None = None,
 ) -> go.Figure:
-    """Engagement margin vs detection range — outcome map.
+    """Outcome map — τ_BT vs available dwell across detection ranges.
 
-    Margin is ``(t_dwell − tau_BT) / tau_BT × 100 %`` at each sweep
-    point. The same formula Plot E uses, here re-framed for the v2.0
-    R_detect-sweep contract: the x-axis is the detection range the
-    operator would have, and the curve crossing zero gives the
-    minimum detection range that closes a kill.
+    v3.5 (2026-04-28): redesigned as a two-curve plot on a log
+    y-axis. Earlier "engagement margin %" framing collapsed to a
+    flat line at +200 % whenever a strong scenario was tested; the
+    user couldn't see the curve shape. Two curves on log seconds:
 
-    Bands: ``status.ok`` ≥ +30 % (engageable), ``status.warn`` 0–30 %
-    (marginal), ``status.error`` < 0 % (not viable). When the curve
-    has a finite zero-crossing, an annotation calls it out as the
-    "kill threshold".
+      - Orange ``τ_BT(R)`` — burn-through time at each detection
+        range (climbs as R grows, more spot spread → less I_avg).
+      - Teal dashed ``available dwell(R)`` — engagement window
+        (shrinks as R grows, less time before R_min).
 
-    When ``current_R_m`` and the chain's headline ``tau_BT`` /
-    ``available_dwell`` are passed, a "you are here" star marks the
-    user's current scenario at that R_detect.
+    Where the orange curve sits **below** the teal one, the
+    engagement closes (green tinted region). Where it sits **above**,
+    the target escapes (red tinted region). The crossing point IS
+    the kill-threshold detection range — a visual answer to the
+    plot's title question.
+
+    A "Current scenario" star sits on the τ_BT curve at the user's
+    R_detect, with a tooltip showing both τ_BT and dwell.
 
     Empty / None sweep → always-render frame fallback.
     """
     height = PLOT_HEIGHTS["default"]
     xtitle = "Detection range R_detect (km, log)"
-    ytitle = "Engagement margin (%)"
+    ytitle = "Time (s, log)"
     title = "Outcome map — at what detection range does the engagement close?"
 
     if not sweep:
@@ -2356,36 +2337,22 @@ def plot_i_outcome_map_vs_R_detect(
 
     palette = _active_palette()
 
-    # Compute margin per sweep element. Skip elements where tau_BT is
-    # missing or zero (degenerate engagement). Clamp to [-100, 200] %
-    # for visual readability — same convention as Plot E.
-    Y_FLOOR, Y_CEIL = -100.0, 200.0
+    # Build (R, tau_BT, dwell) per sweep cell, dropping degenerate ones.
     x_km: list[float] = []
-    margin: list[float] = []
-    verdict: list[str] = []
-    any_clipped_high = False
-    any_clipped_low = False
+    tau_axis: list[float] = []
+    dwell_axis: list[float] = []
     for s in sweep:
         R = float(s.get("range", math.nan))
         tau = s.get("tau_BT")
         dwell = s.get("available_dwell")
         if (R is None or not math.isfinite(R) or R <= 0
                 or tau is None or not math.isfinite(float(tau)) or float(tau) <= 0
-                or dwell is None or not math.isfinite(float(dwell))):
+                or dwell is None or not math.isfinite(float(dwell))
+                or float(dwell) <= 0):
             continue
-        m = 100.0 * (float(dwell) - float(tau)) / float(tau)
-        if m > Y_CEIL:
-            any_clipped_high = True
-        if m < Y_FLOOR:
-            any_clipped_low = True
         x_km.append(R / 1000.0)
-        margin.append(max(Y_FLOOR, min(Y_CEIL, m)))
-        if m >= 30.0:
-            verdict.append("engageable")
-        elif m >= 0.0:
-            verdict.append("marginal")
-        else:
-            verdict.append("not viable")
+        tau_axis.append(float(tau))
+        dwell_axis.append(float(dwell))
 
     if not x_km:
         return _empty_frame(
@@ -2393,148 +2360,132 @@ def plot_i_outcome_map_vs_R_detect(
             advisory=ADVISORY["no_burnthrough"], height=height,
         )
 
-    # Find the kill-threshold crossing — minimum R_detect at which
-    # margin first crosses zero from below as R_detect increases.
-    # We scan from smallest to largest R; the threshold is the
-    # interpolated zero-crossing on the first sign change.
+    # Find the kill-threshold crossing — smallest R where
+    # tau_BT(R) >= dwell(R) (the curve crosses from feasible into
+    # not viable). Linear-interp in log(R) for accuracy.
     threshold_km: float | None = None
-    for i in range(1, len(margin)):
-        if margin[i - 1] < 0 <= margin[i]:
+    for i in range(1, len(tau_axis)):
+        prev_below = tau_axis[i - 1] < dwell_axis[i - 1]
+        curr_below = tau_axis[i] < dwell_axis[i]
+        if prev_below and not curr_below:
             x_lo, x_hi = x_km[i - 1], x_km[i]
-            m_lo, m_hi = margin[i - 1], margin[i]
-            # Linear interp in linear-x space.
-            if m_hi != m_lo:
-                threshold_km = x_lo + (0 - m_lo) / (m_hi - m_lo) * (x_hi - x_lo)
+            gap_lo = dwell_axis[i - 1] - tau_axis[i - 1]
+            gap_hi = dwell_axis[i] - tau_axis[i]
+            if gap_hi != gap_lo and gap_hi <= 0 < gap_lo:
+                # Linear interp on the gap (in log-x space for accuracy).
+                log_lo = math.log(x_lo)
+                log_hi = math.log(x_hi)
+                t = gap_lo / (gap_lo - gap_hi)
+                threshold_km = math.exp(log_lo + t * (log_hi - log_lo))
             else:
                 threshold_km = x_lo
             break
 
     fig = go.Figure()
 
-    # Three verdict bands.
-    ok_rgba = _hex_to_rgba(palette["status.ok"], alpha=0.12)
-    warn_rgba = _hex_to_rgba(palette["status.warn"], alpha=0.12)
-    err_rgba = _hex_to_rgba(palette["status.error"], alpha=0.12)
-    fig.add_hrect(y0=30.0, y1=Y_CEIL,
-                  fillcolor=ok_rgba, line_width=0,
-                  annotation_text="Engageable (≥ 30 %)",
-                  annotation_position="top left",
-                  annotation_font=dict(color=palette["fg.secondary"], size=10))
-    fig.add_hrect(y0=0.0, y1=30.0,
-                  fillcolor=warn_rgba, line_width=0,
-                  annotation_text="Marginal (0–30 %)",
-                  annotation_position="top left",
-                  annotation_font=dict(color=palette["fg.secondary"], size=10))
-    fig.add_hrect(y0=Y_FLOOR, y1=0.0,
-                  fillcolor=err_rgba, line_width=0,
-                  annotation_text="Not viable (< 0 %)",
-                  annotation_position="bottom left",
-                  annotation_font=dict(color=palette["fg.secondary"], size=10))
+    # Y-range bookkeeping — both curves on log scale.
+    all_ys = tau_axis + dwell_axis
+    if current_tau_BT_s is not None and current_tau_BT_s > 0:
+        all_ys.append(current_tau_BT_s)
+    if current_dwell_s is not None and current_dwell_s > 0:
+        all_ys.append(current_dwell_s)
+    y_lo = max(min(all_ys) * 0.5, 1e-3)
+    y_hi = max(all_ys) * 2.0
 
-    # Zero-margin reference line.
-    fig.add_hline(
-        y=0.0,
-        line=dict(color=palette["data.reference"], width=1.2, dash="dash"),
-    )
+    # Feasibility shading — green where τ_BT < dwell, red where
+    # τ_BT > dwell. We approximate by shading vertical strips
+    # between adjacent sweep cells based on the sign of (dwell − τ_BT).
+    ok_rgba = _hex_to_rgba(palette["status.ok"], alpha=0.10)
+    err_rgba = _hex_to_rgba(palette["status.error"], alpha=0.10)
+    feasible = [d > t for d, t in zip(dwell_axis, tau_axis)]
+    # Track the start of each contiguous run.
+    run_start_idx = 0
+    for i in range(1, len(x_km) + 1):
+        at_end = (i == len(x_km))
+        if at_end or feasible[i] != feasible[run_start_idx]:
+            x0 = x_km[run_start_idx]
+            x1 = x_km[i - 1] if at_end else x_km[i]
+            color = ok_rgba if feasible[run_start_idx] else err_rgba
+            fig.add_vrect(
+                x0=x0, x1=x1, fillcolor=color, line_width=0, layer="below",
+            )
+            run_start_idx = i if i < len(x_km) else run_start_idx
 
-    # Threshold annotation — where the curve first reaches viable.
+    # Threshold marker.
     if threshold_km is not None:
         fig.add_vline(
             x=threshold_km,
-            line=dict(color=palette["status.ok"], width=1.5, dash="dash"),
+            line=dict(color=palette["fg.tertiary"], width=1.2, dash="dash"),
             annotation_text=f"Kill threshold ≈ {threshold_km:.2f} km",
-            annotation_position="top right",
+            annotation_position="top",
             annotation_font=dict(color=palette["fg.secondary"], size=11),
         )
 
-    # The margin curve.
+    # τ_BT curve (orange solid).
     s0 = _series_style(0, palette)
     fig.add_trace(
         go.Scatter(
-            x=x_km, y=margin,
+            x=x_km, y=tau_axis,
             mode="lines+markers",
-            name="Engagement margin",
+            name="τ_BT (burn-through time)",
             line=s0["line"], marker=s0["marker"],
-            customdata=verdict,
             hovertemplate=(
-                "R_detect %{x:.2f} km · margin %{y:+.0f}% · "
-                "%{customdata}<extra></extra>"
+                "R %{x:.2f} km · τ_BT %{y:.2g} s<extra></extra>"
             ),
         )
     )
 
-    # "You are here" star at the user's current scenario, when the
-    # caller passed the chain's R_detect + dwell + tau_BT. Star uses
-    # the chain's PDE-accurate margin. When the actual margin is way
-    # above the chart ceiling (engagement closes with huge spare
-    # time), drop the star slightly below the ceiling and put the
-    # actual numeric margin in the text label so the reader can
-    # always see the real number.
+    # Dwell curve (teal dashed).
+    s1 = _series_style(1, palette)
+    fig.add_trace(
+        go.Scatter(
+            x=x_km, y=dwell_axis,
+            mode="lines+markers",
+            name="Available dwell",
+            line=dict(**{**s1["line"], "dash": "dash"}),
+            marker=s1["marker"],
+            hovertemplate=(
+                "R %{x:.2f} km · dwell %{y:.2g} s<extra></extra>"
+            ),
+        )
+    )
+
+    # "You are here" star at the user's scenario.
     if (current_R_m is not None and current_tau_BT_s is not None
             and current_dwell_s is not None
             and math.isfinite(current_R_m) and current_R_m > 0
             and math.isfinite(current_tau_BT_s) and current_tau_BT_s > 0
-            and math.isfinite(current_dwell_s)):
-        current_margin = (
+            and math.isfinite(current_dwell_s) and current_dwell_s > 0):
+        # Format the gap for the label.
+        gap_pct = (
             100.0 * (current_dwell_s - current_tau_BT_s) / current_tau_BT_s
         )
-        was_clipped = current_margin > Y_CEIL or current_margin < Y_FLOOR
-        # Place star inside the visible band even when margin is
-        # off-chart, so it doesn't pile up with the curve at the top.
-        if current_margin > Y_CEIL:
-            star_y = Y_CEIL * 0.85
-        elif current_margin < Y_FLOOR:
-            star_y = Y_FLOOR * 0.85
-        else:
-            star_y = current_margin
-        star_text = f"  Current: {current_margin:+.0f}%"
-        if was_clipped:
-            star_text += "  (off-chart)"
+        gap_label = (
+            f"  τ_BT = {current_tau_BT_s:.2g} s · "
+            f"dwell = {current_dwell_s:.2g} s "
+            f"(margin {gap_pct:+.0f}%)"
+        )
         fig.add_trace(
             go.Scatter(
                 x=[current_R_m / 1000.0],
-                y=[star_y],
+                y=[current_tau_BT_s],
                 mode="markers+text",
-                text=[star_text],
-                textposition="middle right",
+                text=[gap_label],
+                textposition="bottom right",
                 marker=dict(
                     size=16, color=palette["fg.primary"],
                     line=dict(color=palette["bg.base"], width=2),
                     symbol="star",
                 ),
                 textfont=dict(color=palette["fg.primary"], size=11),
-                name="You are here",
+                name="Current scenario",
                 hovertemplate=(
                     f"R_detect = {current_R_m / 1000.0:.2f} km · "
-                    f"margin = {current_margin:+.0f}%<extra></extra>"
+                    f"τ_BT = {current_tau_BT_s:.2g} s · "
+                    f"dwell = {current_dwell_s:.2g} s<extra></extra>"
                 ),
                 showlegend=False,
             )
-        )
-
-    # Annotation when any margin value got clipped — without this
-    # the flat segment at +200% looks like a plateau when it's
-    # really "off the top of the chart".
-    if any_clipped_high:
-        fig.add_annotation(
-            xref="paper", yref="paper", x=0.5, y=1.0,
-            xanchor="center", yanchor="bottom",
-            text=(
-                "<i>Values above +200 % clipped — actual margin much "
-                "higher in this region (engagement closes with huge "
-                "spare time)</i>"
-            ),
-            showarrow=False,
-            font=dict(color=palette["fg.tertiary"], size=10),
-        )
-    if any_clipped_low:
-        fig.add_annotation(
-            xref="paper", yref="paper", x=0.5, y=0.0,
-            xanchor="center", yanchor="top",
-            text="<i>Values below −100 % clipped (deeply infeasible)</i>",
-            showarrow=False,
-            font=dict(color=palette["fg.tertiary"], size=10),
-            yshift=-30,
         )
 
     fig.update_layout(
@@ -2542,17 +2493,17 @@ def plot_i_outcome_map_vs_R_detect(
         height=height,
         hovermode="x unified",
     )
-    # Friendly km tick labels — Plotly's default minor ticks on a
-    # log axis show "4, 5, 6, 7, 8, 9, 1, 2, 3" which strips the
-    # decimals and the unit. Explicit tickvals/ticktext show
-    # "0.5 km", "1 km", "3 km", etc.
+    # Friendly km tick labels.
     km_tickvals = [0.1, 0.2, 0.3, 0.5, 1, 2, 3, 5, 10, 20, 30, 50]
     km_ticktext = [f"{v:g} km" for v in km_tickvals]
     fig.update_xaxes(
         title_text=xtitle, type="log",
         tickvals=km_tickvals, ticktext=km_ticktext,
     )
-    fig.update_yaxes(title_text=ytitle, range=[Y_FLOOR, Y_CEIL])
+    fig.update_yaxes(
+        title_text=ytitle, type="log",
+        range=[math.log10(y_lo), math.log10(y_hi)],
+    )
     return fig
 
 
