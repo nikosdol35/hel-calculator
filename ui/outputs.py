@@ -2758,10 +2758,14 @@ def _render_bibliography_section() -> None:
             "|---|---|---|---|---|---|"
         )
         for i, e in enumerate(entries, start=1):
+            # Pre-escape pipes (Python 3.11 doesn't allow backslashes
+            # inside f-string expressions — PEP 701 lifted this only
+            # in 3.12). Hoist the replacement here.
+            title_escaped = e.title.replace("|", "\\|")
             cells = [
                 str(i),
                 e.authors.replace("|", "\\|"),
-                f"*{e.title.replace('|', '\\|')}*",
+                f"*{title_escaped}*",
                 e.year.replace("|", "\\|"),
                 e.publisher.replace("|", "\\|"),
                 e.used_for.replace("|", "\\|"),
