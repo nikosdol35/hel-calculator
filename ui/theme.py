@@ -622,6 +622,14 @@ select:focus-visible,
   margin: var(--space-2) 0;
 }}
 
+/* ---- Math-tab filter-chip row label (Phase B, 2026-04-28) ------------- */
+.hel-math-chip-row-label {{
+  font-size: 12px;
+  color: var(--fg-secondary);
+  margin: 8px 0 4px 0;
+  font-weight: 500;
+}}
+
 /* ---- Progress bar (compute-time feedback) ------------------------------ */
 /* Thin 2 px bar with a sliding ::after pseudo-element. The parent track is
    a muted border color; the child "glow" slides edge-to-edge on an infinite

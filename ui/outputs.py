@@ -1284,6 +1284,9 @@ def render_tab_diagnostics(result: dict) -> None:
 _MATH_VIEW_KEY = "_math_view_mode"
 _MATH_SEARCH_KEY = "_math_search"
 _MATH_SENSITIVITY_KEY = "_math_sensitivity_enabled"
+# Phase B (2026-04-28) — active filter-chip selection in the math tab.
+# Either "All" (default) or one of TAB_ORDER values.
+_MATH_FILTER_KEY = "_math_section_filter"
 
 
 @st.cache_data(max_entries=128, show_spinner=False)
@@ -2166,21 +2169,31 @@ def _render_sensitivity_bar(entry, result: dict) -> None:
     st.caption(line)
 
 
-def _render_metric_row(entry, result: dict, *, view_mode: str) -> None:
+def _render_metric_row(entry, result: dict, *, view_mode: str = "Full") -> None:
     """Render one metric (one row). Layout per plan §3:
 
-    Simple view:
+    Always-visible (top of card):
        1. Bold display name + symbol + (unit) on the left, value on the
           right of the same row.
        2. LaTeX formula below.
        3. "What it means" plain-language sentence below.
+       4. "Also shown in: X" cross-reference badge (when applicable).
 
-    Full view (when expander opens):
-       4. Substituted formula with this run's input values.
-       5. Citation, code reference, derivation link.
-       6. Depends-on intermediates list.
-       7. Provenance badges (audit-pinned / HIGH UNCERTAINTY / replicated).
-       8. Assumptions list.
+    Full-derivation expander (per-card, collapsed by default):
+       5. Substituted formula with this run's input values.
+       6. Citation, code reference, derivation link.
+       7. Depends-on intermediates list.
+       8. Provenance badges (audit-pinned / HIGH UNCERTAINTY / replicated).
+       9. Assumptions list.
+
+    Phase B (2026-04-28): the global Simple/Full radio toggle was
+    removed in favour of always rendering the per-card expander. The
+    `view_mode` parameter is kept for back-compat (defaulting to
+    "Full") but no longer gates anything — the expander always
+    renders, collapsed by default. Users with the previous "Simple"
+    preference simply leave the expander closed; users wanting the
+    full derivation click to expand. No "did I miss the Full view?"
+    confusion.
 
     Categorical and solver-based metrics skip the LaTeX block and use
     prose-style formula content instead.
@@ -2254,7 +2267,13 @@ def _render_metric_row(entry, result: dict, *, view_mode: str) -> None:
         also_pretty = ", ".join(entry.also_in)
         st.caption(f"Also shown in: {also_pretty}")
 
-    # Full-view expander.
+    # Per-card "Show full derivation" expander. Always rendered (Phase B,
+    # 2026-04-28) — the previous global Simple/Full toggle was removed in
+    # favour of letting each user decide per-metric. Collapsed by default
+    # so the page stays scannable; one click expands the deeper context.
+    # The `view_mode == "Full"` gate is preserved as a defensive fall-
+    # through in case any downstream caller still passes view_mode="Simple"
+    # to suppress the expander entirely (none do today).
     if view_mode == "Full":
         with st.expander("Show full derivation", expanded=False):
             # Substituted formula with this run's values.
@@ -2356,27 +2375,55 @@ def render_tab_math(result: dict) -> None:
     section_header("How it's calculated")
     explanation(EXPLANATIONS["math_intro"])
 
-    # --- View mode + search ----------------------------------------------
-    c1, c2 = st.columns([1, 3])
-    with c1:
-        view_mode = st.radio(
-            "View",
-            options=("Simple", "Full"),
-            horizontal=True,
-            index=0,
-            key=_MATH_VIEW_KEY,
-            help=(
-                "Simple shows formula, value, and a one-sentence "
-                "explanation. Full adds substituted values, citations, "
-                "code references, and assumptions."
-            ),
-        )
-    with c2:
-        search_query = st.text_input(
-            "Search",
-            placeholder="Filter by metric name, symbol, or term…",
-            key=_MATH_SEARCH_KEY,
-        )
+    # --- Search box ------------------------------------------------------
+    # Phase B (2026-04-28): the previous "Simple / Full" radio toggle
+    # was removed; each metric now carries its own collapsed
+    # "Show full derivation" expander, which the user clicks per-metric
+    # rather than flipping a global mode. Less "did I miss the Full
+    # view?" confusion. The view_mode argument to _render_metric_row
+    # defaults to "Full" so the per-card expander always renders.
+    view_mode = "Full"
+    search_query = st.text_input(
+        "Search",
+        placeholder="Filter by metric name, symbol, or term…",
+        key=_MATH_SEARCH_KEY,
+    )
+
+    # --- Filter chips (Phase B, 2026-04-28) -------------------------------
+    # Quick-narrow widget: one button per tab-of-origin section, plus an
+    # "All" button. Click → set st.session_state[_MATH_FILTER_KEY] →
+    # the section-render loop below shows ONLY the matching section.
+    # Composes with the search box: chip narrows by section,
+    # search narrows by text — both apply.
+    st.markdown(
+        "<div class='hel-math-chip-row-label'>Quick filter:</div>",
+        unsafe_allow_html=True,
+    )
+    chip_cols = st.columns(len(TAB_ORDER) + 1)
+    active_filter = st.session_state.get(_MATH_FILTER_KEY, "All")
+    with chip_cols[0]:
+        # Use Streamlit's primary button styling to mark the active
+        # chip — sidesteps the copy-style linter (which forbids emoji
+        # indicators in user-facing strings) and gets a visually
+        # distinct chip for free.
+        if st.button(
+            "All",
+            key="_math_chip_All",
+            type=("primary" if active_filter == "All" else "secondary"),
+            use_container_width=True,
+        ):
+            st.session_state[_MATH_FILTER_KEY] = "All"
+            active_filter = "All"
+    for idx, tab_id in enumerate(TAB_ORDER):
+        with chip_cols[idx + 1]:
+            if st.button(
+                TAB_TITLES[tab_id],
+                key=f"_math_chip_{tab_id}",
+                type=("primary" if active_filter == tab_id else "secondary"),
+                use_container_width=True,
+            ):
+                st.session_state[_MATH_FILTER_KEY] = tab_id
+                active_filter = tab_id
 
     # --- Quick-jump --------------------------------------------------------
     # Lists tab-of-origin sections that actually have entries; skips
@@ -2409,6 +2456,11 @@ def render_tab_math(result: dict) -> None:
     # (which preserves the existing M1 → M2 → … flow within tab groups,
     # so dependency arrows still read top-to-bottom).
     for tab_id in TAB_ORDER:
+        # Phase B chip filter — when the user has clicked a chip,
+        # hide every section except the active one. "All" (default)
+        # leaves every section visible.
+        if active_filter != "All" and tab_id != active_filter:
+            continue
         section_entries = [
             e for e in MATH_CONTENT.values() if e.primary_tab == tab_id
         ]
