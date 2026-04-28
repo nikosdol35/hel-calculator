@@ -630,6 +630,64 @@ select:focus-visible,
   font-weight: 500;
 }}
 
+/* ---- Geometry-tab illustration cards (Plot P companion, 2026-04-28) --- */
+/* Row of 5 small SVG cards above the Plot P chart. Each card shows
+   one approach geometry as a static illustration: gun + line-of-sight
+   + target + velocity arrow. Sits between the intro caption and the
+   plot itself; matches the rest of the app's card aesthetic. */
+.hel-geometry-row {{
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin: 16px 0 24px 0;
+  align-items: stretch;
+}}
+.hel-geometry-card {{
+  flex: 1 1 0;
+  min-width: 160px;
+  background: var(--bg-surface-raised);
+  border: 1px solid var(--border-subtle);
+  border-radius: 8px;
+  padding: 14px 12px 12px 12px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  transition: transform 120ms ease-out, border-color 120ms ease-out;
+}}
+.hel-geometry-card:hover {{
+  transform: translateY(-1px);
+  border-color: var(--border-strong);
+}}
+.hel-geometry-card-title {{
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--fg-primary);
+  margin-bottom: 8px;
+  white-space: nowrap;
+}}
+.hel-geometry-card-svg {{
+  width: 100%;
+  height: auto;
+  max-height: 100px;
+  margin-bottom: 8px;
+}}
+.hel-geometry-card-caption {{
+  font-size: 11px;
+  color: var(--fg-secondary);
+  line-height: 1.4;
+  margin-top: 4px;
+}}
+.hel-geometry-card-caption-line1 {{
+  font-weight: 500;
+  color: var(--fg-secondary);
+}}
+.hel-geometry-card-caption-line2 {{
+  font-weight: 400;
+  color: var(--fg-tertiary);
+  margin-top: 2px;
+}}
+
 /* ---- Progress bar (compute-time feedback) ------------------------------ */
 /* Thin 2 px bar with a sliding ::after pseudo-element. The parent track is
    a muted border color; the child "glow" slides edge-to-edge on an infinite

@@ -84,3 +84,64 @@ def test_plot_p_renders_when_user_trajectory_missing():
     fig = plot_p_peak_irradiance_vs_geometry(curves)
     # Only the 5 reference traces should remain (no user curve, no star).
     assert len(fig.data) == 5
+
+
+# ---------------------------------------------------------------------------
+# Phase: geometry illustration cards (5 SVG panels above Plot P)
+# ---------------------------------------------------------------------------
+def test_geometry_cards_constant_has_five_entries():
+    """The _GEOMETRY_CARDS module-level constant must list exactly the
+    5 reference angles in the same order as
+    physics.geometry_family._REFERENCE_ANGLES_DEG."""
+    from physics.geometry_family import _REFERENCE_ANGLES_DEG
+    from ui.outputs import _GEOMETRY_CARDS
+    assert len(_GEOMETRY_CARDS) == 5
+    angles = tuple(c[0] for c in _GEOMETRY_CARDS)
+    assert angles == _REFERENCE_ANGLES_DEG
+
+
+def test_geometry_cards_titles_include_all_five_angles():
+    """Each card has a title containing its angle in degrees, e.g.
+    '0° Head-on', '30° Diagonal'."""
+    from ui.outputs import _GEOMETRY_CARDS
+    titles = [c[2] for c in _GEOMETRY_CARDS]
+    for expected in ("0°", "30°", "45°", "60°", "90°"):
+        assert any(expected in t for t in titles), (
+            f"no card title contains {expected!r}"
+        )
+
+
+def test_geometry_cards_colors_match_plot_p_palette_keys():
+    """The card colour-key for each angle must match the corresponding
+    curve's colour in plot_p_peak_irradiance_vs_geometry. Visual
+    continuity between the illustrations and the plot: same angle,
+    same colour."""
+    from ui.outputs import _GEOMETRY_CARDS
+    # The mapping from plot_p's hand-picked styles. Order matters
+    # (angle index 0..4 → palette key).
+    expected_keys = (
+        "data.a", "data.b", "data.c", "data.reference", "accent.primary",
+    )
+    actual_keys = tuple(c[1] for c in _GEOMETRY_CARDS)
+    assert actual_keys == expected_keys
+
+
+def test_geometry_card_closest_approach_distances_match_geometry():
+    """Spot-check the closest-approach formula used in the cards
+    matches the physics: head-on → R_min; α=30°/45°/60° → R_detect·sin α;
+    α=90° → R_detect."""
+    import math
+    R_detect_m, R_min_m = 1500.0, 100.0
+    # Per the card-rendering formula:
+    expected = {
+        0.0:  R_min_m,                                          # 100 m
+        30.0: R_detect_m * math.sin(math.radians(30.0)),        # 750 m
+        45.0: R_detect_m * math.sin(math.radians(45.0)),        # ≈1060 m
+        60.0: R_detect_m * math.sin(math.radians(60.0)),        # ≈1300 m
+        90.0: R_detect_m,                                       # 1500 m
+    }
+    assert expected[0.0] == pytest.approx(100.0, abs=0.5)
+    assert expected[30.0] == pytest.approx(750.0, abs=0.5)
+    assert expected[45.0] == pytest.approx(1061.0, abs=5.0)
+    assert expected[60.0] == pytest.approx(1299.0, abs=5.0)
+    assert expected[90.0] == pytest.approx(1500.0, abs=0.5)

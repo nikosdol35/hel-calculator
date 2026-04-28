@@ -1039,6 +1039,134 @@ def _material_comparison_cached(key: tuple) -> dict[str, float]:
 # visualization layer; doesn't touch the chain.
 # =============================================================================
 
+# The 5 reference geometries shown both in the illustration cards
+# (above the plot) AND in Plot P's curves. Kept in lockstep with
+# physics/geometry_family._REFERENCE_ANGLES_DEG.
+#
+# Each entry: (alpha_deg, palette_color_key, title, description_line2).
+_GEOMETRY_CARDS: tuple[tuple[float, str, str, str], ...] = (
+    (0.0,  "data.a",
+     "0° Head-on",       "Target heads straight at the gun."),
+    (30.0, "data.b",
+     "30° Diagonal",     "Mostly closing, some cross-track motion."),
+    (45.0, "data.c",
+     "45° Diagonal",     "Half closing, half cross-track."),
+    (60.0, "data.reference",
+     "60° Wide crossing", "Mostly cross-track, barely closing."),
+    (90.0, "accent.primary",
+     "90° Perpendicular", "Pure fly-by; the target never closes."),
+)
+
+
+def _render_geometry_diagrams(
+    palette: dict, R_detect_m: float, R_min_m: float,
+) -> None:
+    """Render the row of 5 SVG illustration cards above Plot P.
+
+    Each card is a small top-down diagram:
+      - gun (filled circle) at the left, anchored on a horizontal
+        line-of-sight axis;
+      - target (open circle) at the right;
+      - velocity vector arrow originating at the target, pointing in
+        its α-angled direction (length identical across all cards
+        so the eye reads only the rotation difference).
+
+    Arrow colour matches the angle's curve in Plot P so the reader
+    can connect "this scenario looks like this" to "this scenario
+    produces this curve".
+
+    Closest-approach distance per card is computed from the actual
+    chain inputs:
+      - 0° → R_min (engagement-end at gun's minimum range)
+      - α ∈ (0°, 90°) → R_detect · sin(α) (trajectory's closest pass)
+      - 90° → R_detect (target never gets closer than detection)
+    """
+    cards_html: list[str] = []
+    for alpha_deg, color_key, title, line2 in _GEOMETRY_CARDS:
+        arrow_color = palette.get(color_key, palette["fg.secondary"])
+        # Velocity arrow geometry — see plan §4. Gun (20,55), Target
+        # (110,55) on a 140×90 viewBox. Arrow length = 30 px,
+        # endpoint = (target_x − 30·cos α, target_y − 30·sin α).
+        # SVG y-axis points DOWN, so subtracting sin α makes the
+        # arrow point "up" (away from gun) on screen.
+        gun_x, gun_y = 20.0, 55.0
+        tgt_x, tgt_y = 110.0, 55.0
+        alpha_rad = math.radians(alpha_deg)
+        arrow_end_x = tgt_x - 30.0 * math.cos(alpha_rad)
+        arrow_end_y = tgt_y - 30.0 * math.sin(alpha_rad)
+
+        # Closest-approach distance per the geometry (matches
+        # physics/geometry_family.py's truncation rules).
+        if alpha_deg == 0.0:
+            closest_m = R_min_m
+        elif alpha_deg >= 90.0:
+            closest_m = R_detect_m
+        else:
+            closest_m = R_detect_m * math.sin(alpha_rad)
+        # Format with thousand-separator and unit; rounded to int m.
+        if closest_m >= 1000.0:
+            closest_str = f"{closest_m / 1000.0:.2f} km".rstrip("0").rstrip(".")
+            if "km" not in closest_str:
+                closest_str += " km"
+        else:
+            closest_str = f"{closest_m:.0f} m"
+        line1 = f"Closest approach: {closest_str}"
+
+        # Per-card SVG. We use a unique marker id per card so the
+        # arrowhead picks up the angle-specific colour. Stroke + fill
+        # come straight from the active palette.
+        marker_id = f"hel-geom-arrow-{int(alpha_deg)}"
+        gun_color = palette["fg.primary"]
+        target_color = palette["fg.secondary"]
+        los_color = palette["border.strong"]
+        label_color = palette["fg.tertiary"]
+        svg = f"""
+<svg viewBox="0 0 140 90" class="hel-geometry-card-svg"
+     xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <marker id="{marker_id}" viewBox="0 0 10 10"
+            refX="9" refY="5" markerWidth="6" markerHeight="6"
+            orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="{arrow_color}"/>
+    </marker>
+  </defs>
+  <!-- Line of sight (dashed, faint) -->
+  <line x1="{gun_x}" y1="{gun_y}" x2="{tgt_x}" y2="{tgt_y}"
+        stroke="{los_color}" stroke-width="1"
+        stroke-dasharray="3,3"/>
+  <!-- Gun (filled circle) + label -->
+  <circle cx="{gun_x}" cy="{gun_y}" r="4" fill="{gun_color}"/>
+  <text x="{gun_x}" y="{gun_y + 18:.1f}" text-anchor="middle"
+        font-size="9" fill="{label_color}">Gun</text>
+  <!-- Target (open circle) + label -->
+  <circle cx="{tgt_x}" cy="{tgt_y}" r="5" fill="none"
+          stroke="{target_color}" stroke-width="1.5"/>
+  <text x="{tgt_x}" y="{tgt_y + 18:.1f}" text-anchor="middle"
+        font-size="9" fill="{label_color}">Target</text>
+  <!-- Velocity arrow (angle-coloured) -->
+  <line x1="{tgt_x}" y1="{tgt_y}"
+        x2="{arrow_end_x:.2f}" y2="{arrow_end_y:.2f}"
+        stroke="{arrow_color}" stroke-width="2.5"
+        marker-end="url(#{marker_id})"/>
+</svg>
+"""
+        cards_html.append(
+            f'<div class="hel-geometry-card">'
+            f'  <div class="hel-geometry-card-title">{title}</div>'
+            f'  {svg}'
+            f'  <div class="hel-geometry-card-caption">'
+            f'    <div class="hel-geometry-card-caption-line1">{line1}</div>'
+            f'    <div class="hel-geometry-card-caption-line2">{line2}</div>'
+            f'  </div>'
+            f'</div>'
+        )
+
+    st.markdown(
+        f'<div class="hel-geometry-row">{"".join(cards_html)}</div>',
+        unsafe_allow_html=True,
+    )
+
+
 def render_tab_geometry_comparison(result: dict) -> None:
     """Render the Geometry tab — Plot P (peak irradiance vs engagement
     time, family of approach angles).
@@ -1062,6 +1190,15 @@ def render_tab_geometry_comparison(result: dict) -> None:
             "scenario — v2.0 trajectory keys are missing."
         )
         return
+
+    # Render the 5-card illustration row BEFORE the plot. Closest-
+    # approach distances on the cards come from the actual chain
+    # inputs so a non-canonical scenario shows correct numbers.
+    from ui.plots import _active_palette
+    R_detect_m = float(result.get("R_detect") or result.get("R", 0.0))
+    R_min_m = float(result.get("R_min", 100.0))
+    if R_detect_m > 0:
+        _render_geometry_diagrams(_active_palette(), R_detect_m, R_min_m)
 
     try:
         from physics.geometry_family import compute_geometry_family_curves
