@@ -1046,7 +1046,7 @@ def _material_comparison_cached(key: tuple) -> dict[str, float]:
 # Each entry: (alpha_deg, palette_color_key, title, description_line2).
 _GEOMETRY_CARDS: tuple[tuple[float, str, str, str], ...] = (
     (0.0,  "data.a",
-     "0° Head-on",       "Target heads straight at the gun."),
+     "0° Head-on",       "Target heads straight at the beam director."),
     (30.0, "data.b",
      "30° Diagonal",     "Mostly closing, some cross-track motion."),
     (45.0, "data.c",
@@ -1134,10 +1134,12 @@ def _render_geometry_diagrams(
   <line x1="{gun_x}" y1="{gun_y}" x2="{tgt_x}" y2="{tgt_y}"
         stroke="{los_color}" stroke-width="1"
         stroke-dasharray="3,3"/>
-  <!-- Gun (filled circle) + label -->
+  <!-- Beam director (filled circle) + label. Short label "Director"
+       used inside the small SVG; captions / intro use the full
+       "beam director" wording. -->
   <circle cx="{gun_x}" cy="{gun_y}" r="4" fill="{gun_color}"/>
   <text x="{gun_x}" y="{gun_y + 18:.1f}" text-anchor="middle"
-        font-size="9" fill="{label_color}">Gun</text>
+        font-size="9" fill="{label_color}">Director</text>
   <!-- Target (open circle) + label -->
   <circle cx="{tgt_x}" cy="{tgt_y}" r="5" fill="none"
           stroke="{target_color}" stroke-width="1.5"/>

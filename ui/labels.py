@@ -1076,9 +1076,9 @@ EXPLANATIONS: dict[str, str] = {
         "This tab compares peak irradiance — the brightest single "
         "point of laser intensity on the target — across five "
         "different approach geometries. The illustrations below "
-        "show what each scenario looks like from above: gun on "
-        "the left, target on the right, the colored arrow shows "
-        "the direction the target is moving."
+        "show what each scenario looks like from above: the beam "
+        "director on the left, target on the right, the colored "
+        "arrow shows the direction the target is moving."
     ),
     "plot_p_intro": (
         "How to read the plot: each curve traces peak irradiance "
