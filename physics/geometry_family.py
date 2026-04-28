@@ -61,6 +61,13 @@ _DEFAULT_N_SAMPLES: int = 30
 _T_MAX_S: float = 180.0
 
 
+# Empirical correction factor relating lumped-mass τ_BT to the PDE-
+# accurate τ_BT — see physics/jitter_sensitivity.py for derivation.
+# We mirror the same constant here so all lightweight modules use the
+# same calibration. Canonical CFRP scenario: PDE/lumped ratio = 0.83.
+_LUMPED_TO_PDE_RATIO = 0.83
+
+
 @dataclass(frozen=True)
 class GeometryFamilyCurves:
     """Output of `compute_geometry_family_curves`.
@@ -68,23 +75,37 @@ class GeometryFamilyCurves:
     One reference curve per angle in ``_REFERENCE_ANGLES_DEG`` plus
     an optional current-scenario curve from the chain's actual
     trajectory output. Each reference curve is a tuple of
-    (t_axis_s, I_peak_axis_wpcm2) lists of equal length; the
-    user's curve uses chain time series and may be a different
-    length.
+    (alpha_deg, t_axis_s, I_peak_axis_wpcm2, I_avg_aim_axis_wpcm2)
+    of equal length; the user's curve uses chain time series and
+    may be a different length.
 
     Attributes:
-      reference_curves: tuple of (alpha_deg, t_axis, I_peak_axis)
-        triplets, in ``_REFERENCE_ANGLES_DEG`` order.
+      reference_curves: tuple of
+        (alpha_deg, t_axis, I_peak_axis, I_avg_aim_axis) 4-tuples,
+        in ``_REFERENCE_ANGLES_DEG`` order. ``I_avg_aim_axis`` is
+        the bucket-averaged irradiance (W/cm²) used to integrate
+        cumulative absorbed energy for kill-marker placement.
+      reference_kill_markers: tuple of (t_kill_s, I_peak_at_kill_wpcm2)
+        2-tuples or None per angle, in the same order as
+        ``reference_curves``. None when burn-through doesn't happen
+        within the simulated trajectory window — typically α ≥ ~60°
+        crossings that close briefly then fly off, or α=90° fly-bys.
       current_t_axis_s: chain's trajectory_t (None if missing).
       current_I_peak_wpcm2_axis: chain's trajectory_I_peak in
         W/cm² (None if missing). Already converted from W/m² SI.
       current_R_at_kill_km: where the chain says the engagement
         closes (None for fly-by trajectories).
+      current_tau_BT_s: chain's PDE-accurate τ_BT (seconds) for
+        positioning the "current scenario" star at the actual kill
+        moment, not the trajectory end. None when the chain didn't
+        produce a kill within the dwell window.
     """
-    reference_curves: tuple[tuple[float, tuple[float, ...], tuple[float, ...]], ...]
+    reference_curves: tuple[tuple[float, tuple[float, ...], tuple[float, ...], tuple[float, ...]], ...]
+    reference_kill_markers: tuple[tuple[float, float] | None, ...]
     current_t_axis_s: tuple[float, ...] | None
     current_I_peak_wpcm2_axis: tuple[float, ...] | None
     current_R_at_kill_km: float | None
+    current_tau_BT_s: float | None
 
 
 # ---------------------------------------------------------------------------
@@ -165,14 +186,17 @@ def _t_engagement_end(
 # Per-cell M4+M5+M7 compute (lightweight, ~5 ms)
 # ---------------------------------------------------------------------------
 
-def _compute_I_peak_wpcm2_at_R(
+def _compute_irradiance_at_R(
     base_inputs: dict, R_m: float, w0: float, zR: float, P_exit: float,
-) -> float | None:
-    """Compute I_peak (W/cm²) at one slant range using M4+M5+M7 only.
+) -> tuple[float, float] | None:
+    """Compute (I_peak, I_avg_aim) in W/cm² at one slant range using
+    M4+M5+M7 only.
 
     Returns None if any module rejects the inputs (out-of-range or bad
     combination) — caller treats this as a missing data point. Same
-    pattern as ``cn2_family._compute_one_cell``.
+    pattern as ``cn2_family._compute_one_cell``. ``I_avg_aim`` is the
+    bucket-averaged irradiance used downstream to integrate absorbed
+    energy for the kill-marker placement.
     """
     if R_m <= 0.0:
         return None
@@ -213,8 +237,105 @@ def _compute_I_peak_wpcm2_at_R(
         })
     except (ValueError, KeyError):
         return None
-    # I_peak from M7 is in W/m²; convert to W/cm² for display.
-    return float(m7_out.get("I_peak", 0.0)) * 1.0e-4
+    # M7 returns SI W/m²; convert to W/cm² for display & integration.
+    I_peak_wpcm2 = float(m7_out.get("I_peak", 0.0)) * 1.0e-4
+    I_avg_aim_wpcm2 = float(m7_out.get("I_avg_aim", 0.0)) * 1.0e-4
+    return (I_peak_wpcm2, I_avg_aim_wpcm2)
+
+
+def _e_fail_jpcm2(base_inputs: dict) -> float | None:
+    """Lumped-mass failure-fluence requirement (J/cm²) for the user's
+    target material + thickness. Same formula as
+    ``jitter_sensitivity._e_fail_jpm2`` but converted to J/cm² so it
+    pairs naturally with ``I_avg_aim_wpcm2`` from
+    ``_compute_irradiance_at_R``.
+
+    E_fail [J/m²] = ρ · c_p · thickness · (T_fail − T_ambient)
+    E_fail [J/cm²] = E_fail [J/m²] · 1e-4
+
+    Returns None when material is unknown or thickness is degenerate.
+    """
+    thickness_m = base_inputs.get("thickness")
+    material = base_inputs.get("material")
+    T_amb_k = float(base_inputs.get("T_ambient", 293.0))
+    if not thickness_m or float(thickness_m) <= 0:
+        return None
+    try:
+        from physics.m8_material_tables import MATERIAL_PROPERTIES
+        if material not in MATERIAL_PROPERTIES:
+            return None
+        props = MATERIAL_PROPERTIES[material]
+        delta_T = float(props["T_fail"]) - T_amb_k
+        if delta_T <= 0:
+            return None
+        E_fail_jpm2 = (
+            float(props["rho"]) * float(props["c_p"])
+            * float(thickness_m) * delta_T
+        )
+        return E_fail_jpm2 * 1.0e-4
+    except Exception:
+        return None
+
+
+def _kill_marker_for_curve(
+    t_axis: tuple[float, ...],
+    I_peak_axis: tuple[float, ...],
+    I_avg_aim_axis: tuple[float, ...],
+    E_fail_jpcm2: float,
+) -> tuple[float, float] | None:
+    """Find the kill moment on one reference curve via cumulative
+    trapezoidal integration of I_avg_aim over the trajectory.
+
+    Cumulative absorbed energy E_cum(t) = ∫₀ᵗ I_avg_aim(s) ds
+    [W/cm² · s = J/cm²]. Burn-through declared when
+    E_cum(t) ≥ _LUMPED_TO_PDE_RATIO · E_fail. Returns the
+    (t_kill_s, I_peak_at_kill_wpcm2) pair via linear interpolation
+    between the bracketing samples. None if the threshold isn't
+    reached within the simulated trajectory window (target flies away
+    before delivering enough flux).
+
+    NaN samples (M4/M5/M7 rejected) contribute zero to the integral.
+    """
+    target_jpcm2 = _LUMPED_TO_PDE_RATIO * E_fail_jpcm2
+    if target_jpcm2 <= 0 or len(t_axis) < 2:
+        return None
+
+    E_cum = 0.0
+    for i in range(1, len(t_axis)):
+        I_lo = I_avg_aim_axis[i - 1]
+        I_hi = I_avg_aim_axis[i]
+        if math.isnan(I_lo):
+            I_lo = 0.0
+        if math.isnan(I_hi):
+            I_hi = 0.0
+        dt = t_axis[i] - t_axis[i - 1]
+        if dt <= 0:
+            continue
+        # Trapezoidal contribution over this cell.
+        dE = 0.5 * (I_lo + I_hi) * dt
+        E_prev = E_cum
+        E_cum += dE
+        if E_cum >= target_jpcm2:
+            # Linear-interp within the cell to find t_kill.
+            # E_prev + (frac) · dE = target_jpcm2 → frac in [0, 1].
+            if dE <= 0:
+                frac = 0.0
+            else:
+                frac = (target_jpcm2 - E_prev) / dE
+                frac = max(0.0, min(1.0, frac))
+            t_kill = t_axis[i - 1] + frac * dt
+            # I_peak_at_kill — same linear interp on the I_peak axis.
+            Ip_lo = I_peak_axis[i - 1]
+            Ip_hi = I_peak_axis[i]
+            if math.isnan(Ip_lo) and math.isnan(Ip_hi):
+                return None
+            if math.isnan(Ip_lo):
+                Ip_lo = Ip_hi
+            if math.isnan(Ip_hi):
+                Ip_hi = Ip_lo
+            I_peak_at_kill = Ip_lo + frac * (Ip_hi - Ip_lo)
+            return (t_kill, I_peak_at_kill)
+    return None
 
 
 # ---------------------------------------------------------------------------
@@ -274,8 +395,17 @@ def compute_geometry_family_curves(
 
     levels = angles_deg if angles_deg is not None else _REFERENCE_ANGLES_DEG
 
+    # E_fail (J/cm²) for the user's material — drives the cumulative-
+    # absorbed-energy threshold for kill markers. None when material
+    # is unknown / missing → no kill markers will be produced (the
+    # plot still renders the bare curves).
+    E_fail_jpcm2 = _e_fail_jpcm2(base_inputs)
+
     # Build each reference curve.
-    reference_curves: list[tuple[float, tuple[float, ...], tuple[float, ...]]] = []
+    reference_curves: list[
+        tuple[float, tuple[float, ...], tuple[float, ...], tuple[float, ...]]
+    ] = []
+    reference_kill_markers: list[tuple[float, float] | None] = []
     for alpha_deg in levels:
         t_end = _t_engagement_end(R_detect_m, R_min_m, v_tgt_mps, alpha_deg)
         if n_samples < 2:
@@ -284,15 +414,30 @@ def compute_geometry_family_curves(
             step = t_end / (n_samples - 1) if n_samples > 1 else 0.0
             sample_times = tuple(step * i for i in range(n_samples))
         I_peak_axis: list[float] = []
+        I_avg_aim_axis: list[float] = []
         for t_s in sample_times:
             R = _trajectory_R_of_t(R_detect_m, v_tgt_mps, alpha_deg, t_s)
-            I_peak = _compute_I_peak_wpcm2_at_R(
+            pair = _compute_irradiance_at_R(
                 base_inputs, R, w0, zR, P_exit,
             )
-            I_peak_axis.append(I_peak if I_peak is not None else float("nan"))
+            if pair is None:
+                I_peak_axis.append(float("nan"))
+                I_avg_aim_axis.append(float("nan"))
+            else:
+                I_peak_axis.append(pair[0])
+                I_avg_aim_axis.append(pair[1])
+        I_peak_tuple = tuple(I_peak_axis)
+        I_avg_aim_tuple = tuple(I_avg_aim_axis)
         reference_curves.append(
-            (float(alpha_deg), sample_times, tuple(I_peak_axis))
+            (float(alpha_deg), sample_times, I_peak_tuple, I_avg_aim_tuple)
         )
+        if E_fail_jpcm2 is not None:
+            marker = _kill_marker_for_curve(
+                sample_times, I_peak_tuple, I_avg_aim_tuple, E_fail_jpcm2,
+            )
+            reference_kill_markers.append(marker)
+        else:
+            reference_kill_markers.append(None)
 
     # User's current-scenario curve from the chain's trajectory output.
     current_t_axis = base_inputs.get("trajectory_t")
@@ -318,11 +463,25 @@ def compute_geometry_family_curves(
         except (TypeError, ValueError):
             current_R_at_kill_km = None
 
+    # Chain's PDE-accurate τ_BT — drives the "current scenario" star
+    # placement at the actual kill moment (not the trajectory end).
+    tau_BT_raw = base_inputs.get("tau_BT")
+    current_tau_BT_s: float | None = None
+    if tau_BT_raw is not None:
+        try:
+            v = float(tau_BT_raw)
+            if math.isfinite(v) and v > 0:
+                current_tau_BT_s = v
+        except (TypeError, ValueError):
+            current_tau_BT_s = None
+
     return GeometryFamilyCurves(
         reference_curves=tuple(reference_curves),
+        reference_kill_markers=tuple(reference_kill_markers),
         current_t_axis_s=current_t_tup,
         current_I_peak_wpcm2_axis=current_I_tup,
         current_R_at_kill_km=current_R_at_kill_km,
+        current_tau_BT_s=current_tau_BT_s,
     )
 
 
@@ -331,4 +490,5 @@ __all__ = [
     "compute_geometry_family_curves",
     "_REFERENCE_ANGLES_DEG",
     "_T_MAX_S",
+    "_LUMPED_TO_PDE_RATIO",
 ]

@@ -64,15 +64,16 @@ def test_returns_curves_dataclass():
     curves = compute_geometry_family_curves(_merged_result())
     assert isinstance(curves, GeometryFamilyCurves)
     assert len(curves.reference_curves) == len(_REFERENCE_ANGLES_DEG)
-    # Each entry is (alpha_deg, t_axis, I_peak_axis) triplet.
-    for alpha_deg, t_axis, I_axis in curves.reference_curves:
+    # Each entry is (alpha_deg, t_axis, I_peak_axis, I_avg_aim_axis).
+    for alpha_deg, t_axis, I_axis, I_avg_axis in curves.reference_curves:
         assert isinstance(alpha_deg, float)
         assert isinstance(t_axis, tuple)
         assert isinstance(I_axis, tuple)
-        assert len(t_axis) == len(I_axis)
+        assert isinstance(I_avg_axis, tuple)
+        assert len(t_axis) == len(I_axis) == len(I_avg_axis)
         assert len(t_axis) >= 2
     # Reference angles are exactly the documented set.
-    actual_angles = tuple(a for a, _, _ in curves.reference_curves)
+    actual_angles = tuple(a for a, *_ in curves.reference_curves)
     assert actual_angles == _REFERENCE_ANGLES_DEG
 
 
@@ -135,9 +136,9 @@ def test_truncation_head_on_stops_at_R_min():
     head-on engagement-end)."""
     curves = compute_geometry_family_curves(_merged_result())
     head_on = next(
-        (a, t, I) for a, t, I in curves.reference_curves if a == 0.0
+        entry for entry in curves.reference_curves if entry[0] == 0.0
     )
-    _, t_axis, _ = head_on
+    _, t_axis, _, _ = head_on
     # Canonical: (1500-100)/20 = 70 s.
     assert t_axis[-1] == pytest.approx(70.0, rel=0.01)
 
@@ -151,9 +152,9 @@ def test_truncation_angled_stops_at_closest_approach():
     R_detect, v_tgt = 1500.0, 20.0
     for alpha_deg in (30.0, 45.0, 60.0):
         entry = next(
-            (a, t, I) for a, t, I in curves.reference_curves if a == alpha_deg
+            e for e in curves.reference_curves if e[0] == alpha_deg
         )
-        _, t_axis, _ = entry
+        _, t_axis, _, _ = entry
         expected_t_end = R_detect * math.cos(math.radians(alpha_deg)) / v_tgt
         assert t_axis[-1] == pytest.approx(expected_t_end, rel=0.01), (
             f"α={alpha_deg}°: expected t_end={expected_t_end:.2f}, "
@@ -165,9 +166,9 @@ def test_truncation_perpendicular_caps_at_t_max():
     """The α=90° curve runs for the full t_max (target never closes)."""
     curves = compute_geometry_family_curves(_merged_result())
     perp = next(
-        (a, t, I) for a, t, I in curves.reference_curves if a == 90.0
+        e for e in curves.reference_curves if e[0] == 90.0
     )
-    _, t_axis, _ = perp
+    _, t_axis, _, _ = perp
     assert t_axis[-1] == pytest.approx(_T_MAX_S, rel=1e-9)
 
 
@@ -179,9 +180,9 @@ def test_I_peak_climbs_for_head_on():
     as the target gets closer."""
     curves = compute_geometry_family_curves(_merged_result())
     head_on = next(
-        (a, t, I) for a, t, I in curves.reference_curves if a == 0.0
+        e for e in curves.reference_curves if e[0] == 0.0
     )
-    _, _, I_axis = head_on
+    _, _, I_axis, _ = head_on
     finite = [v for v in I_axis if not math.isnan(v) and v > 0]
     assert len(finite) >= 2
     assert finite[-1] > finite[0], (
@@ -195,9 +196,9 @@ def test_I_peak_falls_for_perpendicular():
     farther, so I_peak should DECREASE over time."""
     curves = compute_geometry_family_curves(_merged_result())
     perp = next(
-        (a, t, I) for a, t, I in curves.reference_curves if a == 90.0
+        e for e in curves.reference_curves if e[0] == 90.0
     )
-    _, _, I_axis = perp
+    _, _, I_axis, _ = perp
     finite = [v for v in I_axis if not math.isnan(v) and v > 0]
     assert len(finite) >= 2
     assert finite[-1] < finite[0], (
@@ -211,7 +212,7 @@ def test_higher_alpha_lower_max_I_peak():
     decrease across the family."""
     curves = compute_geometry_family_curves(_merged_result())
     max_per_angle = []
-    for alpha_deg, _, I_axis in curves.reference_curves:
+    for alpha_deg, _, I_axis, _ in curves.reference_curves:
         finite = [v for v in I_axis if not math.isnan(v) and v > 0]
         max_per_angle.append((alpha_deg, max(finite) if finite else 0.0))
     # Pull α=0° max and α=60° max for the comparison.
@@ -271,9 +272,11 @@ def test_missing_material_does_not_crash():
     curves = compute_geometry_family_curves(merged)
     assert len(curves.reference_curves) == len(_REFERENCE_ANGLES_DEG)
     # All reference curves still produce values.
-    for _, _, I_axis in curves.reference_curves:
+    for _, _, I_axis, _ in curves.reference_curves:
         finite = [v for v in I_axis if not math.isnan(v) and v > 0]
         assert len(finite) >= 2
+    # Without a known material, kill markers should all be None.
+    assert curves.reference_kill_markers == (None,) * len(_REFERENCE_ANGLES_DEG)
 
 
 def test_constants_locked():
@@ -281,3 +284,103 @@ def test_constants_locked():
     silently would shift the entire plot story."""
     assert _REFERENCE_ANGLES_DEG == (0.0, 30.0, 45.0, 60.0, 90.0)
     assert _T_MAX_S > 60.0  # At least handles canonical 70 s head-on.
+
+
+# ---------------------------------------------------------------------------
+# Kill markers — per-geometry burn-through points
+# ---------------------------------------------------------------------------
+def test_kill_markers_alignment_with_reference_curves():
+    """`reference_kill_markers` is a tuple of the same length and order
+    as `reference_curves`. Each entry is either None (no burn-through
+    in this geometry) or a (t_kill_s, I_peak_at_kill_wpcm2) pair."""
+    curves = compute_geometry_family_curves(_merged_result())
+    assert len(curves.reference_kill_markers) == len(curves.reference_curves)
+    for marker in curves.reference_kill_markers:
+        if marker is not None:
+            t_kill, I_peak_at_kill = marker
+            assert t_kill > 0
+            assert I_peak_at_kill > 0
+
+
+def test_head_on_kill_marker_within_trajectory():
+    """For canonical CFRP head-on, burn-through happens inside the
+    trajectory window, so the α=0° marker must be present and its
+    t_kill must be ≤ the trajectory end (70 s)."""
+    curves = compute_geometry_family_curves(_merged_result())
+    head_on_idx = next(
+        i for i, e in enumerate(curves.reference_curves) if e[0] == 0.0
+    )
+    marker = curves.reference_kill_markers[head_on_idx]
+    assert marker is not None, "head-on must kill within the canonical window"
+    t_kill, _ = marker
+    _, t_axis, _, _ = curves.reference_curves[head_on_idx]
+    assert 0.0 < t_kill <= t_axis[-1]
+
+
+def test_perpendicular_kill_no_earlier_than_head_on():
+    """Whatever happens at α=90° (target only flies away), it cannot
+    burn through faster than the head-on case (closing target).
+    Physically: α=0° flux RISES with time; α=90° flux FALLS — so
+    cumulative absorbed energy reaches threshold no later for head-on
+    than for perpendicular."""
+    curves = compute_geometry_family_curves(_merged_result())
+    head_on_idx = next(
+        i for i, e in enumerate(curves.reference_curves) if e[0] == 0.0
+    )
+    perp_idx = next(
+        i for i, e in enumerate(curves.reference_curves) if e[0] == 90.0
+    )
+    head_on_marker = curves.reference_kill_markers[head_on_idx]
+    perp_marker = curves.reference_kill_markers[perp_idx]
+    # Head-on must kill within the canonical scenario.
+    assert head_on_marker is not None
+    # If the perpendicular fly-by also delivers enough flux to kill
+    # (plausible given the same starting range), it must be no earlier
+    # than head-on. If it doesn't kill at all, that's also fine.
+    if perp_marker is not None:
+        assert perp_marker[0] >= head_on_marker[0] - 1e-6, (
+            f"α=90° killed at t={perp_marker[0]:.3f}s but α=0° killed "
+            f"later at t={head_on_marker[0]:.3f}s — non-physical"
+        )
+
+
+def test_kill_marker_ordering_matches_alpha_intensity():
+    """Smaller α (more head-on) should kill at smaller or equal t than
+    larger α — head-on closes faster + delivers higher flux. Pin the
+    monotonicity for the killed subset."""
+    curves = compute_geometry_family_curves(_merged_result())
+    kills = [
+        (alpha, marker[0])
+        for (alpha, _, _, _), marker
+        in zip(curves.reference_curves, curves.reference_kill_markers)
+        if marker is not None
+    ]
+    # Each consecutive pair must satisfy α_i ≤ α_{i+1} → t_i ≤ t_{i+1}.
+    for (a_lo, t_lo), (a_hi, t_hi) in zip(kills, kills[1:]):
+        assert a_lo < a_hi
+        assert t_lo <= t_hi + 1e-6, (
+            f"α={a_lo}° killed at t={t_lo:.3f}s but α={a_hi}° killed at "
+            f"t={t_hi:.3f}s — non-monotone"
+        )
+
+
+def test_current_tau_BT_s_passed_through():
+    """`current_tau_BT_s` mirrors the chain's PDE-accurate τ_BT.
+    Plot P uses this to place the 'current scenario' star at the
+    actual kill moment (not the trajectory end)."""
+    merged = _merged_result()
+    curves = compute_geometry_family_curves(merged)
+    # Canonical CFRP at 1500 m kills around 2.7 s (PDE-accurate).
+    chain_tau_BT = float(merged["tau_BT"])
+    assert curves.current_tau_BT_s == pytest.approx(chain_tau_BT, rel=1e-9)
+    assert 0.0 < curves.current_tau_BT_s < 10.0
+
+
+def test_current_tau_BT_s_none_when_chain_no_kill():
+    """If the chain produces no kill (τ_BT is None), the dataclass's
+    `current_tau_BT_s` must be None — the plot then falls back to
+    placing the star at the trajectory end as a degraded display."""
+    merged = _merged_result()
+    merged["tau_BT"] = None
+    curves = compute_geometry_family_curves(merged)
+    assert curves.current_tau_BT_s is None

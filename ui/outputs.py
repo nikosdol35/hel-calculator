@@ -717,21 +717,17 @@ def render_tab_engagement(
             config=PLOTLY_MODEBAR_CONFIG,
         )
         explanation(EXPLANATIONS["plot_h_intro"], variant="plot")
-        # SPEC v2.0 §8.4 — Plot I (outcome map vs R_detect) sits right
-        # under Plot H. Both rely on the v2 trajectory contract; both
-        # are gated on the same trajectory_t_pde guard so they appear
-        # or disappear together.
+        # 2026-04-28: Plot I (outcome-map vs R_detect) hidden per user
+        # request — Plot B (time-to-burn-through) now occupies this
+        # slot and tells the same engagement-closure story more
+        # directly. Plot I's constructor remains in ui/plots.py for
+        # any future use; only the render call is removed here.
         st.plotly_chart(
-            plots.plot_i_outcome_map_vs_R_detect(
-                sweep,
-                current_R_m=result.get("R_detect"),
-                current_tau_BT_s=result.get("tau_BT"),
-                current_dwell_s=result.get("available_dwell"),
-            ),
+            plots.plot_b_time_to_burnthrough(sweep),
             use_container_width=True,
             config=PLOTLY_MODEBAR_CONFIG,
         )
-        explanation(EXPLANATIONS["plot_i_intro"], variant="plot")
+        explanation(EXPLANATIONS["plot_b_intro"], variant="plot")
         # SPEC v2.0 §8.5 — Plot J (cumulative-energy diagnostic).
         st.plotly_chart(
             plots.plot_j_cumulative_energy_diagnostic(result),
@@ -773,22 +769,10 @@ def render_tab_engagement(
     # atmospheres + the user's actual scenario highlighted. Lightweight
     # M4+M5+M7-only compute path keeps it sub-second.
     _render_cn2_family_plot(result)
-    st.plotly_chart(
-        plots.plot_b_time_to_burnthrough(sweep),
-        use_container_width=True,
-        config=PLOTLY_MODEBAR_CONFIG,
-    )
-    explanation(EXPLANATIONS["plot_b_intro"], variant="plot")
-    st.plotly_chart(
-        plots.plot_e_engagement_margin_vs_range(
-            sweep, reference_range=reference_range,
-            current_tau_BT_s=result.get("tau_BT"),
-            current_dwell_s=result.get("available_dwell"),
-        ),
-        use_container_width=True,
-        config=PLOTLY_MODEBAR_CONFIG,
-    )
-    explanation(EXPLANATIONS["plot_e_intro"], variant="plot")
+    # 2026-04-28: Plot B was promoted UP into Plot I's slot (above);
+    # Plot E (burn-through time vs dwell window) hidden per user
+    # request — it duplicated Plot B's engagement-closure story.
+    # Both plot constructors remain in ui/plots.py for future use.
     # 2026-04-28: Plot C' (spot tightening through trajectory) and the
     # v1 fallback (beam-diameter breakdown) hidden per user request —
     # the spot-vs-bucket plot already conveys the key insight.
@@ -2682,6 +2666,9 @@ def render_tab_math(result: dict) -> None:
     # --- Worked example ---------------------------------------------------
     _render_worked_example()
 
+    # --- Bibliography & references (last content block) ------------------
+    _render_bibliography_section()
+
     # --- Markdown export --------------------------------------------------
     _render_markdown_export(result)
 
@@ -2738,6 +2725,53 @@ def _render_constants_section() -> None:
                     f"`{c.code_ref}`",
                 ]
                 st.markdown("| " + " | ".join(cells) + " |")
+
+
+def _render_bibliography_section() -> None:
+    """Render the math-tab Bibliography section — 13 primary references
+    (cited in physics-module docstrings + SPEC.md Appendix B) plus 10
+    supplementary canonical books (web-search-verified 2026-04-28).
+
+    Shape mirrors ``_render_constants_section``: anchor link, header,
+    short caption, then a Markdown table per group. Two sub-headings
+    separate the cited works from the supplementary reading so users
+    can quickly locate "what we used" vs "what to read next".
+    """
+    from ui.bibliography import (
+        PRIMARY_REFERENCES, SUPPLEMENTARY_REFERENCES,
+    )
+
+    st.markdown("<a id='bibliography'></a>", unsafe_allow_html=True)
+    st.markdown("### Bibliography & references")
+    st.caption(
+        "Every formula in this tool traces to one of the primary "
+        "references below. Supplementary works are widely-used "
+        "canonical texts for users who want to study the field deeper."
+    )
+
+    def _table(entries) -> None:
+        # Markdown table — same format as the constants section so
+        # spacing, theming, and font weight read consistently across
+        # the math tab.
+        st.markdown(
+            "| # | Author(s) | Title | Year | Publisher | Where used / topic |\n"
+            "|---|---|---|---|---|---|"
+        )
+        for i, e in enumerate(entries, start=1):
+            cells = [
+                str(i),
+                e.authors.replace("|", "\\|"),
+                f"*{e.title.replace('|', '\\|')}*",
+                e.year.replace("|", "\\|"),
+                e.publisher.replace("|", "\\|"),
+                e.used_for.replace("|", "\\|"),
+            ]
+            st.markdown("| " + " | ".join(cells) + " |")
+
+    st.markdown("**Primary references (cited in physics modules)**")
+    _table(PRIMARY_REFERENCES)
+    st.markdown("**Supplementary reading**")
+    _table(SUPPLEMENTARY_REFERENCES)
 
 
 def _render_markdown_export(result: dict) -> None:

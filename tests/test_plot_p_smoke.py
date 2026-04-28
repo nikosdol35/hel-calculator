@@ -33,12 +33,13 @@ def _merged_result(**overrides) -> dict:
 
 def test_plot_p_smoke_real_chain():
     """Plot P renders against a real v2 chain result with the expected
-    number of traces — 5 reference angles + 1 PDE-accurate user
-    trajectory + 1 star marker = 7 total."""
+    number of traces — 5 reference angles + 1 reference-burn-through
+    marker trace + 1 PDE-accurate user trajectory + 1 'Current
+    scenario' star = 8 total."""
     from ui.plots import plot_p_peak_irradiance_vs_geometry
     curves = compute_geometry_family_curves(_merged_result())
     fig = plot_p_peak_irradiance_vs_geometry(curves)
-    assert len(fig.data) == 7
+    assert len(fig.data) == 8
 
 
 def test_plot_p_log_y_axis():
@@ -74,7 +75,8 @@ def test_plot_p_legend_labels_include_angles():
 def test_plot_p_renders_when_user_trajectory_missing():
     """If the chain output lacks trajectory_t / trajectory_I_peak (v1.x
     backward-compat scenarios in tests), the plot still renders the
-    5 reference curves plus an empty user-curve area."""
+    5 reference curves plus the burn-through-marker trace (material
+    is still known) — 6 total. No user curve, no scenario star."""
     from ui.plots import plot_p_peak_irradiance_vs_geometry
     merged = _merged_result()
     # Strip the trajectory series — simulate a v1.x-style result.
@@ -82,8 +84,8 @@ def test_plot_p_renders_when_user_trajectory_missing():
     merged.pop("trajectory_I_peak", None)
     curves = compute_geometry_family_curves(merged)
     fig = plot_p_peak_irradiance_vs_geometry(curves)
-    # Only the 5 reference traces should remain (no user curve, no star).
-    assert len(fig.data) == 5
+    # 5 reference traces + 1 combined burn-through-marker trace.
+    assert len(fig.data) == 6
 
 
 # ---------------------------------------------------------------------------
@@ -124,6 +126,109 @@ def test_geometry_cards_colors_match_plot_p_palette_keys():
     )
     actual_keys = tuple(c[1] for c in _GEOMETRY_CARDS)
     assert actual_keys == expected_keys
+
+
+# ---------------------------------------------------------------------------
+# Phase: kill-marker placement (per-curve burn-through + scenario star)
+# ---------------------------------------------------------------------------
+def test_plot_p_star_sits_at_chain_tau_BT_not_trajectory_end():
+    """The 'Current scenario' star must be at the chain's PDE-accurate
+    τ_BT (the actual kill moment), not at the trajectory end. For
+    canonical CFRP at 1500 m head-on, τ_BT ≈ 2.7 s while the trajectory
+    runs to ~70 s — so the star's x-coordinate must be in single-digit
+    seconds."""
+    from ui.plots import plot_p_peak_irradiance_vs_geometry
+    merged = _merged_result()
+    chain_tau_BT = float(merged["tau_BT"])
+    curves = compute_geometry_family_curves(merged)
+    fig = plot_p_peak_irradiance_vs_geometry(curves)
+    # Find the star trace (markers+text mode, name == "You are here").
+    star_traces = [t for t in fig.data if t.name == "You are here"]
+    assert len(star_traces) == 1, "exactly one scenario-star trace expected"
+    star = star_traces[0]
+    star_t = float(star.x[0])
+    assert star_t == pytest.approx(chain_tau_BT, rel=1e-6), (
+        f"star at t={star_t:.3f}s should be at τ_BT={chain_tau_BT:.3f}s, "
+        f"not the trajectory end"
+    )
+    # Defensive: the trajectory end is ~70 s for canonical → star
+    # must NOT be there.
+    assert star_t < 30.0, (
+        f"star at t={star_t:.1f}s is suspiciously close to the trajectory "
+        f"end — bug regression?"
+    )
+
+
+def test_plot_p_star_tooltip_says_burn_through():
+    """When the chain produces a kill, the star's tooltip should say
+    'burn-through at t = ...' (not 'engagement-end at ...'). The
+    distinction matters because the user asked for the star to mark
+    the kill moment, not the trajectory end."""
+    from ui.plots import plot_p_peak_irradiance_vs_geometry
+    curves = compute_geometry_family_curves(_merged_result())
+    fig = plot_p_peak_irradiance_vs_geometry(curves)
+    star_traces = [t for t in fig.data if t.name == "You are here"]
+    template = star_traces[0].hovertemplate
+    assert "burn-through" in template, (
+        f"star tooltip should advertise 'burn-through' for a chain-kill "
+        f"scenario; got: {template!r}"
+    )
+
+
+def test_plot_p_star_falls_back_to_engagement_end_when_no_kill():
+    """If the chain produces no kill (τ_BT is None / not in result),
+    the star should fall back to the trajectory END so the figure
+    still renders. Tooltip uses 'engagement-end' rather than
+    'burn-through' to be honest about what the user is seeing."""
+    from ui.plots import plot_p_peak_irradiance_vs_geometry
+    merged = _merged_result()
+    merged["tau_BT"] = None  # simulate no-kill chain output
+    curves = compute_geometry_family_curves(merged)
+    fig = plot_p_peak_irradiance_vs_geometry(curves)
+    star_traces = [t for t in fig.data if t.name == "You are here"]
+    template = star_traces[0].hovertemplate
+    assert "engagement-end" in template
+
+
+def test_plot_p_kill_markers_trace_present_for_canonical():
+    """For canonical CFRP (a killable scenario), the
+    burn-through-markers trace must exist with at least the head-on
+    point. The trace is named so legend identifies it."""
+    from ui.plots import plot_p_peak_irradiance_vs_geometry
+    curves = compute_geometry_family_curves(_merged_result())
+    fig = plot_p_peak_irradiance_vs_geometry(curves)
+    bt_traces = [t for t in fig.data if t.name == "Burn-through (per geometry)"]
+    assert len(bt_traces) == 1
+    assert len(bt_traces[0].x) >= 1, "head-on at minimum should kill"
+
+
+def test_plot_p_kill_markers_match_dataclass_values():
+    """The kill-marker trace coordinates must match the
+    `reference_kill_markers` from the dataclass exactly. Pin this so
+    a plot-side recomputation can't drift from the physics module."""
+    from ui.plots import plot_p_peak_irradiance_vs_geometry
+    curves = compute_geometry_family_curves(_merged_result())
+    fig = plot_p_peak_irradiance_vs_geometry(curves)
+    bt_trace = next(t for t in fig.data if t.name == "Burn-through (per geometry)")
+    expected_xs = [m[0] for m in curves.reference_kill_markers if m is not None]
+    expected_ys = [m[1] for m in curves.reference_kill_markers if m is not None]
+    assert list(bt_trace.x) == pytest.approx(expected_xs, rel=1e-9)
+    assert list(bt_trace.y) == pytest.approx(expected_ys, rel=1e-9)
+
+
+def test_plot_p_no_kill_markers_when_material_unknown():
+    """If the material is unknown (E_fail can't be computed), no
+    kill-marker trace should be added. Plot must still render the
+    5 reference curves + user trajectory + star = 7 total."""
+    from ui.plots import plot_p_peak_irradiance_vs_geometry
+    merged = _merged_result()
+    merged["material"] = "definitely_not_a_real_material"
+    curves = compute_geometry_family_curves(merged)
+    fig = plot_p_peak_irradiance_vs_geometry(curves)
+    bt_traces = [t for t in fig.data if t.name == "Burn-through (per geometry)"]
+    assert len(bt_traces) == 0
+    # 5 ref + 1 user + 1 star = 7 (no kill-markers trace).
+    assert len(fig.data) == 7
 
 
 def test_geometry_card_closest_approach_distances_match_geometry():

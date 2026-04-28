@@ -81,3 +81,58 @@ def test_plot_o_no_star_when_current_I_peak_missing():
     fig = plot_o_peak_irradiance_vs_cn2(curves)
     # 5 references + 1 current curve = 6 traces (no star).
     assert len(fig.data) == 6
+
+
+# ---------------------------------------------------------------------------
+# Phase: book-style Cn² formatting + legend repositioning (2026-04-28)
+# ---------------------------------------------------------------------------
+def test_plot_o_legend_uses_book_style_unicode():
+    """Cn² values must render as e.g. '1×10⁻¹⁵ m⁻²ᐟ³' (Unicode
+    superscripts), not the raw '1e-15' code form. This matches how
+    Andrews & Phillips / Tatarski write the refractive-index structure
+    constant in print."""
+    from ui.plots import plot_o_peak_irradiance_vs_cn2
+    curves = compute_cn2_family_curves(_merged_result())
+    fig = plot_o_peak_irradiance_vs_cn2(curves)
+    names = [t.name or "" for t in fig.data]
+    # At least one legend entry should contain the new Unicode form.
+    assert any("×10" in n for n in names), (
+        f"no legend entry uses '×10' Unicode multiplier; names={names}"
+    )
+    assert any("⁻²ᐟ³" in n for n in names), (
+        f"no legend entry uses Unicode 'm⁻²ᐟ³' superscript; names={names}"
+    )
+    # No legend entry should still use the old 'e-' raw form.
+    assert not any("e-1" in n for n in names), (
+        f"some legend entry still uses 'e-' raw form; names={names}"
+    )
+
+
+def test_plot_o_legend_positioned_outside_to_right():
+    """Plot O's legend must be vertical and anchored OUTSIDE the plot
+    area on the right, so it doesn't overlap the (long) plot title.
+    Pre-fix, the horizontal legend at y=1.02 collided with the
+    headline."""
+    from ui.plots import plot_o_peak_irradiance_vs_cn2
+    curves = compute_cn2_family_curves(_merged_result())
+    fig = plot_o_peak_irradiance_vs_cn2(curves)
+    assert fig.layout.legend.orientation == "v"
+    # x ≥ 1.0 means the legend is at the right edge of the plotting
+    # frame or further right (outside).
+    assert (fig.layout.legend.x or 0) >= 1.0
+
+
+def test_fmt_cn2_book_style_helper():
+    """The Cn² formatter handles canonical reference values + edge
+    cases (zero, negative, NaN, fractional mantissa)."""
+    from ui.plots import _fmt_cn2_book_style
+    # Each Cn² reference value → expected book-style string.
+    assert _fmt_cn2_book_style(1.0e-15) == "1×10⁻¹⁵ m⁻²ᐟ³"
+    assert _fmt_cn2_book_style(1.0e-14) == "1×10⁻¹⁴ m⁻²ᐟ³"
+    assert _fmt_cn2_book_style(5.0e-13) == "5×10⁻¹³ m⁻²ᐟ³"
+    # Fractional mantissa → 1 decimal place.
+    assert _fmt_cn2_book_style(1.7e-14) == "1.7×10⁻¹⁴ m⁻²ᐟ³"
+    # Edge cases all return the en-dash placeholder.
+    assert _fmt_cn2_book_style(0.0) == "—"
+    assert _fmt_cn2_book_style(-1.0) == "—"
+    assert _fmt_cn2_book_style(float("nan")) == "—"

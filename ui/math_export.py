@@ -166,6 +166,52 @@ def _render_constants_md() -> str:
     return "\n".join(chunks)
 
 
+def _render_bibliography_md() -> str:
+    """Render the Bibliography & references section as Markdown.
+
+    Mirrors ``ui.outputs._render_bibliography_section`` so the UI and
+    the Markdown export read identically. Two tables: 13 cited
+    primary references then 10 supplementary canonical books.
+    """
+    from ui.bibliography import (
+        PRIMARY_REFERENCES, SUPPLEMENTARY_REFERENCES,
+    )
+
+    chunks: list[str] = ["## Bibliography & references", ""]
+    chunks.append(
+        "_Every formula in this tool traces to one of the primary "
+        "references below. Supplementary works are widely-used "
+        "canonical texts for users who want to study the field "
+        "deeper._"
+    )
+    chunks.append("")
+
+    def _table(entries) -> None:
+        chunks.append(
+            "| # | Author(s) | Title | Year | Publisher | Where used / topic |"
+        )
+        chunks.append("|---|---|---|---|---|---|")
+        for i, e in enumerate(entries, start=1):
+            cells = [
+                str(i),
+                e.authors.replace("|", "\\|"),
+                f"*{e.title.replace('|', '\\|')}*",
+                e.year.replace("|", "\\|"),
+                e.publisher.replace("|", "\\|"),
+                e.used_for.replace("|", "\\|"),
+            ]
+            chunks.append("| " + " | ".join(cells) + " |")
+        chunks.append("")
+
+    chunks.append("### Primary references (cited in physics modules)")
+    chunks.append("")
+    _table(PRIMARY_REFERENCES)
+    chunks.append("### Supplementary reading")
+    chunks.append("")
+    _table(SUPPLEMENTARY_REFERENCES)
+    return "\n".join(chunks)
+
+
 def _render_worked_example_md() -> str:
     walkthrough = compute_worked_example()
     chunks: list[str] = ["## Worked example — c_uas at 1 km", ""]
@@ -247,6 +293,7 @@ def to_markdown(result: dict, *, include_full: bool = True) -> str:
             chunks.append(f"- [{module_id} — {title}](#{slug})")
     chunks.append("- [Constants & sources](#constants--physical-sources)")
     chunks.append("- [Worked example — c_uas at 1 km](#worked-example--c_uas-at-1-km)")
+    chunks.append("- [Bibliography & references](#bibliography--references)")
     chunks.append("")
 
     # Glossary first.
@@ -276,6 +323,10 @@ def to_markdown(result: dict, *, include_full: bool = True) -> str:
 
     # Worked example.
     chunks.append(_render_worked_example_md())
+    chunks.append("")
+
+    # Bibliography & references — mirror of the on-screen section.
+    chunks.append(_render_bibliography_md())
     chunks.append("")
 
     return "\n".join(chunks)

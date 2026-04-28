@@ -239,6 +239,31 @@ def _all_nan(values: list[float]) -> bool:
     )
 
 
+def _fmt_cn2_book_style(value: float) -> str:
+    """Format Cn² as e.g. ``"1×10⁻¹⁵ m⁻²ᐟ³"`` using Unicode superscripts.
+
+    Used by Plot O legends to display Cn² in book-style scientific
+    notation (matches how Andrews & Phillips, Tatarski, etc. write
+    refractive-index structure constants in print) instead of the
+    code-style ``"1e-15"`` form.
+
+    Edge cases: returns ``"—"`` for non-positive or non-finite inputs.
+    Mantissa rounds to integer when it's effectively whole (e.g.
+    ``1.0e-15`` → ``"1×10⁻¹⁵"``); otherwise to 1 decimal (e.g.
+    ``1.7e-14`` → ``"1.7×10⁻¹⁴"``).
+    """
+    if value is None or value <= 0 or not math.isfinite(value):
+        return "—"
+    exp = int(math.floor(math.log10(value)))
+    mant = value / (10 ** exp)
+    sup = str.maketrans("-0123456789", "⁻⁰¹²³⁴⁵⁶⁷⁸⁹")
+    if abs(mant - round(mant)) < 1.0e-3:
+        mant_str = f"{round(mant):d}"
+    else:
+        mant_str = f"{mant:.1f}"
+    return f"{mant_str}×10{str(exp).translate(sup)} m⁻²ᐟ³"
+
+
 # ---------------------------------------------------------------------------
 # Always-render frame helper.
 # ---------------------------------------------------------------------------
@@ -1982,12 +2007,33 @@ def plot_k_operational_envelope(envelope) -> go.Figure:
     v = list(envelope.v_tgt_axis)
     grid = [list(row) for row in envelope.margin_grid]
 
+    # Two-layer rendering (2026-04-28):
+    #   Layer 0 — gray underlay covering the entire grid extent. NaN
+    #     cells in the colored layer above render transparent and so
+    #     reveal this gray fill, making "skipped" cells (dwell > 5 min)
+    #     read as a uniform mid-gray instead of blending into the page
+    #     background. xgap/ygap=0 prevents thin gray gridlines from
+    #     showing between the colored cells.
+    #   Layer 1 — the actual margin-coloured heatmap (red/amber/green).
+    fig = go.Figure()
+    fig.add_trace(go.Heatmap(
+        x=R_km,
+        y=v,
+        z=[[1.0 for _ in row] for row in grid],
+        showscale=False,
+        hoverinfo="skip",
+        colorscale=[
+            [0.0, palette["border.strong"]],
+            [1.0, palette["border.strong"]],
+        ],
+        xgap=0, ygap=0,
+    ))
     # Diverging colour scale centred on 0 % margin: red below, green
     # above, with the zero-crossing pinned to the centre by setting
     # ``zmid=0`` on the heatmap. The amber band 0–30 % is implicit
     # in the colour interpolation; the per-cell hover always reads
     # the verdict tier explicitly.
-    fig = go.Figure(data=go.Heatmap(
+    fig.add_trace(go.Heatmap(
         x=R_km,
         y=v,
         z=grid,
@@ -2012,6 +2058,7 @@ def plot_k_operational_envelope(envelope) -> go.Figure:
             tickvals=[-100, 0, 30, 200],
             ticktext=["−100", "0", "+30", "+200"],
         ),
+        xgap=0, ygap=0,
     ))
 
     # "You are here" — current-scenario reference dot.
@@ -2039,8 +2086,33 @@ def plot_k_operational_envelope(envelope) -> go.Figure:
         title=title,
         height=height,
         hovermode="closest",
+        annotations=[dict(
+            text="Gray = engagement window > 5 min "
+                 "(skipped, not computed)",
+            xref="paper", yref="paper",
+            x=0.0, y=-0.18,
+            showarrow=False, xanchor="left",
+            font=dict(size=11, color=palette["fg.tertiary"]),
+        )],
+        margin=dict(b=80, l=70, r=70, t=70),
     )
-    fig.update_xaxes(title_text=xtitle, type="log")
+    # Explicit log-decade tickvals (2026-04-28). Previously
+    # ``update_xaxes(type="log")`` alone caused Plotly to render BOTH
+    # auto-ticks from the heatmap data extent AND log-scale minor
+    # ticks, producing the duplicated "1, 2, 3, … 10" row at the
+    # bottom of the plot. ``tickmode="array"`` with explicit values
+    # silences the auto-tick generator.
+    log_ticks = [0.1, 0.3, 1, 3, 10, 30, 100]
+    if R_km:
+        rmin, rmax = min(R_km) * 0.5, max(R_km) * 2.0
+        log_ticks = [t for t in log_ticks if rmin <= t <= rmax]
+    fig.update_xaxes(
+        title_text=xtitle, type="log",
+        tickmode="array",
+        tickvals=log_ticks,
+        ticktext=[f"{t:g}" for t in log_ticks],
+        minor=dict(showgrid=False, ticks=""),
+    )
     fig.update_yaxes(title_text=ytitle)
     return fig
 
@@ -3948,7 +4020,10 @@ def plot_n_jitter_sensitivity(curve) -> go.Figure:
     render frame fallback.
     """
     height = PLOT_HEIGHTS["hero"]
-    title = "Burn-through time vs Jitter"
+    title = (
+        "Burn-through time vs Jitter — "
+        "How tracking accuracy affects burn-through time?"
+    )
     xtitle = "σ_jit"
     ytitle = "τ_BT (s)"
 
@@ -4339,8 +4414,11 @@ def plot_o_peak_irradiance_vs_cn2(curves) -> go.Figure:
     for idx, (label, cn2_value, per_R) in enumerate(curves.reference_curves):
         color = palette[ref_palette_keys[idx % len(ref_palette_keys)]]
         dash = ref_dashes[idx % len(ref_dashes)]
-        # Format the legend label with the Cn² in scientific notation.
-        legend_label = f"{label} (Cn² = {cn2_value:.0e} m⁻²/³)"
+        # Format the legend label with the Cn² in book-style scientific
+        # notation (e.g. "1×10⁻¹⁵ m⁻²ᐟ³") rather than the code-style
+        # "1e-15" form. Matches how Andrews & Phillips / Tatarski write
+        # the refractive-index structure constant in print.
+        legend_label = f"{label} (Cn² = {_fmt_cn2_book_style(cn2_value)})"
         fig.add_trace(go.Scatter(
             x=list(curves.range_axis_km),
             y=list(per_R),
@@ -4361,7 +4439,7 @@ def plot_o_peak_irradiance_vs_cn2(curves) -> go.Figure:
         x=list(curves.range_axis_km),
         y=list(cur_per_R),
         mode="lines+markers",
-        name=f"Current scenario (Cn² = {cur_cn2:.2e} m⁻²/³)",
+        name=f"Current scenario (Cn² = {_fmt_cn2_book_style(cur_cn2)})",
         line=dict(color=palette["fg.primary"], width=2.8),
         marker=dict(
             size=7, color=palette["fg.primary"],
@@ -4409,14 +4487,22 @@ def plot_o_peak_irradiance_vs_cn2(curves) -> go.Figure:
     i_tickvals = [0.001, 0.01, 0.1, 1, 10, 100, 1000, 10000, 100000]
     i_ticktext = [f"{v:g} W/cm²" for v in i_tickvals]
 
+    # Legend repositioned 2026-04-28: previous horizontal-above-plot
+    # placement (y=1.02) overlapped the long plot title visually. Now
+    # vertical, anchored just outside the plot area on the right with
+    # a panel-style background so the six entries (5 reference + 1
+    # current scenario) read cleanly without colliding with the title.
     fig.update_layout(
         title=title,
         height=height,
         hovermode="closest",
         legend=dict(
-            orientation="h", yanchor="bottom", y=1.02,
-            xanchor="right", x=1.0,
+            orientation="v", yanchor="top", y=1.0,
+            xanchor="left", x=1.02,
+            bgcolor=palette["bg.surface"],
+            bordercolor=palette["border.subtle"], borderwidth=1,
         ),
+        margin=dict(t=60, r=270, b=60, l=70),
     )
     fig.update_xaxes(
         title_text=xtitle, type="log",
@@ -4487,7 +4573,16 @@ def plot_p_peak_irradiance_vs_geometry(curves) -> go.Figure:
         # engagement).
         {"color_key": "accent.primary", "dash": "longdash", "symbol": "triangle-up"},
     ]
-    for idx, (alpha_deg, t_axis, I_axis) in enumerate(curves.reference_curves):
+    # Track kill markers per angle for the combined "Burn-through"
+    # trace (one Scatter with N points where N ≤ 5; angles whose
+    # geometry doesn't deliver enough flux to burn through are simply
+    # absent from this trace).
+    kill_xs: list[float] = []
+    kill_ys: list[float] = []
+    kill_colors: list[str] = []
+    kill_hovers: list[str] = []
+    for idx, ref in enumerate(curves.reference_curves):
+        alpha_deg, t_axis, I_axis = ref[0], ref[1], ref[2]
         style = geometry_styles[idx % len(geometry_styles)]
         color = palette[style["color_key"]]
         legend_label = f"{alpha_deg:.0f}° crossing"
@@ -4503,6 +4598,37 @@ def plot_p_peak_irradiance_vs_geometry(curves) -> go.Figure:
                 f"{alpha_deg:.0f}° · t %{{x:.1f}} s · "
                 "I_peak %{y:.2g} W/cm²<extra></extra>"
             ),
+        ))
+        # Per-curve kill marker → contribute to the combined trace.
+        markers = getattr(curves, "reference_kill_markers", None) or ()
+        if idx < len(markers) and markers[idx] is not None:
+            t_kill, I_peak_kill = markers[idx]
+            kill_xs.append(float(t_kill))
+            kill_ys.append(float(I_peak_kill))
+            kill_colors.append(color)
+            kill_hovers.append(
+                f"{alpha_deg:.0f}° burn-through · t = {t_kill:.2f} s · "
+                f"I_peak = {I_peak_kill:.2g} W/cm²"
+            )
+
+    # ── Reference-curve kill markers ─────────────────────────────
+    # One trace, N ≤ 5 points: where each reference geometry would
+    # achieve burn-through given the user's material + power. Marker
+    # colour matches the curve's colour for instant visual association.
+    # Hidden when there are no killable curves (e.g., unknown material
+    # or all geometries flux-starved).
+    if kill_xs:
+        fig.add_trace(go.Scatter(
+            x=kill_xs, y=kill_ys,
+            mode="markers",
+            name="Burn-through (per geometry)",
+            marker=dict(
+                size=12, color=kill_colors, symbol="star",
+                line=dict(color=palette["bg.base"], width=1.5),
+            ),
+            customdata=kill_hovers,
+            hovertemplate="%{customdata}<extra></extra>",
+            showlegend=True,
         ))
 
     # ── Current-scenario curve (user's chain trajectory) ──────────
@@ -4523,13 +4649,49 @@ def plot_p_peak_irradiance_vs_geometry(curves) -> go.Figure:
                 "I_peak %{y:.2g} W/cm²<extra></extra>"
             ),
         ))
-        # Star marker at engagement-end so the user can see where
-        # their actual trajectory finishes vs the reference family.
+        # Star marker at the actual KILL moment (τ_BT) — not the
+        # trajectory end. Falls back to trajectory end only when the
+        # chain produced no kill verdict (current_tau_BT_s is None).
+        # The interpolation finds the I_peak value at exactly t = τ_BT
+        # so the star sits ON the white trajectory line.
         if curves.current_t_axis_s and curves.current_I_peak_wpcm2_axis:
-            t_end = curves.current_t_axis_s[-1]
-            I_end = curves.current_I_peak_wpcm2_axis[-1]
+            t_axis_s = curves.current_t_axis_s
+            I_axis = curves.current_I_peak_wpcm2_axis
+            tau_BT = getattr(curves, "current_tau_BT_s", None)
+            if tau_BT is not None and t_axis_s[0] <= tau_BT <= t_axis_s[-1]:
+                # Linear-interpolate I_peak at t = τ_BT.
+                t_star = float(tau_BT)
+                # Find bracketing indices.
+                lo = 0
+                for k in range(1, len(t_axis_s)):
+                    if t_axis_s[k] >= t_star:
+                        lo = k - 1
+                        break
+                else:
+                    lo = len(t_axis_s) - 2
+                hi = lo + 1
+                t_lo, t_hi = float(t_axis_s[lo]), float(t_axis_s[hi])
+                I_lo, I_hi = float(I_axis[lo]), float(I_axis[hi])
+                if t_hi > t_lo:
+                    frac = (t_star - t_lo) / (t_hi - t_lo)
+                else:
+                    frac = 0.0
+                I_star = I_lo + frac * (I_hi - I_lo)
+                star_label_t_s = t_star
+                star_label_I = I_star
+                star_event = "burn-through"
+            else:
+                # No chain kill verdict → fall back to trajectory end.
+                star_label_t_s = float(t_axis_s[-1])
+                star_label_I = float(I_axis[-1])
+                star_event = "engagement-end"
+            R_kill_prefix = (
+                f"R_at_kill = {curves.current_R_at_kill_km:.2f} km · "
+                if curves.current_R_at_kill_km is not None
+                else ""
+            )
             fig.add_trace(go.Scatter(
-                x=[t_end], y=[I_end],
+                x=[star_label_t_s], y=[star_label_I],
                 mode="markers+text",
                 text=["Current scenario"],
                 textposition="top right",
@@ -4541,13 +4703,9 @@ def plot_p_peak_irradiance_vs_geometry(curves) -> go.Figure:
                 textfont=dict(color=palette["fg.primary"], size=11),
                 name="You are here",
                 hovertemplate=(
-                    f"R_at_kill = "
-                    f"{curves.current_R_at_kill_km:.2f} km · "
-                    if curves.current_R_at_kill_km is not None
-                    else ""
-                ) + (
-                    f"engagement-end at t = {t_end:.1f} s · "
-                    f"I_peak = {I_end:.2g} W/cm²<extra></extra>"
+                    f"{R_kill_prefix}"
+                    f"{star_event} at t = {star_label_t_s:.2f} s · "
+                    f"I_peak = {star_label_I:.2g} W/cm²<extra></extra>"
                 ),
                 showlegend=False,
             ))
@@ -4571,7 +4729,8 @@ def plot_p_peak_irradiance_vs_geometry(curves) -> go.Figure:
     # curve runs the full t_max (180 s) and squashes everything else
     # into the left third.
     head_on_t_end: float | None = None
-    for alpha_deg, t_axis, _ in curves.reference_curves:
+    for ref in curves.reference_curves:
+        alpha_deg, t_axis = ref[0], ref[1]
         if alpha_deg == 0.0 and t_axis:
             head_on_t_end = float(t_axis[-1])
             break
@@ -4579,8 +4738,8 @@ def plot_p_peak_irradiance_vs_geometry(curves) -> go.Figure:
         # No head-on reference; fall back to whichever curve has the
         # longest finite portion (typically 30°).
         head_on_t_end = max(
-            (float(t_axis[-1]) for _, t_axis, _ in curves.reference_curves
-             if t_axis),
+            (float(ref[1][-1]) for ref in curves.reference_curves
+             if ref[1]),
             default=60.0,
         )
     x_max = max(60.0, head_on_t_end * 1.3)

@@ -132,15 +132,22 @@ def test_compute_envelope_kills_in_short_R_high_v_box():
 
 
 def test_plot_k_smoke():
-    """Plot K renders against a real envelope grid."""
+    """Plot K renders against a real envelope grid.
+
+    Trace layout (post-2026-04-28 visual fix):
+      0. Gray underlay heatmap (covers full grid extent)
+      1. Coloured margin heatmap (NaN cells render transparent →
+         reveal the gray underlay)
+      2. "You are here" scatter marker
+    """
     from ui.plots import plot_k_operational_envelope
     env = compute_operational_envelope(_v2_inputs(), n_R=3, n_v=3, **_FAST_KW)
     fig = plot_k_operational_envelope(env)
-    # Heatmap trace + "you are here" scatter.
-    assert len(fig.data) == 2
-    # Trace 0 is the heatmap, trace 1 is the marker.
-    assert fig.data[0].type == "heatmap"
-    assert fig.data[1].type == "scatter"
+    # 2 heatmaps + 1 scatter marker.
+    assert len(fig.data) == 3
+    assert fig.data[0].type == "heatmap"  # gray underlay
+    assert fig.data[1].type == "heatmap"  # coloured margin layer
+    assert fig.data[2].type == "scatter"  # "you are here" star
     # X-axis is log.
     assert fig.layout.xaxis.type == "log"
 
@@ -149,6 +156,57 @@ def test_plot_k_none_envelope_renders_empty_frame():
     from ui.plots import plot_k_operational_envelope
     fig = plot_k_operational_envelope(None)
     assert len(fig.data) == 0
+
+
+# ---------------------------------------------------------------------------
+# Phase: visual fixes (2026-04-28)
+# ---------------------------------------------------------------------------
+def test_plot_k_underlay_is_gray_and_hides_colorbar():
+    """The gray underlay heatmap (trace 0) must hide its colorbar
+    (showscale=False) and ignore hover, so it doesn't compete with
+    the coloured layer for visual attention."""
+    from ui.plots import plot_k_operational_envelope
+    env = compute_operational_envelope(_v2_inputs(), n_R=3, n_v=3, **_FAST_KW)
+    fig = plot_k_operational_envelope(env)
+    underlay = fig.data[0]
+    assert underlay.showscale is False
+    assert underlay.hoverinfo == "skip"
+
+
+def test_plot_k_x_axis_uses_explicit_tickvals():
+    """Pre-fix, ``update_xaxes(type='log')`` alone caused Plotly to
+    render TWO overlapping tick rows (auto + log-decade). After
+    setting ``tickmode='array'`` with explicit tickvals, only one
+    tick row appears."""
+    from ui.plots import plot_k_operational_envelope
+    env = compute_operational_envelope(_v2_inputs(), n_R=3, n_v=3, **_FAST_KW)
+    fig = plot_k_operational_envelope(env)
+    assert fig.layout.xaxis.tickmode == "array"
+    # At least 2 tickvals (≥ 1 decade visible).
+    assert len(fig.layout.xaxis.tickvals or ()) >= 2
+
+
+def test_plot_k_caption_explains_gray_cells():
+    """A short annotation under the plot tells the user the gray
+    cells are skipped (dwell > 5 min) rather than render bugs."""
+    from ui.plots import plot_k_operational_envelope
+    env = compute_operational_envelope(_v2_inputs(), n_R=3, n_v=3, **_FAST_KW)
+    fig = plot_k_operational_envelope(env)
+    annot_texts = [a.text for a in (fig.layout.annotations or [])]
+    assert any("Gray =" in t for t in annot_texts), (
+        f"no caption explains gray cells; annotations={annot_texts}"
+    )
+
+
+def test_plot_k_cells_have_no_gap():
+    """Both heatmap layers use xgap=ygap=0 so adjacent coloured cells
+    abut without thin gray gridlines between them."""
+    from ui.plots import plot_k_operational_envelope
+    env = compute_operational_envelope(_v2_inputs(), n_R=3, n_v=3, **_FAST_KW)
+    fig = plot_k_operational_envelope(env)
+    for trace in fig.data[:2]:  # both heatmaps
+        assert (trace.xgap or 0) == 0
+        assert (trace.ygap or 0) == 0
 
 
 def test_default_bounds_locked_to_200m_12km():
