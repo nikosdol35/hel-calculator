@@ -193,9 +193,34 @@ def test_plot_k_caption_explains_gray_cells():
     env = compute_operational_envelope(_v2_inputs(), n_R=3, n_v=3, **_FAST_KW)
     fig = plot_k_operational_envelope(env)
     annot_texts = [a.text for a in (fig.layout.annotations or [])]
-    assert any("Gray =" in t for t in annot_texts), (
-        f"no caption explains gray cells; annotations={annot_texts}"
+    # Caption must mention BOTH the visual cue ("Gray cells") and the
+    # cutoff threshold ("5 min") so the user understands what they're
+    # looking at and why.
+    combined = " ".join(annot_texts)
+    assert "Gray cells" in combined and "5 min" in combined, (
+        f"caption should explain gray cells + 5 min cutoff; "
+        f"annotations={annot_texts}"
     )
+
+
+def test_plot_k_skipped_cells_have_helpful_hover():
+    """NaN cells now read 'Skipped — engagement window > 5 min' in
+    the hover instead of the misleading default 'margin null%'."""
+    from ui.plots import plot_k_operational_envelope
+    env = compute_operational_envelope(_v2_inputs(), n_R=3, n_v=3, **_FAST_KW)
+    fig = plot_k_operational_envelope(env)
+    # Trace 1 is the colored heatmap (trace 0 is the gray underlay).
+    coloured = fig.data[1]
+    assert coloured.customdata is not None, (
+        "colored heatmap must carry customdata for per-cell hover text"
+    )
+    # Every cell's customdata is either the margin readout or the
+    # skipped-cell explanation — never anything else.
+    flat = [cell for row in coloured.customdata for cell in row]
+    for cell_text in flat:
+        assert ("margin" in cell_text) or ("Skipped" in cell_text), (
+            f"unexpected hover text: {cell_text!r}"
+        )
 
 
 def test_plot_k_cells_have_no_gap():

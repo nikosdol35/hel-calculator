@@ -2028,6 +2028,20 @@ def plot_k_operational_envelope(envelope) -> go.Figure:
         ],
         xgap=0, ygap=0,
     ))
+    # Per-cell hover text — NaN cells (skipped because dwell > 5 min)
+    # now read "Skipped — engagement window > 5 min" instead of the
+    # confusing default "margin null%". Finite cells keep the
+    # margin-percent format.
+    hover_text: list[list[str]] = []
+    for row in grid:
+        hover_row: list[str] = []
+        for cell in row:
+            if cell is None or (isinstance(cell, float) and math.isnan(cell)):
+                hover_row.append("Skipped — engagement window > 5 min")
+            else:
+                hover_row.append(f"margin {float(cell):+.0f}%")
+        hover_text.append(hover_row)
+
     # Diverging colour scale centred on 0 % margin: red below, green
     # above, with the zero-crossing pinned to the centre by setting
     # ``zmid=0`` on the heatmap. The amber band 0–30 % is implicit
@@ -2049,9 +2063,10 @@ def plot_k_operational_envelope(envelope) -> go.Figure:
             [(1.0 / 3.0) + (30.0 / 300.0) + 0.001, palette["status.ok"]],
             [1.0, palette["status.ok"]],
         ],
+        customdata=hover_text,
         hovertemplate=(
             "R_detect %{x:.2f} km · v_tgt %{y:.0f} m/s · "
-            "margin %{z:+.0f}%<extra></extra>"
+            "%{customdata}<extra></extra>"
         ),
         colorbar=dict(
             title=dict(text="Margin (%)"),
@@ -2087,8 +2102,12 @@ def plot_k_operational_envelope(envelope) -> go.Figure:
         height=height,
         hovermode="closest",
         annotations=[dict(
-            text="Gray = engagement window > 5 min "
-                 "(skipped, not computed)",
+            text=(
+                "Gray cells: target so slow at this range that "
+                "the engagement window exceeds 5 minutes — "
+                "skipped (not operationally meaningful, and the "
+                "long-trajectory M8 PDE solver is expensive)."
+            ),
             xref="paper", yref="paper",
             x=0.0, y=-0.18,
             showarrow=False, xanchor="left",
