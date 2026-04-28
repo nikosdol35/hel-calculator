@@ -4516,7 +4516,7 @@ def plot_p_peak_irradiance_vs_geometry(curves) -> go.Figure:
             x=list(curves.current_t_axis_s),
             y=list(curves.current_I_peak_wpcm2_axis),
             mode="lines",
-            name="Current scenario (PDE-accurate)",
+            name="Current scenario",
             line=dict(color=palette["fg.primary"], width=2.8),
             hovertemplate=(
                 "Current · t %{x:.1f} s · "
@@ -4565,7 +4565,26 @@ def plot_p_peak_irradiance_vs_geometry(curves) -> go.Figure:
             xanchor="right", x=1.0,
         ),
     )
-    fig.update_xaxes(title_text=xtitle)
+    # Cap the x-axis at ~1.3× the head-on (0°) curve's engagement
+    # duration so the interesting region (head-on closing + angled
+    # crossings) fills most of the plot. Without a cap, the 90°
+    # curve runs the full t_max (180 s) and squashes everything else
+    # into the left third.
+    head_on_t_end: float | None = None
+    for alpha_deg, t_axis, _ in curves.reference_curves:
+        if alpha_deg == 0.0 and t_axis:
+            head_on_t_end = float(t_axis[-1])
+            break
+    if head_on_t_end is None:
+        # No head-on reference; fall back to whichever curve has the
+        # longest finite portion (typically 30°).
+        head_on_t_end = max(
+            (float(t_axis[-1]) for _, t_axis, _ in curves.reference_curves
+             if t_axis),
+            default=60.0,
+        )
+    x_max = max(60.0, head_on_t_end * 1.3)
+    fig.update_xaxes(title_text=xtitle, range=[0.0, x_max])
     fig.update_yaxes(
         title_text=ytitle, type="log",
         tickvals=i_tickvals, ticktext=i_ticktext,

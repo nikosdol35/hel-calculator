@@ -1084,33 +1084,38 @@ def _render_geometry_diagrams(
     cards_html: list[str] = []
     for alpha_deg, color_key, title, line2 in _GEOMETRY_CARDS:
         arrow_color = palette.get(color_key, palette["fg.secondary"])
-        # Velocity arrow geometry — see plan §4. Gun (20,55), Target
-        # (110,55) on a 140×90 viewBox. Arrow length = 30 px,
-        # endpoint = (target_x − 30·cos α, target_y − 30·sin α).
-        # SVG y-axis points DOWN, so subtracting sin α makes the
-        # arrow point "up" (away from gun) on screen.
+        # Velocity arrow geometry — see plan §4. Beam director (20,55),
+        # Target (110,55) on a 140×90 viewBox. Arrow length 25 px from
+        # the target's circle EDGE (radius 5). SVG y-axis points DOWN
+        # so subtracting sin α makes the arrow point "up" (away from
+        # the beam director) on screen.
         gun_x, gun_y = 20.0, 55.0
         tgt_x, tgt_y = 110.0, 55.0
+        target_radius = 5.0
+        arrow_length = 25.0   # the visible arrow shaft length
         alpha_rad = math.radians(alpha_deg)
-        arrow_end_x = tgt_x - 30.0 * math.cos(alpha_rad)
-        arrow_end_y = tgt_y - 30.0 * math.sin(alpha_rad)
+        cos_a = math.cos(alpha_rad)
+        sin_a = math.sin(alpha_rad)
+        # Arrow START — outside the target circle, at the edge in the
+        # velocity direction. Looks like the arrow "emerges from" the
+        # target rather than passing through it.
+        arrow_start_x = tgt_x - target_radius * cos_a
+        arrow_start_y = tgt_y - target_radius * sin_a
+        # Arrow END — start + length × (-cos α, -sin α).
+        arrow_end_x = arrow_start_x - arrow_length * cos_a
+        arrow_end_y = arrow_start_y - arrow_length * sin_a
 
         # Closest-approach distance per the geometry (matches
-        # physics/geometry_family.py's truncation rules).
+        # physics/geometry_family.py's truncation rules). Always
+        # formatted in metres for consistency across the row — mixing
+        # "750 m" with "1.06 km" was visually jarring.
         if alpha_deg == 0.0:
             closest_m = R_min_m
         elif alpha_deg >= 90.0:
             closest_m = R_detect_m
         else:
-            closest_m = R_detect_m * math.sin(alpha_rad)
-        # Format with thousand-separator and unit; rounded to int m.
-        if closest_m >= 1000.0:
-            closest_str = f"{closest_m / 1000.0:.2f} km".rstrip("0").rstrip(".")
-            if "km" not in closest_str:
-                closest_str += " km"
-        else:
-            closest_str = f"{closest_m:.0f} m"
-        line1 = f"Closest approach: {closest_str}"
+            closest_m = R_detect_m * sin_a
+        line1 = f"Closest approach: {closest_m:.0f} m"
 
         # Per-card SVG. We use a unique marker id per card so the
         # arrowhead picks up the angle-specific colour. Stroke + fill
@@ -1134,19 +1139,20 @@ def _render_geometry_diagrams(
   <line x1="{gun_x}" y1="{gun_y}" x2="{tgt_x}" y2="{tgt_y}"
         stroke="{los_color}" stroke-width="1"
         stroke-dasharray="3,3"/>
-  <!-- Beam director (filled circle) + label. Short label "Director"
-       used inside the small SVG; captions / intro use the full
-       "beam director" wording. -->
+  <!-- Beam director (filled circle) + label. Short label "BD" inside
+       the small SVG; captions / intro use the full "beam director"
+       wording. -->
   <circle cx="{gun_x}" cy="{gun_y}" r="4" fill="{gun_color}"/>
   <text x="{gun_x}" y="{gun_y + 18:.1f}" text-anchor="middle"
-        font-size="9" fill="{label_color}">Director</text>
+        font-size="9" fill="{label_color}">BD</text>
   <!-- Target (open circle) + label -->
-  <circle cx="{tgt_x}" cy="{tgt_y}" r="5" fill="none"
+  <circle cx="{tgt_x}" cy="{tgt_y}" r="{target_radius}" fill="none"
           stroke="{target_color}" stroke-width="1.5"/>
   <text x="{tgt_x}" y="{tgt_y + 18:.1f}" text-anchor="middle"
         font-size="9" fill="{label_color}">Target</text>
-  <!-- Velocity arrow (angle-coloured) -->
-  <line x1="{tgt_x}" y1="{tgt_y}"
+  <!-- Velocity arrow (angle-coloured). Starts at the target circle
+       EDGE (not the centre) so it visually "emerges from" the target. -->
+  <line x1="{arrow_start_x:.2f}" y1="{arrow_start_y:.2f}"
         x2="{arrow_end_x:.2f}" y2="{arrow_end_y:.2f}"
         stroke="{arrow_color}" stroke-width="2.5"
         marker-end="url(#{marker_id})"/>
