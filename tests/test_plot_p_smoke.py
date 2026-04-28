@@ -1,0 +1,86 @@
+"""Smoke tests for Plot P — peak irradiance vs target approach geometry.
+
+Verifies the plot constructor renders against a real chain result,
+returns the expected number of traces, and falls back to the empty
+frame for None / empty inputs.
+"""
+from __future__ import annotations
+
+import pytest
+
+from physics.geometry_family import compute_geometry_family_curves
+from physics.orchestrator import run_full_chain
+from tests.golden.scenarios import C_UAS_1500M
+
+
+def _v2_inputs(**overrides) -> dict:
+    inputs = dict(C_UAS_1500M)
+    inputs.pop("R", None)
+    inputs.pop("v_perp", None)
+    inputs.update({
+        "R_detect": 1500, "R_min": 100,
+        "engagement_geometry": "head_on",
+    })
+    inputs.update(overrides)
+    return inputs
+
+
+def _merged_result(**overrides) -> dict:
+    inputs = _v2_inputs(**overrides)
+    result = run_full_chain(inputs)
+    return {**inputs, **result}
+
+
+def test_plot_p_smoke_real_chain():
+    """Plot P renders against a real v2 chain result with the expected
+    number of traces — 5 reference angles + 1 PDE-accurate user
+    trajectory + 1 star marker = 7 total."""
+    from ui.plots import plot_p_peak_irradiance_vs_geometry
+    curves = compute_geometry_family_curves(_merged_result())
+    fig = plot_p_peak_irradiance_vs_geometry(curves)
+    assert len(fig.data) == 7
+
+
+def test_plot_p_log_y_axis():
+    """Plot P uses a log y-axis (peak irradiance spans multiple decades
+    across geometries)."""
+    from ui.plots import plot_p_peak_irradiance_vs_geometry
+    curves = compute_geometry_family_curves(_merged_result())
+    fig = plot_p_peak_irradiance_vs_geometry(curves)
+    assert fig.layout.yaxis.type == "log"
+
+
+def test_plot_p_handles_none_curves():
+    """None input → always-render empty frame, not a crash."""
+    from ui.plots import plot_p_peak_irradiance_vs_geometry
+    fig = plot_p_peak_irradiance_vs_geometry(None)
+    assert len(fig.data) == 0
+
+
+def test_plot_p_legend_labels_include_angles():
+    """Legend traces are labelled by crossing angle (0°, 30°, …)."""
+    from ui.plots import plot_p_peak_irradiance_vs_geometry
+    curves = compute_geometry_family_curves(_merged_result())
+    fig = plot_p_peak_irradiance_vs_geometry(curves)
+    names = [t.name for t in fig.data if t.name]
+    # Reference traces include 5 angle labels.
+    assert any("0° crossing" in n for n in names)
+    assert any("30° crossing" in n for n in names)
+    assert any("90° crossing" in n for n in names)
+    # Current scenario is labelled.
+    assert any("Current scenario" in n for n in names)
+
+
+def test_plot_p_renders_when_user_trajectory_missing():
+    """If the chain output lacks trajectory_t / trajectory_I_peak (v1.x
+    backward-compat scenarios in tests), the plot still renders the
+    5 reference curves plus an empty user-curve area."""
+    from ui.plots import plot_p_peak_irradiance_vs_geometry
+    merged = _merged_result()
+    # Strip the trajectory series — simulate a v1.x-style result.
+    merged.pop("trajectory_t", None)
+    merged.pop("trajectory_I_peak", None)
+    curves = compute_geometry_family_curves(merged)
+    fig = plot_p_peak_irradiance_vs_geometry(curves)
+    # Only the 5 reference traces should remain (no user curve, no star).
+    assert len(fig.data) == 5

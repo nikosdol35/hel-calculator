@@ -79,6 +79,12 @@ TAB_LABELS: dict[str, str] = {
     "overview":       "Overview",
     "engagement":     "Engagement",
     "target_effects": "Target effects",
+    # Plot P / new "Geometry" tab (2026-04-28): comparative diagnostic
+    # showing how peak irradiance evolves for 5 reference target
+    # approach geometries (head-on, 30°, 45°, 60°, perpendicular)
+    # plus the user's actual chain trajectory. Sits between Target
+    # effects and Safety per user request.
+    "geometry":       "Geometry",
     "safety":         "Safety",
     "atmosphere":     "Atmosphere",
     "diagnostics":    "Diagnostics",
@@ -1062,6 +1068,24 @@ EXPLANATIONS: dict[str, str] = {
         "heat map underneath shows where energy has actually been "
         "deposited. Try increasing σ_jit (Beam director panel) to "
         "make the wander obvious."
+    ),
+    "plot_p_intro_pre": (
+        "Peak irradiance during the engagement at five reference "
+        "target approach geometries plus your current scenario. "
+        "Crossing angle = angle between the target's velocity and "
+        "the line-of-sight at detection. 0° = head-on closing, "
+        "90° = perpendicular fly-by. Use this to see how robust "
+        "your engagement is to off-axis attackers."
+    ),
+    "plot_p_intro": (
+        "Reference curves use a fast M5+M7-only path (skips "
+        "blooming and burn-through, like Plot O's Cn² family). "
+        "Your current scenario uses the full chain (PDE-accurate) "
+        "and may sit slightly off the references in absolute level "
+        "— the comparative shape across geometries is what matters. "
+        "Head-on (0°) closes deeply and gets the most peak "
+        "intensity; perpendicular (90°) flies past at constant "
+        "range and only loses intensity over time."
     ),
     "plot_o_intro_pre": (
         "Peak irradiance vs detection range at five reference "

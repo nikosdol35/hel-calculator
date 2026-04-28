@@ -1034,6 +1034,56 @@ def _material_comparison_cached(key: tuple) -> dict[str, float]:
 
 
 # =============================================================================
+# Geometry tab — peak irradiance for varying target approach angles
+# (Plot P, 2026-04-28). Sibling of Plot O (Cn² family) on the
+# visualization layer; doesn't touch the chain.
+# =============================================================================
+
+def render_tab_geometry_comparison(result: dict) -> None:
+    """Render the Geometry tab — Plot P (peak irradiance vs engagement
+    time, family of approach angles).
+
+    Reads the chain's by_module + trajectory_t / trajectory_I_peak
+    series directly from the merged result dict (no recompute, no
+    cache helper). The reference-family compute is sub-second
+    closed-form arithmetic per cell so we render inline. Same
+    fall-through pattern as Plot O / Plot N: KeyError → info banner;
+    any other compute failure → warning banner; the rest of the
+    tab degrades cleanly.
+    """
+    section_header(
+        "Approach geometry — how Peak irradiance varies with target angle"
+    )
+    explanation(EXPLANATIONS["plot_p_intro_pre"])
+
+    if "engagement_geometry" not in result:
+        st.info(
+            "Geometry-comparison plot is not available for this "
+            "scenario — v2.0 trajectory keys are missing."
+        )
+        return
+
+    try:
+        from physics.geometry_family import compute_geometry_family_curves
+        curves = compute_geometry_family_curves(result)
+    except KeyError as exc:
+        st.info(f"Geometry-comparison plot skipped: {exc}")
+        return
+    except Exception as exc:  # pragma: no cover — defensive
+        st.warning(f"Geometry-comparison compute failed: {exc!s}")
+        return
+
+    from ui import plots
+    from ui.theme import PLOTLY_MODEBAR_CONFIG
+
+    fig = plots.plot_p_peak_irradiance_vs_geometry(curves)
+    st.plotly_chart(
+        fig, use_container_width=True, config=PLOTLY_MODEBAR_CONFIG,
+    )
+    explanation(EXPLANATIONS["plot_p_intro"], variant="plot")
+
+
+# =============================================================================
 # Safety tab — both NOHD conventions + laser class
 # =============================================================================
 

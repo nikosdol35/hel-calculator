@@ -555,6 +555,12 @@ if "target_effects" in tabs:
     with tabs["target_effects"]:
         outputs.render_tab_target_effects(merged)
 
+# Plot P (2026-04-28): new "Geometry" tab between Target effects and
+# Safety. Sub-second compute per render, no caching needed.
+if "geometry" in tabs:
+    with tabs["geometry"]:
+        outputs.render_tab_geometry_comparison(merged)
+
 if "safety" in tabs:
     with tabs["safety"]:
         outputs.render_tab_safety(merged)

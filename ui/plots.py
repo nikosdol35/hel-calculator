@@ -4429,6 +4429,133 @@ def plot_o_peak_irradiance_vs_cn2(curves) -> go.Figure:
     return fig
 
 
+# ---------------------------------------------------------------------------
+# Plot P — Peak irradiance vs engagement time, family of crossing geometries.
+# Sibling to Plot O (Cn² family): same multi-trace idiom, but the swept
+# parameter is the target's approach angle (head-on / 30° / 45° / 60° /
+# perpendicular). The user's actual chain trajectory is overlaid as the
+# highlighted "current scenario" curve. Lives on its own "Geometry" tab
+# between Target effects and Safety.
+# ---------------------------------------------------------------------------
+
+def plot_p_peak_irradiance_vs_geometry(curves) -> go.Figure:
+    """Family-of-curves plot: peak irradiance vs engagement time at
+    five reference target approach geometries plus the user's current
+    scenario.
+
+    Mirrors the ``plot_o_peak_irradiance_vs_cn2`` multi-trace idiom.
+    One Scatter trace per α reference (data.{a,b,c} cyclic palette),
+    plus an extra trace for the chain's actual trajectory drawn in
+    the primary colour with a star marker at engagement-end.
+
+    Empty curves → always-render frame fallback.
+    """
+    height = PLOT_HEIGHTS["default"]
+    title = "Peak irradiance — sensitivity to target approach geometry"
+    xtitle = "Engagement time t (s)"
+    ytitle = "Peak irradiance I_peak (W/cm², log)"
+
+    if curves is None or not curves.reference_curves:
+        return _empty_frame(
+            title=title, xtitle=xtitle, ytitle=ytitle,
+            advisory=ADVISORY["infeasible_geometry"], height=height,
+        )
+
+    palette = _active_palette()
+    fig = go.Figure()
+
+    # ── Reference curves (5 angles) ────────────────────────────────
+    # Cycle through data.{a,b,c} + reference; reference curves use
+    # slightly thinner lines (1.6 px) than the user's curve (2.8 px)
+    # so the highlighted scenario stands out.
+    ref_palette_keys = ["data.a", "data.b", "data.c", "data.reference"]
+    ref_dashes = ["solid", "dash", "dot", "dashdot"]
+    for idx, (alpha_deg, t_axis, I_axis) in enumerate(curves.reference_curves):
+        color = palette[ref_palette_keys[idx % len(ref_palette_keys)]]
+        dash = ref_dashes[idx % len(ref_dashes)]
+        legend_label = f"{alpha_deg:.0f}° crossing"
+        fig.add_trace(go.Scatter(
+            x=list(t_axis),
+            y=list(I_axis),
+            mode="lines+markers",
+            name=legend_label,
+            line=dict(color=color, width=1.6, dash=dash),
+            marker=dict(size=4, color=color),
+            connectgaps=False,
+            hovertemplate=(
+                f"{alpha_deg:.0f}° · t %{{x:.1f}} s · "
+                "I_peak %{y:.2g} W/cm²<extra></extra>"
+            ),
+        ))
+
+    # ── Current-scenario curve (user's chain trajectory) ──────────
+    # PDE-accurate via the orchestrator's full M4–M8. May differ from
+    # the reference curves by ~10–20 % in absolute level; caption
+    # discloses the simplification used by the references.
+    if (curves.current_t_axis_s is not None
+            and curves.current_I_peak_wpcm2_axis is not None
+            and len(curves.current_t_axis_s) > 1):
+        fig.add_trace(go.Scatter(
+            x=list(curves.current_t_axis_s),
+            y=list(curves.current_I_peak_wpcm2_axis),
+            mode="lines",
+            name="Current scenario (PDE-accurate)",
+            line=dict(color=palette["fg.primary"], width=2.8),
+            hovertemplate=(
+                "Current · t %{x:.1f} s · "
+                "I_peak %{y:.2g} W/cm²<extra></extra>"
+            ),
+        ))
+        # Star marker at engagement-end so the user can see where
+        # their actual trajectory finishes vs the reference family.
+        if curves.current_t_axis_s and curves.current_I_peak_wpcm2_axis:
+            t_end = curves.current_t_axis_s[-1]
+            I_end = curves.current_I_peak_wpcm2_axis[-1]
+            fig.add_trace(go.Scatter(
+                x=[t_end], y=[I_end],
+                mode="markers+text",
+                text=["Current scenario"],
+                textposition="top right",
+                marker=dict(
+                    size=16, color=palette["fg.primary"],
+                    line=dict(color=palette["bg.base"], width=2),
+                    symbol="star",
+                ),
+                textfont=dict(color=palette["fg.primary"], size=11),
+                name="You are here",
+                hovertemplate=(
+                    f"R_at_kill = "
+                    f"{curves.current_R_at_kill_km:.2f} km · "
+                    if curves.current_R_at_kill_km is not None
+                    else ""
+                ) + (
+                    f"engagement-end at t = {t_end:.1f} s · "
+                    f"I_peak = {I_end:.2g} W/cm²<extra></extra>"
+                ),
+                showlegend=False,
+            ))
+
+    # Friendly W/cm² tick labels for the log y-axis.
+    i_tickvals = [0.001, 0.01, 0.1, 1, 10, 100, 1000, 10000, 100000]
+    i_ticktext = [f"{v:g} W/cm²" for v in i_tickvals]
+
+    fig.update_layout(
+        title=title,
+        height=height,
+        hovermode="closest",
+        legend=dict(
+            orientation="h", yanchor="bottom", y=1.02,
+            xanchor="right", x=1.0,
+        ),
+    )
+    fig.update_xaxes(title_text=xtitle)
+    fig.update_yaxes(
+        title_text=ytitle, type="log",
+        tickvals=i_tickvals, ticktext=i_ticktext,
+    )
+    return fig
+
+
 __all__ = [
     "plot_a_on_target_performance",
     "plot_b_time_to_burnthrough",
@@ -4454,6 +4581,7 @@ __all__ = [
     "plot_m_atmospheric_envelope_3d",
     "plot_n_jitter_sensitivity",
     "plot_o_peak_irradiance_vs_cn2",
+    "plot_p_peak_irradiance_vs_geometry",
     "plot_overview_dwell_vs_burnthrough",
     "plot_target_temperature_envelope",
     "plot_target_material_comparison",
