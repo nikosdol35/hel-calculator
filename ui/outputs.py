@@ -249,33 +249,10 @@ def _build_formula_details_html(key: str, result: dict | None) -> str | None:
         .replace(">", "&gt;")
     )
 
-    # Build a KaTeX-rendered version of the formula (Greek letters, proper
-    # math symbols) and slot it ABOVE the ASCII <code> block so the
-    # disclosure widget reads "pretty math first, code-form fallback
-    # second, substituted variables last". Streamlit's markdown processor
-    # walks the rendered DOM looking for $$...$$ math blocks and runs them
-    # through the same KaTeX renderer the math tab uses via st.latex().
-    # Categorical entries returned None at line 210, so every entry that
-    # reaches here has formula_latex populated; the `if` guard is
-    # defensive (catches future MetricEntry shape changes).
-    latex_html = ""
-    if entry.formula_latex:
-        # `&` is the only HTML-special char we need to escape — `<` and
-        # `>` aren't used in any of the 51 LaTeX strings (verified via
-        # python -c 'from ui.math_content import MATH_CONTENT; ...').
-        # KaTeX wants `<` and `>` literal anyway.
-        latex_safe = entry.formula_latex.replace("&", "&amp;")
-        latex_html = (
-            f"<div class='hel-card-formula-latex'>$$\n"
-            f"{latex_safe}\n"
-            f"$$</div>"
-        )
-
     return (
         "<details class='hel-card-formula'>"
         "<summary>Show formula</summary>"
         f"<div class='hel-card-formula-body'>"
-        f"{latex_html}"
         f"<code class='hel-card-formula-code'>{formula_escaped}</code>"
         f"{sub_html}"
         "</div>"
@@ -298,6 +275,65 @@ def _md_emphasis_to_html(text: str) -> str:
     # *italic* → <em>italic</em>
     out = re.sub(r"\*([^*]+)\*", r"<em>\1</em>", out)
     return out
+
+
+def _render_formula_disclosure(key: str, result: dict | None) -> None:
+    """Native-Streamlit "Show formula" expander, replaces the HTML
+    ``<details>`` widget that used to live inside the metric card.
+
+    Why the refactor (2026-04-29):
+      The HTML disclosure approach used by ``_build_formula_details_html``
+      (still callable for back-compat) injected `$$...$$` math blocks
+      inside a ``<details>`` element rendered via
+      ``st.markdown(unsafe_allow_html=True)``. Streamlit's KaTeX
+      post-processor doesn't traverse into HTML disclosure widgets, so
+      the math rendered as literal `$$...$$` text — exactly the
+      Risk R1 case the plan called out.
+
+      The fix: use Streamlit's native ``st.expander`` plus ``st.latex``,
+      which is the same path the math tab uses (`_render_metric_row`)
+      and renders KaTeX reliably across browsers.
+
+    Renders nothing when:
+      - result is None (chain hasn't run)
+      - the key has no MATH_CONTENT entry
+      - the entry is categorical (a verdict — no formula to show)
+
+    Otherwise opens a collapsed expander containing, top-to-bottom:
+      1. The KaTeX-rendered LaTeX formula (Greek letters / proper symbols)
+      2. The ASCII formula in a code block (back-compat for screen
+         readers + copy-paste)
+      3. A bullet list of the formula's variables with substituted
+         values from the user's current run
+    """
+    if result is None:
+        return
+    from ui.math_content import MATH_CONTENT
+
+    entry = MATH_CONTENT.get(key)
+    if entry is None or entry.is_categorical:
+        return
+
+    # The same fallback chain as _build_formula_details_html — prefer
+    # the ASCII formula text (single line, copy-paste-friendly).
+    formula_line = entry.formula_text or entry.formula_latex or ""
+    if not formula_line:
+        return
+
+    # Compact variable substitution — same source as the HTML disclosure,
+    # so the on-screen content remains identical except for rendering.
+    sub_md = _substitute_formula_values(entry, result, compact=True)
+
+    with st.expander("Show formula", expanded=False):
+        # 1. KaTeX-rendered formula, if available.
+        if entry.formula_latex:
+            st.latex(entry.formula_latex)
+        # 2. ASCII fallback / copy-paste form.
+        st.code(formula_line, language="text")
+        # 3. Variable list (already markdown-formatted by
+        #    _substitute_formula_values; render directly).
+        if sub_md:
+            st.markdown(sub_md)
 
 
 def _card(
@@ -330,13 +366,15 @@ def _card(
 
     scaled = value if isinstance(value, str) else _scale(key, value)
 
-    # Phase C — build the optional formula-details HTML block. Reads
-    # the current run's result dict from session_state (set once at
-    # the top of the page render). Falls back to None when the chain
-    # hasn't run yet, the key has no MATH_CONTENT entry, or the entry
-    # is categorical.
+    # 2026-04-29: switched from HTML <details> (passed via
+    # ``formula_details_html=...``) to a native ``st.expander`` so the
+    # KaTeX-rendered formula actually renders — see
+    # ``_render_formula_disclosure`` for the rationale (Streamlit's
+    # KaTeX post-processor doesn't traverse HTML disclosure widgets,
+    # so the previous ``$$...$$`` block rendered as literal text).
+    # The metric card itself no longer carries the formula HTML; the
+    # expander appears immediately below it in the same column cell.
     current_result = st.session_state.get("_current_result")
-    formula_details_html = _build_formula_details_html(key, current_result)
 
     metric_card(
         label,
@@ -346,8 +384,8 @@ def _card(
         flag_est=flag_est,
         size=size,
         sig_figs=sig_figs,
-        formula_details_html=formula_details_html,
     )
+    _render_formula_disclosure(key, current_result)
 
 
 # =============================================================================

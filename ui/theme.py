@@ -560,23 +560,6 @@ select:focus-visible,
   border-left: 2px solid var(--border-subtle);
   padding-left: 10px;
 }}
-.hel-card-formula-latex {{
-  margin: 4px 0 8px 0;
-  padding: 6px 8px;
-  font-size: 14px;
-  line-height: 1.4;
-  color: var(--fg-primary);
-  background: var(--bg-surface);
-  border-radius: 4px;
-  /* Centre the rendered formula in the disclosure widget's content
-     column — matches how the math tab's ``st.latex(...)`` blocks
-     render. */
-  text-align: center;
-  /* Long formulas (the M8 PDE, the four-term w_total square root)
-     get a horizontal scrollbar inside the card instead of overflowing
-     onto the next card. */
-  overflow-x: auto;
-}}
 .hel-card-formula-code {{
   display: block;
   font-family: 'JetBrains Mono', 'Menlo', ui-monospace, monospace;

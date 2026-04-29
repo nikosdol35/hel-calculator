@@ -148,71 +148,132 @@ def test_html_uses_details_summary_disclosure_markup():
 
 
 # ---------------------------------------------------------------------------
-# Phase: LaTeX-rendered formula above the ASCII <code> block (2026-04-29)
+# Phase: native st.expander disclosure with KaTeX-rendered LaTeX (2026-04-29)
+#
+# The previous attempt embedded `$$...$$` math inside the HTML <details>
+# widget, but Streamlit's KaTeX post-processor doesn't traverse into
+# HTML disclosure widgets — the math rendered as literal text. We
+# switched to a native ``st.expander`` + ``st.latex`` combo (R1.fallback
+# in the plan), which renders KaTeX reliably in every browser.
 # ---------------------------------------------------------------------------
-def test_html_contains_latex_block_wrapped_in_double_dollars():
-    """The disclosure body now renders the metric's `formula_latex`
-    as a KaTeX math block ($$...$$) above the ASCII <code> block.
-    Streamlit's markdown processor walks the rendered DOM and turns
-    the $$...$$ text into a KaTeX-rendered formula on screen."""
-    from ui.outputs import _build_formula_details_html
-    from ui.math_content import MATH_CONTENT
-    result = _merged_result()
-    html = _build_formula_details_html("I_peak", result)
-    assert html is not None
-    # The LaTeX block is present.
-    assert "hel-card-formula-latex" in html, (
-        "expected the new .hel-card-formula-latex CSS class hook"
+def _capture_disclosure_calls(monkeypatch):
+    """Patch the Streamlit functions used by ``_render_formula_disclosure``
+    so tests can inspect what would have been rendered. Returns a dict
+    of capture buckets: ``expanders``, ``latex``, ``code``, ``markdown``.
+    """
+    captured = {
+        "expanders": [],
+        "latex": [],
+        "code": [],
+        "markdown": [],
+    }
+    import contextlib
+
+    def _exp(label, *_, **__):
+        captured["expanders"].append(label)
+        return contextlib.nullcontext()
+
+    monkeypatch.setattr("streamlit.expander", _exp)
+    monkeypatch.setattr(
+        "streamlit.latex", lambda s, **_: captured["latex"].append(str(s))
     )
-    # The literal LaTeX string from MATH_CONTENT appears inside the
-    # disclosure body, wrapped in $$...$$ delimiters.
+    monkeypatch.setattr(
+        "streamlit.code",
+        lambda s, **_: captured["code"].append(str(s)),
+    )
+    monkeypatch.setattr(
+        "streamlit.markdown",
+        lambda s, **_: captured["markdown"].append(str(s)),
+    )
+    return captured
+
+
+def test_disclosure_renders_latex_via_st_latex(monkeypatch):
+    """The expander now calls ``st.latex(formula_latex)`` so KaTeX
+    actually renders the Greek-letter formula (the HTML-disclosure
+    approach didn't, which the user reported 2026-04-29)."""
+    from ui.outputs import _render_formula_disclosure
+    from ui.math_content import MATH_CONTENT
+    captured = _capture_disclosure_calls(monkeypatch)
+
+    _render_formula_disclosure("I_peak", _merged_result())
+
     expected_latex = MATH_CONTENT["I_peak"].formula_latex
     assert expected_latex is not None
-    assert f"$$\n{expected_latex}\n$$" in html
-
-
-def test_latex_block_renders_before_ascii_code_block():
-    """Visual ordering matters — the LaTeX (Greek-letter) version
-    must appear ABOVE the ASCII <code> block in DOM order so
-    casual readers see the math-style formula first."""
-    from ui.outputs import _build_formula_details_html
-    result = _merged_result()
-    html = _build_formula_details_html("I_peak", result)
-    assert html is not None
-    latex_pos = html.find("hel-card-formula-latex")
-    code_pos = html.find("hel-card-formula-code")
-    assert 0 < latex_pos < code_pos, (
-        f"LaTeX block must appear before <code>; "
-        f"latex_pos={latex_pos}, code_pos={code_pos}"
+    assert expected_latex in captured["latex"], (
+        f"expected st.latex({expected_latex!r}); "
+        f"got latex calls: {captured['latex']}"
     )
 
 
-def test_categorical_entries_remain_excluded_from_disclosure():
-    """Regression guard: the LaTeX addition didn't accidentally
-    enable the disclosure for categorical (verdict) entries. Those
-    must still return None at the line-210 early-return — they
-    have no formula, so showing an empty math block would be wrong."""
-    from ui.outputs import _build_formula_details_html
-    result = _merged_result()
+def test_disclosure_uses_native_st_expander(monkeypatch):
+    """The disclosure uses ``st.expander`` (native), NOT the HTML
+    ``<details>`` widget any more — the previous HTML approach
+    suppressed KaTeX rendering."""
+    from ui.outputs import _render_formula_disclosure
+    captured = _capture_disclosure_calls(monkeypatch)
+
+    _render_formula_disclosure("I_peak", _merged_result())
+    assert captured["expanders"] == ["Show formula"]
+
+
+def test_disclosure_still_includes_ascii_formula_and_variables(monkeypatch):
+    """Regression guard: the ASCII formula and the substituted variable
+    list still render. The native-widget refactor didn't drop them."""
+    from ui.outputs import _render_formula_disclosure
+    captured = _capture_disclosure_calls(monkeypatch)
+
+    _render_formula_disclosure("I_peak", _merged_result())
+
+    # ASCII formula text appears in the captured st.code calls.
+    code_blob = "\n".join(captured["code"])
+    assert "I_peak" in code_blob
+    assert "P_exit" in code_blob or "tau_atm" in code_blob
+    # Variable list appears in the captured st.markdown calls.
+    md_blob = "\n".join(captured["markdown"])
+    assert "**" in md_blob, "expected bolded variable names in the bullet list"
+
+
+def test_disclosure_skips_categorical_entries(monkeypatch):
+    """Categorical (verdict) entries have no formula — render
+    nothing, exactly like the old HTML disclosure path."""
+    from ui.outputs import _render_formula_disclosure
+    captured = _capture_disclosure_calls(monkeypatch)
+
     for cat_key in ("failure_mode", "laser_class"):
-        assert _build_formula_details_html(cat_key, result) is None, (
-            f"categorical entry {cat_key!r} should not produce a "
-            f"disclosure widget"
-        )
+        _render_formula_disclosure(cat_key, _merged_result())
+
+    assert captured["expanders"] == [], (
+        "categorical entries must not open an expander"
+    )
+    assert captured["latex"] == []
+    assert captured["code"] == []
 
 
-def test_latex_block_uses_chain_metric_with_special_glyphs():
-    """Spot-check on a metric whose LaTeX uses Greek letters AND
-    subscripts (the visible payoff of this change). w_total has
-    `\\sqrt`, `w_\\text{...}` subscripts, and `^{2}` superscripts —
-    all the things ASCII can't represent cleanly."""
-    from ui.outputs import _build_formula_details_html
-    result = _merged_result()
-    html = _build_formula_details_html("w_total", result)
-    assert html is not None
-    # The full LaTeX expression appears inside the disclosure body.
-    assert "\\sqrt" in html
-    assert "w_\\text{diff}" in html or "w_\\text{turb}" in html
+def test_disclosure_skips_when_result_is_none(monkeypatch):
+    """No chain → no disclosure (back-compat with pre-result page
+    state, e.g. before the user clicks Run Analysis)."""
+    from ui.outputs import _render_formula_disclosure
+    captured = _capture_disclosure_calls(monkeypatch)
+
+    _render_formula_disclosure("I_peak", None)
+
+    assert captured["expanders"] == []
+    assert captured["latex"] == []
+
+
+def test_disclosure_renders_w_total_special_glyphs(monkeypatch):
+    """Spot-check on a metric whose LaTeX has Greek letters, subscripts,
+    sqrt, and superscripts — the visible payoff of switching to
+    KaTeX rendering."""
+    from ui.outputs import _render_formula_disclosure
+    captured = _capture_disclosure_calls(monkeypatch)
+
+    _render_formula_disclosure("w_total", _merged_result())
+
+    latex_blob = "\n".join(captured["latex"])
+    assert "\\sqrt" in latex_blob
+    assert "w_\\text{diff}" in latex_blob or "w_\\text{turb}" in latex_blob
 
 
 # ---------------------------------------------------------------------------
