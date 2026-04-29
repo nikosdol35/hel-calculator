@@ -5,24 +5,39 @@ the default Streamlit form stack. A single password field (shared access
 code — no username) per the plan's "first pixel" brief; the project
 wordmark sits above it in the Inter display face.
 
-Authentication model is unchanged from the v1 contract — one shared
-access code protects the live deployment from anonymous web traffic.
-No per-user accounts (CLAUDE §7.2 / SPEC §7.2 — out of v1 scope). The
-credential lives in Streamlit Cloud's secrets manager:
+Authentication model (2026-04-29 update): two parallel access codes
+protect the live deployment from anonymous web traffic. Both grant
+identical access to the calculator UI; the split exists purely so the
+project owner can rotate the team credential without disrupting their
+own access (and vice versa). The secrets live in Streamlit Cloud's
+secrets manager:
 
-    APP_PASSWORD = "..."
+    APP_PASSWORD  = "..."   # admin / owner
+    TEAM_PASSWORD = "..."   # team / colleagues (optional — leave unset
+                            # for single-credential deployments)
 
-``APP_USERNAME`` is still read for backward compatibility with existing
-deployments; if present it must match a ``username`` query parameter
-or be explicitly left empty. New deployments should set ``APP_PASSWORD``
-only. Credentials are never committed to git; local development uses
+The login card itself is unchanged — one password field, no username.
+Either secret value typed there grants access. ``APP_USERNAME`` from
+older deployments is no longer read.
+
+The "permission" model intentionally has only one tier — every
+authenticated user has the same access to the calculator UI.
+Distinguishing admin-only behaviours (reboot, code edits, log access,
+secrets changes) is handled OUTSIDE this app, at the Streamlit Cloud
+admin layer (share.streamlit.io), which gates on the project owner's
+GitHub account, not on these passwords.
+
+Credentials are never committed to git; local development uses
 ``.streamlit/secrets.toml`` (in ``.gitignore``).
 
 Design notes:
     * No server-side session DB — per-tab ``st.session_state`` holds
       the authed flag for the life of the browser tab.
-    * Fails closed when the secret is missing (never opens the app with
-      an empty expected password).
+    * Fails closed when both secrets are missing (never opens the app
+      with empty expected passwords).
+    * Constant-time comparison via ``hmac.compare_digest`` so a timing
+      attacker can't distinguish which secret matched (or whether
+      either was set).
     * Wrong access code surfaces a single calm line of feedback; no
       rate limiting, no enumeration hint, no apology spam.
     * User-visible strings route through ``ui/labels.LOGIN_COPY`` so
@@ -37,6 +52,7 @@ References:
 
 from __future__ import annotations
 
+import hmac
 import os
 
 import streamlit as st
@@ -127,9 +143,19 @@ def _render_login_card() -> None:
         )
 
     if submitted:
-        expected = st.secrets.get("APP_PASSWORD", "")
-        # Fail closed: do not treat "" == "" as a match.
-        if expected and password == expected:
+        admin_pw = st.secrets.get("APP_PASSWORD", "")
+        team_pw = st.secrets.get("TEAM_PASSWORD", "")
+        # Fail closed: empty secrets never grant access. Constant-time
+        # comparison via ``hmac.compare_digest`` so a timing attacker
+        # can't distinguish which slot matched (or whether either
+        # secret is set). Both passwords grant identical access — the
+        # split exists purely to let the project owner rotate the team
+        # credential independently of their own.
+        matched = (
+            (bool(admin_pw) and hmac.compare_digest(password, admin_pw))
+            or (bool(team_pw) and hmac.compare_digest(password, team_pw))
+        )
+        if matched:
             st.session_state[_AUTH_KEY] = True
             st.rerun()
         else:
