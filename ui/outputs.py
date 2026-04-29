@@ -249,10 +249,33 @@ def _build_formula_details_html(key: str, result: dict | None) -> str | None:
         .replace(">", "&gt;")
     )
 
+    # Build a KaTeX-rendered version of the formula (Greek letters, proper
+    # math symbols) and slot it ABOVE the ASCII <code> block so the
+    # disclosure widget reads "pretty math first, code-form fallback
+    # second, substituted variables last". Streamlit's markdown processor
+    # walks the rendered DOM looking for $$...$$ math blocks and runs them
+    # through the same KaTeX renderer the math tab uses via st.latex().
+    # Categorical entries returned None at line 210, so every entry that
+    # reaches here has formula_latex populated; the `if` guard is
+    # defensive (catches future MetricEntry shape changes).
+    latex_html = ""
+    if entry.formula_latex:
+        # `&` is the only HTML-special char we need to escape — `<` and
+        # `>` aren't used in any of the 51 LaTeX strings (verified via
+        # python -c 'from ui.math_content import MATH_CONTENT; ...').
+        # KaTeX wants `<` and `>` literal anyway.
+        latex_safe = entry.formula_latex.replace("&", "&amp;")
+        latex_html = (
+            f"<div class='hel-card-formula-latex'>$$\n"
+            f"{latex_safe}\n"
+            f"$$</div>"
+        )
+
     return (
         "<details class='hel-card-formula'>"
         "<summary>Show formula</summary>"
         f"<div class='hel-card-formula-body'>"
+        f"{latex_html}"
         f"<code class='hel-card-formula-code'>{formula_escaped}</code>"
         f"{sub_html}"
         "</div>"
@@ -1210,6 +1233,97 @@ def render_tab_geometry_comparison(result: dict) -> None:
         fig, use_container_width=True, config=PLOTLY_MODEBAR_CONFIG,
     )
     explanation(EXPLANATIONS["plot_p_intro"], variant="plot")
+    # Collapsible explainer of the four formulas the chain evaluates per
+    # trajectory sample to build each curve. Sits below the plot caption
+    # so curious readers can dive into the math without cluttering the
+    # default view (per user request 2026-04-29).
+    _render_plot_p_formula_explainer()
+
+
+def _render_plot_p_formula_explainer() -> None:
+    """Collapsible "Show the formulas used" explainer below Plot P's
+    caption on the Geometry tab.
+
+    Lists, in chain order, the four formulas evaluated at each
+    trajectory sample to produce one (t, I_peak) point on every curve:
+      1. Trajectory geometry — R(t) at crossing angle α
+      2. Atmospheric transmission — Beer-Lambert (M4)
+      3. Spot size at the target — quadrature sum (M5 + M7)
+      4. Peak irradiance — Gaussian × Strehl (M7)
+
+    Closes with a one-liner tying the simplification (S_TB = 1,
+    w_bloom = 0 for reference curves) back to the specific formula
+    affected — block 4. Uses ``st.latex(...)`` directly so KaTeX
+    rendering is the simple, native Streamlit pathway (no
+    HTML-disclosure indirection).
+
+    Separated into its own helper so the test can patch streamlit
+    calls without dragging in the rest of ``render_tab_geometry_comparison``.
+    """
+    with st.expander("Show the formulas used", expanded=False):
+        st.markdown(
+            "Each point on every curve is computed by running these "
+            "four steps end-to-end at one trajectory sample:"
+        )
+
+        st.markdown("**1. Where the target is at time *t* (trajectory)**")
+        st.markdown(
+            "Different crossing angles trace different paths past the "
+            "beam director. The slant range follows Pythagoras from "
+            "the (x, y) components of the target's straight-line "
+            "trajectory:"
+        )
+        st.latex(
+            r"R(t) = \sqrt{\bigl(R_\text{detect} - v_\text{tgt}\cos\alpha "
+            r"\cdot t\bigr)^{2} + \bigl(v_\text{tgt}\sin\alpha \cdot t\bigr)^{2}}"
+        )
+        st.caption(
+            "α = 0° is head-on (target closes straight at the beam "
+            "director); α = 90° is a perpendicular fly-by (range only "
+            "grows); 30° / 45° / 60° interpolate."
+        )
+
+        st.markdown("**2. Atmospheric transmission at that range (M4)**")
+        st.markdown(
+            "Beer-Lambert — extinction grows linearly with range, "
+            "transmission drops exponentially:"
+        )
+        st.latex(
+            r"\tau_\text{atm}(t) = "
+            r"\exp\bigl(-\alpha_\text{ext} \cdot R(t)\bigr)"
+        )
+
+        st.markdown("**3. Spot size at the target (M5 + M7)**")
+        st.markdown(
+            "Four spreading contributions add in quadrature: "
+            "ideal-Gaussian diffraction, atmospheric-turbulence "
+            "broadening, pointing-jitter broadening, and (full chain "
+            "only) thermal blooming."
+        )
+        st.latex(
+            r"w_\text{total}^{2}(t) = w_\text{diff}^{2}(t) + "
+            r"w_\text{turb}^{2}(t) + w_\text{jit}^{2}(t) + "
+            r"w_\text{bloom}^{2}(t)"
+        )
+
+        st.markdown("**4. Peak irradiance at the target (M7)**")
+        st.markdown(
+            "Gaussian beam with the bucket-filling Strehl correction. "
+            "This is the y-axis of every curve in the plot:"
+        )
+        st.latex(
+            r"I_\text{peak}(t) = \dfrac{2 \, P_\text{exit} \, "
+            r"\tau_\text{atm}(t) \, S_\text{TB}(t)}"
+            r"{\pi \, w_\text{total}^{\,2}(t)}"
+        )
+
+        st.caption(
+            "The 5 reference curves use this formula with S_TB = 1 "
+            "and w_bloom = 0 (skip thermal blooming) for fast "
+            "comparison. The bold white \"Current scenario\" curve "
+            "uses the full M4–M8 chain — including blooming and the "
+            "M8 burn-through PDE."
+        )
 
 
 # =============================================================================

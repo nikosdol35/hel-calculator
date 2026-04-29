@@ -148,6 +148,74 @@ def test_html_uses_details_summary_disclosure_markup():
 
 
 # ---------------------------------------------------------------------------
+# Phase: LaTeX-rendered formula above the ASCII <code> block (2026-04-29)
+# ---------------------------------------------------------------------------
+def test_html_contains_latex_block_wrapped_in_double_dollars():
+    """The disclosure body now renders the metric's `formula_latex`
+    as a KaTeX math block ($$...$$) above the ASCII <code> block.
+    Streamlit's markdown processor walks the rendered DOM and turns
+    the $$...$$ text into a KaTeX-rendered formula on screen."""
+    from ui.outputs import _build_formula_details_html
+    from ui.math_content import MATH_CONTENT
+    result = _merged_result()
+    html = _build_formula_details_html("I_peak", result)
+    assert html is not None
+    # The LaTeX block is present.
+    assert "hel-card-formula-latex" in html, (
+        "expected the new .hel-card-formula-latex CSS class hook"
+    )
+    # The literal LaTeX string from MATH_CONTENT appears inside the
+    # disclosure body, wrapped in $$...$$ delimiters.
+    expected_latex = MATH_CONTENT["I_peak"].formula_latex
+    assert expected_latex is not None
+    assert f"$$\n{expected_latex}\n$$" in html
+
+
+def test_latex_block_renders_before_ascii_code_block():
+    """Visual ordering matters — the LaTeX (Greek-letter) version
+    must appear ABOVE the ASCII <code> block in DOM order so
+    casual readers see the math-style formula first."""
+    from ui.outputs import _build_formula_details_html
+    result = _merged_result()
+    html = _build_formula_details_html("I_peak", result)
+    assert html is not None
+    latex_pos = html.find("hel-card-formula-latex")
+    code_pos = html.find("hel-card-formula-code")
+    assert 0 < latex_pos < code_pos, (
+        f"LaTeX block must appear before <code>; "
+        f"latex_pos={latex_pos}, code_pos={code_pos}"
+    )
+
+
+def test_categorical_entries_remain_excluded_from_disclosure():
+    """Regression guard: the LaTeX addition didn't accidentally
+    enable the disclosure for categorical (verdict) entries. Those
+    must still return None at the line-210 early-return — they
+    have no formula, so showing an empty math block would be wrong."""
+    from ui.outputs import _build_formula_details_html
+    result = _merged_result()
+    for cat_key in ("failure_mode", "laser_class"):
+        assert _build_formula_details_html(cat_key, result) is None, (
+            f"categorical entry {cat_key!r} should not produce a "
+            f"disclosure widget"
+        )
+
+
+def test_latex_block_uses_chain_metric_with_special_glyphs():
+    """Spot-check on a metric whose LaTeX uses Greek letters AND
+    subscripts (the visible payoff of this change). w_total has
+    `\\sqrt`, `w_\\text{...}` subscripts, and `^{2}` superscripts —
+    all the things ASCII can't represent cleanly."""
+    from ui.outputs import _build_formula_details_html
+    result = _merged_result()
+    html = _build_formula_details_html("w_total", result)
+    assert html is not None
+    # The full LaTeX expression appears inside the disclosure body.
+    assert "\\sqrt" in html
+    assert "w_\\text{diff}" in html or "w_\\text{turb}" in html
+
+
+# ---------------------------------------------------------------------------
 # _md_emphasis_to_html — small markdown subset converter
 # ---------------------------------------------------------------------------
 def test_md_emphasis_bold_to_strong():

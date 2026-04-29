@@ -250,3 +250,88 @@ def test_geometry_card_closest_approach_distances_match_geometry():
     assert expected[45.0] == pytest.approx(1061.0, abs=5.0)
     assert expected[60.0] == pytest.approx(1299.0, abs=5.0)
     assert expected[90.0] == pytest.approx(1500.0, abs=0.5)
+
+
+# ---------------------------------------------------------------------------
+# Phase: "Show the formulas used" explainer below Plot P caption (2026-04-29)
+# ---------------------------------------------------------------------------
+def test_plot_p_formula_explainer_renders_four_blocks(monkeypatch):
+    """The explainer expander shows four labeled formula sections
+    (Trajectory, Atmospheric transmission, Spot size, Peak irradiance)
+    plus the simplification disclosure tying back to the plot's
+    reference vs full-chain curves."""
+    captured: list[str] = []
+
+    def _capture(text, **_):
+        captured.append(str(text))
+
+    monkeypatch.setattr("streamlit.markdown", _capture)
+    monkeypatch.setattr("streamlit.caption", _capture)
+    monkeypatch.setattr("streamlit.latex", _capture)
+    # The expander is a contextmanager; stub to a no-op so the body
+    # still executes and emits its st.markdown / st.latex calls.
+    import contextlib
+    monkeypatch.setattr(
+        "streamlit.expander",
+        lambda *a, **k: contextlib.nullcontext(),
+    )
+
+    from ui.outputs import _render_plot_p_formula_explainer
+    _render_plot_p_formula_explainer()
+
+    blob = "\n".join(captured)
+
+    # Four labeled blocks (block headings).
+    for needle in (
+        "trajectory",
+        "Atmospheric transmission",
+        "Spot size",
+        "Peak irradiance",
+    ):
+        assert needle.lower() in blob.lower(), (
+            f"missing block heading: {needle!r}"
+        )
+
+    # The four LaTeX expressions all reach the captured stream.
+    for symbol in (
+        r"R_\text{detect}",
+        r"\tau_\text{atm}",
+        r"w_\text{total}",
+        r"I_\text{peak}",
+    ):
+        assert symbol in blob, f"missing LaTeX symbol: {symbol!r}"
+
+    # The closing simplification disclosure ties S_TB / w_bloom
+    # explicitly to the formula that uses them.
+    assert "S_TB = 1" in blob
+    assert "w_bloom = 0" in blob
+
+
+def test_plot_p_formula_explainer_uses_alpha_for_crossing_angle(monkeypatch):
+    """The trajectory formula must express the crossing-angle
+    dependence — that's the exact thing the user asked us to surface
+    ('something with angle you use there')."""
+    captured: list[str] = []
+    monkeypatch.setattr(
+        "streamlit.markdown", lambda t, **_: captured.append(str(t))
+    )
+    monkeypatch.setattr(
+        "streamlit.caption", lambda t, **_: captured.append(str(t))
+    )
+    monkeypatch.setattr(
+        "streamlit.latex", lambda t, **_: captured.append(str(t))
+    )
+    import contextlib
+    monkeypatch.setattr(
+        "streamlit.expander",
+        lambda *a, **k: contextlib.nullcontext(),
+    )
+    from ui.outputs import _render_plot_p_formula_explainer
+    _render_plot_p_formula_explainer()
+    blob = "\n".join(captured)
+    # The crossing-angle terms (cos α and sin α) must both appear in
+    # the trajectory formula — otherwise the explainer doesn't
+    # actually answer the user's "something with angle" question.
+    assert r"\cos\alpha" in blob or r"\cos \alpha" in blob
+    assert r"\sin\alpha" in blob or r"\sin \alpha" in blob
+
