@@ -531,7 +531,18 @@ def _render_scenario_map(R_detect_max_m: float, R_min_m: float) -> None:
                 else getattr(sel, "points", []) or []
             )
     if points:
-        clicked = points[0]
+        # Streamlit + Plotly's selection ACCUMULATES every clicked
+        # point across reruns rather than replacing on each click.
+        # That means after clicking a drone (selects it) and then
+        # clicking an empty cell (intended to move the drone), the
+        # selection list looks like ``[drone_click, snap_click]``.
+        # Reading ``points[0]`` would give us the stale drone-click
+        # we already processed last render — and the move would
+        # never fire. Always take ``points[-1]``: the MOST RECENT
+        # click, which is what the user just did. (User report:
+        # "click drone, then click empty space, drone doesn't
+        # move" — this was the root cause.)
+        clicked = points[-1]
         trace_idx = (
             clicked.get("curve_number")
             if isinstance(clicked, dict)
