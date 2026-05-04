@@ -146,8 +146,13 @@ dri_page = st.Page(
     title="DRI Analyzer",
     icon=":material/photo_camera:",
 )
+swarm_page = st.Page(
+    "tools/swarm_analyzer.py",
+    title="Swarm Analyzer",
+    icon=":material/groups:",
+)
 
-pages = [hel_page, dri_page]
+pages = [hel_page, dri_page, swarm_page]
 
 pg = st.navigation(pages)
 pg.run()
