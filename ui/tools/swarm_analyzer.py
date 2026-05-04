@@ -69,6 +69,13 @@ st.caption(
 # ---------------------------------------------------------------------------
 sidebar_inputs = swarm_panels.render_swarm_sidebar()
 
+# Thread R_min and R_detect_max through to the visual map renderer
+# via session-state. The map needs them to draw the dashed rings;
+# capturing them here keeps render_scenario_builder() agnostic of
+# the sidebar's exact return-dict shape.
+st.session_state["_swarm_R_min_m"] = sidebar_inputs["R_min_m"]
+st.session_state["_swarm_R_detect_max_m"] = sidebar_inputs["R_detect_max_m"]
+
 
 # ---------------------------------------------------------------------------
 # Main panel — scenario builder

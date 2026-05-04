@@ -11,8 +11,13 @@ cover the swarm-specific inputs:
   * **Engagement** — strategy dropdown + simulation timestep
 
 The main panel (rendered by ``render_scenario_builder``) carries
-the drone-list table-edit UI. Day-4 v1 ships table-only; the
-click-on-map builder lands in Day 5 alongside the playback plot.
+the **visual scenario builder** (2026-04-29 redesign): a Plotly
+map with the BD at center, R_min/R_detect circles, and
+click-to-place drone targets. Each placed drone shows as a
+colored dot with a velocity arrow; clicking a drone opens an
+inline edit panel (speed slider, heading toggle, delete). The
+table is preserved in a collapsed expander for power-users who
+want raw x/y/vx/vy editing.
 
 Pure UI glue — no physics; relies on ``physics/swarm_scenario.py``
 for validation.
@@ -21,17 +26,34 @@ from __future__ import annotations
 
 import math
 
+import plotly.graph_objects as go
 import streamlit as st
 
 from physics.swarm_drone_types import DRONE_TYPES, get_drone_type
+from physics.swarm_kinematics import bearing_to_drone_deg, range_to_bd_m
 from physics.swarm_scenario import BDKinematics, Drone, SwarmScenario
 from ui import panels
+from ui.theme import PLOTLY_MODEBAR_CONFIG
 
 
 # Session-state keys (scoped with ``_swarm_`` prefix per plan §4.4 to
 # avoid stomping HEL Calculator's session-state).
-_SWARM_DRONES_KEY = "_swarm_drones"          # list[dict] of drone rows
-_SWARM_NEXT_ID_KEY = "_swarm_next_drone_id"  # monotonic id counter
+_SWARM_DRONES_KEY = "_swarm_drones"            # list[dict] of drone rows
+_SWARM_NEXT_ID_KEY = "_swarm_next_drone_id"    # monotonic id counter
+_SWARM_ACTIVE_TYPE_KEY = "_swarm_active_type"  # drone type for next click
+_SWARM_SELECTED_KEY = "_swarm_selected_drone"  # drone_id (stable) of selection
+_SWARM_R_DETECT_KEY = "_swarm_R_detect_max_m"  # captured for the map extent
+
+
+# Plotly trace-index constants (used by the click handler to dispatch
+# clicks). Order MUST match the order traces are added to the figure
+# in ``_render_scenario_map``.
+_TRACE_R_MIN = 0
+_TRACE_R_DETECT = 1
+_TRACE_GRID_LINES = 2
+_TRACE_BD = 3
+_TRACE_SNAP_GRID = 4
+_TRACE_DRONES = 5
 
 
 _STRATEGY_LABELS = {
@@ -172,6 +194,10 @@ def _ensure_drone_state() -> None:
         st.session_state[_SWARM_DRONES_KEY] = []
     if _SWARM_NEXT_ID_KEY not in st.session_state:
         st.session_state[_SWARM_NEXT_ID_KEY] = 0
+    if _SWARM_ACTIVE_TYPE_KEY not in st.session_state:
+        st.session_state[_SWARM_ACTIVE_TYPE_KEY] = "commercial_quad"
+    if _SWARM_SELECTED_KEY not in st.session_state:
+        st.session_state[_SWARM_SELECTED_KEY] = None
 
 
 def _add_drone(
@@ -204,9 +230,49 @@ def _add_drone(
 
 
 def _clear_drones() -> None:
-    """Remove every drone in the session-state list."""
+    """Remove every drone in the session-state list and clear the
+    current selection (so the edit panel doesn't dangle)."""
     st.session_state[_SWARM_DRONES_KEY] = []
     st.session_state[_SWARM_NEXT_ID_KEY] = 0
+    st.session_state[_SWARM_SELECTED_KEY] = None
+
+
+def _delete_drone(drone_id: int) -> None:
+    """Remove the drone with the given drone_id from the list. Clears
+    the selection if it pointed to the deleted drone."""
+    drones = st.session_state.get(_SWARM_DRONES_KEY, [])
+    st.session_state[_SWARM_DRONES_KEY] = [
+        d for d in drones if d["drone_id"] != drone_id
+    ]
+    if st.session_state.get(_SWARM_SELECTED_KEY) == drone_id:
+        st.session_state[_SWARM_SELECTED_KEY] = None
+
+
+def _ensure_selection_valid() -> None:
+    """If the current selection points to a drone that no longer
+    exists (e.g., deleted via the table editor), clear it."""
+    selected = st.session_state.get(_SWARM_SELECTED_KEY)
+    if selected is None:
+        return
+    drones = st.session_state.get(_SWARM_DRONES_KEY, [])
+    valid_ids = {d["drone_id"] for d in drones}
+    if selected not in valid_ids:
+        st.session_state[_SWARM_SELECTED_KEY] = None
+
+
+def _drone_velocity_toward_bd(
+    type_key: str, position_m: tuple[float, float],
+) -> tuple[float, float]:
+    """Compute the default velocity vector for a drone of the given
+    type at the given position — heading directly at the BD (origin)
+    at the type's preset speed. Returns (vx, vy) in m/s."""
+    drone_type = get_drone_type(type_key)
+    x, y = position_m
+    r = math.sqrt(x * x + y * y)
+    if r > 0:
+        speed = drone_type.speed_mps_default
+        return (-speed * x / r, -speed * y / r)
+    return (-drone_type.speed_mps_default, 0.0)
 
 
 def _quick_action_arc(
@@ -246,138 +312,556 @@ def _quick_action_mixed_speed() -> None:
 
 
 # ---------------------------------------------------------------------------
-# Scenario builder — main panel
+# Scenario builder — main panel (visual click-to-place + Advanced table)
 # ---------------------------------------------------------------------------
 
+def _render_scenario_map(R_detect_max_m: float, R_min_m: float) -> None:
+    """Build and render the BD-centered scenario map. Captures
+    Plotly click events via ``st.plotly_chart(... on_select="rerun")``
+    and dispatches them: snap-grid clicks add a new drone of the
+    active type; drone clicks select that drone for the edit panel.
+
+    Trace order (locked, must match the ``_TRACE_*`` constants):
+      0. R_min circle (red dashed)
+      1. R_detect circle (gray dotted)
+      2. Major + minor grid lines (single trace, faint)
+      3. BD square at origin
+      4. Invisible snap-grid (200 m spacing) — click target
+      5. Drones (single trace; ``point_number`` = drones-list index)
+    """
+    drones = st.session_state[_SWARM_DRONES_KEY]
+    selected_id = st.session_state.get(_SWARM_SELECTED_KEY)
+
+    extent_m = R_detect_max_m * 1.1
+
+    fig = go.Figure()
+
+    # Trace 0: R_min circle.
+    n_circle = 64
+    r_min_x = [R_min_m * math.cos(2 * math.pi * i / n_circle) for i in range(n_circle + 1)]
+    r_min_y = [R_min_m * math.sin(2 * math.pi * i / n_circle) for i in range(n_circle + 1)]
+    fig.add_trace(go.Scatter(
+        x=r_min_x, y=r_min_y, mode="lines",
+        line=dict(color="rgba(229, 80, 86, 0.7)", width=1.5, dash="dash"),
+        name=f"R_min = {R_min_m:.0f} m",
+        hoverinfo="skip",
+    ))
+
+    # Trace 1: R_detect circle.
+    r_det_x = [R_detect_max_m * math.cos(2 * math.pi * i / n_circle) for i in range(n_circle + 1)]
+    r_det_y = [R_detect_max_m * math.sin(2 * math.pi * i / n_circle) for i in range(n_circle + 1)]
+    fig.add_trace(go.Scatter(
+        x=r_det_x, y=r_det_y, mode="lines",
+        line=dict(color="rgba(127, 142, 156, 0.5)", width=1, dash="dot"),
+        name=f"R_detect = {R_detect_max_m / 1000.0:.1f} km",
+        hoverinfo="skip",
+    ))
+
+    # Trace 2: minor grid lines (every 200 m, very faint). Built as
+    # a single trace with NaN separators between line segments — one
+    # GPU draw, very cheap.
+    grid_x: list[float | None] = []
+    grid_y: list[float | None] = []
+    grid_step_m = 200.0
+    n_steps = int(extent_m / grid_step_m)
+    for i in range(-n_steps, n_steps + 1):
+        v = i * grid_step_m
+        # Vertical line at x = v
+        grid_x.extend([v, v, None])
+        grid_y.extend([-extent_m, extent_m, None])
+        # Horizontal line at y = v
+        grid_x.extend([-extent_m, extent_m, None])
+        grid_y.extend([v, v, None])
+    fig.add_trace(go.Scatter(
+        x=grid_x, y=grid_y, mode="lines",
+        line=dict(color="rgba(127, 142, 156, 0.08)", width=0.5),
+        hoverinfo="skip", showlegend=False,
+        name="_grid_lines",
+    ))
+
+    # Trace 3: BD marker at origin.
+    fig.add_trace(go.Scatter(
+        x=[0.0], y=[0.0], mode="markers+text",
+        marker=dict(symbol="square", size=16, color="white",
+                    line=dict(color="black", width=1)),
+        text=["BD"],
+        textposition="bottom center",
+        textfont=dict(size=11, color="white"),
+        name="Beam director",
+        hoverinfo="skip",
+    ))
+
+    # Trace 4: invisible snap-grid (clicks register here when the
+    # operator clicks empty space).
+    snap_xs: list[float] = []
+    snap_ys: list[float] = []
+    snap_grid_step_m = 200.0
+    snap_n = int(extent_m / snap_grid_step_m)
+    for ix in range(-snap_n, snap_n + 1):
+        for iy in range(-snap_n, snap_n + 1):
+            snap_xs.append(ix * snap_grid_step_m)
+            snap_ys.append(iy * snap_grid_step_m)
+    fig.add_trace(go.Scatter(
+        x=snap_xs, y=snap_ys, mode="markers",
+        marker=dict(size=20, color="rgba(0,0,0,0)"),  # invisible
+        hoverinfo="skip",
+        showlegend=False,
+        name="_snap_grid",
+    ))
+
+    # Trace 5: drones (colored dots).
+    if drones:
+        drone_xs = [d["position_x_m"] for d in drones]
+        drone_ys = [d["position_y_m"] for d in drones]
+        drone_colors = [
+            get_drone_type(d["drone_type_key"]).color_hex for d in drones
+        ]
+        # Selected drone gets a thick outline ring; others get a
+        # thin black border for definition.
+        line_widths = [
+            3 if d["drone_id"] == selected_id else 1
+            for d in drones
+        ]
+        line_colors = [
+            "white" if d["drone_id"] == selected_id else "black"
+            for d in drones
+        ]
+        hover_texts = [
+            f"#{d['drone_id']} {get_drone_type(d['drone_type_key']).label}"
+            f"<br>({d['position_x_m']:.0f}, {d['position_y_m']:.0f}) m"
+            f"<br>v = ({d['velocity_x_mps']:+.1f}, {d['velocity_y_mps']:+.1f}) m/s"
+            for d in drones
+        ]
+        fig.add_trace(go.Scatter(
+            x=drone_xs, y=drone_ys, mode="markers",
+            marker=dict(
+                size=14, color=drone_colors,
+                line=dict(color=line_colors, width=line_widths),
+            ),
+            text=hover_texts,
+            hovertemplate="%{text}<extra></extra>",
+            showlegend=False,
+            name="_drones",
+        ))
+    else:
+        # Empty trace placeholder so trace_idx for drones stays
+        # at _TRACE_DRONES = 5 even before any drone is placed.
+        fig.add_trace(go.Scatter(
+            x=[], y=[], mode="markers",
+            marker=dict(size=14),
+            showlegend=False,
+            name="_drones",
+        ))
+
+    # Velocity arrows as per-drone annotations.
+    arrow_scale = extent_m * 0.06  # ~6% of map extent — readable
+    for d in drones:
+        vx, vy = d["velocity_x_mps"], d["velocity_y_mps"]
+        v_mag = math.sqrt(vx * vx + vy * vy)
+        if v_mag <= 0:
+            continue
+        arrow_dx = vx / v_mag * arrow_scale
+        arrow_dy = vy / v_mag * arrow_scale
+        fig.add_annotation(
+            x=d["position_x_m"] + arrow_dx,
+            y=d["position_y_m"] + arrow_dy,
+            ax=d["position_x_m"],
+            ay=d["position_y_m"],
+            xref="x", yref="y",
+            axref="x", ayref="y",
+            showarrow=True,
+            arrowhead=2,
+            arrowsize=1.2,
+            arrowwidth=2,
+            arrowcolor=get_drone_type(d["drone_type_key"]).color_hex,
+        )
+
+    fig.update_layout(
+        title="Scenario map — click empty space to place drones, click a drone to edit",
+        xaxis=dict(
+            title="x (m, BD at origin)",
+            range=[-extent_m, extent_m],
+            scaleanchor="y", scaleratio=1,
+            zeroline=True, zerolinecolor="rgba(127,142,156,0.3)",
+        ),
+        yaxis=dict(
+            title="y (m)",
+            range=[-extent_m, extent_m],
+            zeroline=True, zerolinecolor="rgba(127,142,156,0.3)",
+        ),
+        height=600,
+        margin=dict(l=60, r=20, t=60, b=60),
+        legend=dict(
+            orientation="h", yanchor="bottom", y=1.02,
+            xanchor="right", x=1.0,
+        ),
+    )
+
+    # Render with click event capture.
+    selection = st.plotly_chart(
+        fig,
+        on_select="rerun",
+        selection_mode=("points",),
+        key="_swarm_map_chart",
+        use_container_width=True,
+        config=PLOTLY_MODEBAR_CONFIG,
+    )
+
+    # Streamlit 1.38: returns a state object whose .selection.points
+    # is a list of {curve_number, point_number, x, y} dicts. Be
+    # defensive about the shape (dict-like vs object-like).
+    points = []
+    if selection is not None:
+        sel = (
+            selection.get("selection")
+            if isinstance(selection, dict)
+            else getattr(selection, "selection", None)
+        )
+        if sel is not None:
+            points = (
+                sel.get("points", [])
+                if isinstance(sel, dict)
+                else getattr(sel, "points", []) or []
+            )
+    if points:
+        clicked = points[0]
+        trace_idx = (
+            clicked.get("curve_number")
+            if isinstance(clicked, dict)
+            else getattr(clicked, "curve_number", None)
+        )
+        cx = clicked.get("x") if isinstance(clicked, dict) else getattr(clicked, "x", None)
+        cy = clicked.get("y") if isinstance(clicked, dict) else getattr(clicked, "y", None)
+        pt_idx = (
+            clicked.get("point_number")
+            if isinstance(clicked, dict)
+            else getattr(clicked, "point_number", None)
+        )
+        if trace_idx == _TRACE_SNAP_GRID and cx is not None and cy is not None:
+            # Click on empty space → snap-grid hit → add new drone.
+            active_type = st.session_state.get(_SWARM_ACTIVE_TYPE_KEY, "commercial_quad")
+            _add_drone(active_type, (float(cx), float(cy)))
+            st.rerun()
+        elif trace_idx == _TRACE_DRONES and pt_idx is not None:
+            # Click on existing drone → open edit panel.
+            drones_list = st.session_state[_SWARM_DRONES_KEY]
+            if 0 <= pt_idx < len(drones_list):
+                st.session_state[_SWARM_SELECTED_KEY] = (
+                    drones_list[pt_idx]["drone_id"]
+                )
+                st.rerun()
+
+
+def _render_edit_panel() -> None:
+    """Show the inline drone-edit panel below the map when a drone
+    is selected. Covers per-drone speed, heading mode (toward BD vs
+    custom angle), delete, and deselect."""
+    selected_id = st.session_state.get(_SWARM_SELECTED_KEY)
+    if selected_id is None:
+        return
+    drones = st.session_state[_SWARM_DRONES_KEY]
+    drone = next((d for d in drones if d["drone_id"] == selected_id), None)
+    if drone is None:
+        # Stale selection (drone deleted via another path) → clear.
+        st.session_state[_SWARM_SELECTED_KEY] = None
+        return
+
+    drone_type = get_drone_type(drone["drone_type_key"])
+    pos = (drone["position_x_m"], drone["position_y_m"])
+    vel = (drone["velocity_x_mps"], drone["velocity_y_mps"])
+    rng = range_to_bd_m(pos)
+    bearing = bearing_to_drone_deg(pos)
+    speed_now = math.sqrt(vel[0] ** 2 + vel[1] ** 2)
+    # Current heading angle (degrees). atan2(vy, vx) → -180..180.
+    heading_now_deg = math.degrees(math.atan2(vel[1], vel[0])) if speed_now > 0 else 0.0
+    # Is the current heading approximately "toward BD"? Toward-BD
+    # vector from drone position is (-pos)/|pos|. Compare angle.
+    if rng > 0 and speed_now > 0:
+        toward_bd_deg = math.degrees(math.atan2(-pos[1], -pos[0]))
+        # Normalize delta to [-180, 180] and take absolute.
+        delta = ((heading_now_deg - toward_bd_deg + 540.0) % 360.0) - 180.0
+        is_toward_bd = abs(delta) < 1.0  # within 1° of toward-BD
+    else:
+        is_toward_bd = True
+
+    st.markdown("---")
+    st.markdown(
+        f"**Selected: Drone #{selected_id} — {drone_type.label}**  "
+        f"  ·  At ({pos[0]:.0f}, {pos[1]:.0f}) m  =  "
+        f"{rng / 1000.0:.2f} km @ {bearing:+.1f}°"
+    )
+    edit_col1, edit_col2 = st.columns([3, 2])
+    with edit_col1:
+        speed_low, speed_high = drone_type.speed_envelope_mps
+        # Allow slider down to 0 for the stationary edge case, up to
+        # 1.5× the type envelope so unusual scenarios still fit.
+        slider_min = 0.0
+        slider_max = max(speed_high * 1.5, speed_now * 1.2, 100.0)
+        new_speed = st.slider(
+            "Speed (m/s)",
+            min_value=slider_min,
+            max_value=float(round(slider_max, 0)),
+            value=float(speed_now),
+            step=1.0,
+            key=f"_swarm_speed_slider_{selected_id}",
+            help=(
+                f"Drone class envelope: {speed_low:.0f}–{speed_high:.0f} m/s. "
+                "Slider extends past the envelope for unusual scenarios."
+            ),
+        )
+        heading_mode = st.radio(
+            "Heading",
+            options=["Toward BD", "Custom angle"],
+            index=(0 if is_toward_bd else 1),
+            key=f"_swarm_heading_mode_{selected_id}",
+            horizontal=True,
+        )
+        if heading_mode == "Custom angle":
+            new_heading_deg = st.slider(
+                "Heading angle (deg)",
+                min_value=-180.0, max_value=180.0,
+                value=float(heading_now_deg),
+                step=5.0,
+                key=f"_swarm_heading_slider_{selected_id}",
+                help=(
+                    "0° = +x axis, 90° = +y axis. The BD is at the origin; "
+                    "to make the drone head AT the BD, use 'Toward BD' mode."
+                ),
+            )
+        else:
+            # Toward BD — derive the angle from the drone's position.
+            if rng > 0:
+                new_heading_deg = math.degrees(math.atan2(-pos[1], -pos[0]))
+            else:
+                new_heading_deg = 180.0  # arbitrary; drone at origin
+
+    with edit_col2:
+        st.markdown("&nbsp;", unsafe_allow_html=True)  # spacer
+        if st.button(
+            "🗑 Delete drone",
+            key=f"_swarm_delete_btn_{selected_id}",
+            use_container_width=True,
+            type="secondary",
+        ):
+            _delete_drone(selected_id)
+            st.rerun()
+        if st.button(
+            "Deselect",
+            key=f"_swarm_deselect_btn_{selected_id}",
+            use_container_width=True,
+        ):
+            st.session_state[_SWARM_SELECTED_KEY] = None
+            st.rerun()
+
+    # Apply slider edits to the drone's velocity.
+    new_heading_rad = math.radians(new_heading_deg)
+    new_vx = new_speed * math.cos(new_heading_rad)
+    new_vy = new_speed * math.sin(new_heading_rad)
+    if (
+        abs(new_vx - vel[0]) > 1e-9
+        or abs(new_vy - vel[1]) > 1e-9
+    ):
+        # Mutate the dict in-place (it's the actual session-state list element).
+        drone["velocity_x_mps"] = float(new_vx)
+        drone["velocity_y_mps"] = float(new_vy)
+        st.rerun()
+
+
 def render_scenario_builder() -> list[dict]:
-    """Render the drone-list table-edit UI in the main panel.
+    """Render the visual scenario builder.
+
+    Layout (top → bottom):
+      1. Header + caption
+      2. Active drone-type picker + quick-action buttons
+      3. Visual map (click empty space to place; click drone to edit)
+      4. Edit panel (only visible when a drone is selected)
+      5. Advanced table (collapsed expander) for raw x/y/vx/vy editing
 
     Returns the current list of drone dicts (session-state). The
     caller composes a ``SwarmScenario`` from this + the sidebar
     output before invoking the orchestrator.
-
-    Day-4 v1: table-only edit. Click-on-map adds in Day 5.
     """
     _ensure_drone_state()
+    _ensure_selection_valid()
 
     st.markdown("### Swarm scenario")
     st.caption(
-        "Build a multi-drone scenario. The beam director sits at the "
-        "origin. Drones are placed in a 2D top-down plane around it; "
-        "each row below describes one drone's starting position, "
-        "velocity, and class."
+        "Build a multi-drone scenario by clicking on the map below — "
+        "the beam director sits at the origin (white square). Each "
+        "click places a drone of the type currently selected in the "
+        "dropdown, snapped to a 200 m grid, with a velocity vector "
+        "heading at the BD by default. Click an existing drone to "
+        "tweak its speed / heading or delete it."
     )
 
-    # ── Quick-action buttons ─────────────────────────────────────
-    col1, col2, col3, col4, col5, col6 = st.columns(6)
-    with col1:
-        if st.button("Add quad", help="Add one commercial quad-copter at 1.5 km, head-on"):
+    # ── Active type picker + quick-action buttons ────────────────
+    type_col, q1, q2, q3, q4, q5 = st.columns([2, 1, 1, 1, 1, 1])
+    with type_col:
+        st.session_state[_SWARM_ACTIVE_TYPE_KEY] = st.selectbox(
+            "Click on the map to place:",
+            options=list(DRONE_TYPES.keys()),
+            format_func=lambda k: get_drone_type(k).label,
+            index=list(DRONE_TYPES.keys()).index(
+                st.session_state.get(_SWARM_ACTIVE_TYPE_KEY, "commercial_quad")
+            ),
+            key="_swarm_active_type_selector",
+        )
+    with q1:
+        st.markdown("&nbsp;")  # vertical alignment hack
+        if st.button(
+            "Add quad",
+            help=(
+                "Add 1 commercial quad-copter at 1.5 km, head-on. "
+                "Bypasses the dropdown — always adds a quad."
+            ),
+        ):
             _add_drone("commercial_quad", (1500.0, 0.0))
-    with col2:
-        if st.button("Add fixed-wing", help="Add one mini fixed-wing UAV at 1.5 km, head-on"):
+    with q2:
+        st.markdown("&nbsp;")
+        if st.button(
+            "Add fixed-wing",
+            help=(
+                "Add 1 mini fixed-wing UAV at 1.5 km, head-on. "
+                "Bypasses the dropdown — always adds a fixed-wing."
+            ),
+        ):
             _add_drone("mini_fixed_wing", (1500.0, 0.0))
-    with col3:
-        if st.button("Add kamikaze", help="Add one Group-1 kamikaze at 1.5 km, head-on"):
+    with q3:
+        st.markdown("&nbsp;")
+        if st.button(
+            "Add kamikaze",
+            help=(
+                "Add 1 Group-1 kamikaze at 1.5 km, head-on. "
+                "Bypasses the dropdown — always adds a kamikaze."
+            ),
+        ):
             _add_drone("group1_kamikaze", (1500.0, 0.0))
-    with col4:
+    with q4:
+        st.markdown("&nbsp;")
         if st.button(
             "Saturation arc",
             help="12 mixed drones evenly spaced over a 90° arc at 1.5 km",
         ):
             _quick_action_arc(12, 90.0, 1500.0, "group1_kamikaze")
-    with col5:
-        if st.button(
-            "Mixed-speed test",
-            help="5 fast kamikaze + 5 slow quads at mixed ranges",
-        ):
+    with q5:
+        st.markdown("&nbsp;")
+        if st.button("Mixed-speed", help="5 fast kamikaze + 5 slow quads"):
             _quick_action_mixed_speed()
-    with col6:
-        if st.button("Clear all", help="Remove every drone"):
-            _clear_drones()
 
-    drones = st.session_state[_SWARM_DRONES_KEY]
-    if not drones:
-        st.info(
-            "No drones placed yet. Use the buttons above to add a "
-            "preset scenario, or 'Add quad/fixed-wing/kamikaze' for a "
-            "single test target."
-        )
-        return drones
-
-    # ── Editable table ───────────────────────────────────────────
-    st.markdown(f"**{len(drones)} drone(s) placed**")
-
-    # Build a Pandas DataFrame for st.data_editor.
-    import pandas as pd
-    df = pd.DataFrame([
-        {
-            "id": d["drone_id"],
-            "type": d["drone_type_key"],
-            "x_m": d["position_x_m"],
-            "y_m": d["position_y_m"],
-            "vx_m/s": d["velocity_x_mps"],
-            "vy_m/s": d["velocity_y_mps"],
-        }
-        for d in drones
-    ])
-    edited = st.data_editor(
-        df,
-        column_config={
-            "id": st.column_config.NumberColumn("ID", disabled=True, width="small"),
-            "type": st.column_config.SelectboxColumn(
-                "Type",
-                options=list(DRONE_TYPES.keys()),
-                required=True,
-                width="medium",
-            ),
-            "x_m": st.column_config.NumberColumn(
-                "x (m)", min_value=-50000.0, max_value=50000.0, step=50.0,
-                format="%.0f", width="small",
-            ),
-            "y_m": st.column_config.NumberColumn(
-                "y (m)", min_value=-50000.0, max_value=50000.0, step=50.0,
-                format="%.0f", width="small",
-            ),
-            "vx_m/s": st.column_config.NumberColumn(
-                "vx (m/s)", min_value=-200.0, max_value=200.0, step=1.0,
-                format="%.1f", width="small",
-            ),
-            "vy_m/s": st.column_config.NumberColumn(
-                "vy (m/s)", min_value=-200.0, max_value=200.0, step=1.0,
-                format="%.1f", width="small",
-            ),
-        },
-        num_rows="dynamic",
-        use_container_width=True,
-        key="_swarm_drone_editor",
+    # ── Map ──────────────────────────────────────────────────────
+    R_detect_max_m = float(
+        st.session_state.get(_SWARM_R_DETECT_KEY, 3000.0)
     )
+    R_min_m = 100.0  # Caller threads this in via session-state on render
+    if "_swarm_R_min_m" in st.session_state:
+        R_min_m = float(st.session_state["_swarm_R_min_m"])
+    _render_scenario_map(R_detect_max_m, R_min_m)
 
-    # Sync edited DataFrame back to session-state.
-    new_list: list[dict] = []
-    for _, row in edited.iterrows():
-        try:
-            type_key = str(row["type"])
-            if type_key not in DRONE_TYPES:
-                type_key = "commercial_quad"
-            new_list.append({
-                "drone_id": int(row["id"]) if not pd.isna(row["id"]) else st.session_state[_SWARM_NEXT_ID_KEY],
-                "drone_type_key": type_key,
-                "position_x_m": float(row["x_m"]),
-                "position_y_m": float(row["y_m"]),
-                "velocity_x_mps": float(row["vx_m/s"]),
-                "velocity_y_mps": float(row["vy_m/s"]),
-            })
-        except (ValueError, KeyError, TypeError):
-            continue
-    # Reassign IDs if any new rows have NaN ids (st.data_editor adds
-    # blank rows when num_rows="dynamic").
-    next_id = st.session_state[_SWARM_NEXT_ID_KEY]
-    for item in new_list:
-        if item["drone_id"] >= next_id:
-            next_id = item["drone_id"] + 1
-    st.session_state[_SWARM_NEXT_ID_KEY] = next_id
-    st.session_state[_SWARM_DRONES_KEY] = new_list
-    return new_list
+    # ── Edit panel (only renders when a drone is selected) ───────
+    _render_edit_panel()
+
+    # ── Counter + Clear All ──────────────────────────────────────
+    drones = st.session_state[_SWARM_DRONES_KEY]
+    counter_col, clear_col = st.columns([4, 1])
+    with counter_col:
+        if drones:
+            st.markdown(f"**{len(drones)} drone(s) placed**")
+        else:
+            st.caption(
+                "ℹ️ Click on the map to place your first drone, or use a "
+                "preset above (Saturation arc / Mixed-speed)."
+            )
+    with clear_col:
+        if drones and st.button(
+            "Clear all", help="Remove every drone from the scenario",
+        ):
+            _clear_drones()
+            st.rerun()
+
+    # ── Advanced table (collapsed expander) ──────────────────────
+    if drones:
+        with st.expander(
+            "Advanced — fine-tune drone vectors (raw x/y/vx/vy)",
+            expanded=False,
+        ):
+            st.caption(
+                "Power-user view. Edit positions and velocity components "
+                "directly. Changes here sync back to the visual map."
+            )
+            import pandas as pd
+            df = pd.DataFrame([
+                {
+                    "id": d["drone_id"],
+                    "type": d["drone_type_key"],
+                    "x_m": d["position_x_m"],
+                    "y_m": d["position_y_m"],
+                    "vx_m/s": d["velocity_x_mps"],
+                    "vy_m/s": d["velocity_y_mps"],
+                }
+                for d in drones
+            ])
+            edited = st.data_editor(
+                df,
+                column_config={
+                    "id": st.column_config.NumberColumn(
+                        "ID", disabled=True, width="small",
+                    ),
+                    "type": st.column_config.SelectboxColumn(
+                        "Type",
+                        options=list(DRONE_TYPES.keys()),
+                        required=True,
+                        width="medium",
+                    ),
+                    "x_m": st.column_config.NumberColumn(
+                        "x (m)", min_value=-50000.0, max_value=50000.0,
+                        step=50.0, format="%.0f", width="small",
+                    ),
+                    "y_m": st.column_config.NumberColumn(
+                        "y (m)", min_value=-50000.0, max_value=50000.0,
+                        step=50.0, format="%.0f", width="small",
+                    ),
+                    "vx_m/s": st.column_config.NumberColumn(
+                        "vx (m/s)", min_value=-200.0, max_value=200.0,
+                        step=1.0, format="%.1f", width="small",
+                    ),
+                    "vy_m/s": st.column_config.NumberColumn(
+                        "vy (m/s)", min_value=-200.0, max_value=200.0,
+                        step=1.0, format="%.1f", width="small",
+                    ),
+                },
+                num_rows="dynamic",
+                use_container_width=True,
+                key="_swarm_drone_editor",
+            )
+            # Sync edited DataFrame back to session-state.
+            new_list: list[dict] = []
+            for _, row in edited.iterrows():
+                try:
+                    type_key = str(row["type"])
+                    if type_key not in DRONE_TYPES:
+                        type_key = "commercial_quad"
+                    new_list.append({
+                        "drone_id": (
+                            int(row["id"]) if not pd.isna(row["id"])
+                            else st.session_state[_SWARM_NEXT_ID_KEY]
+                        ),
+                        "drone_type_key": type_key,
+                        "position_x_m": float(row["x_m"]),
+                        "position_y_m": float(row["y_m"]),
+                        "velocity_x_mps": float(row["vx_m/s"]),
+                        "velocity_y_mps": float(row["vy_m/s"]),
+                    })
+                except (ValueError, KeyError, TypeError):
+                    continue
+            next_id = st.session_state[_SWARM_NEXT_ID_KEY]
+            for item in new_list:
+                if item["drone_id"] >= next_id:
+                    next_id = item["drone_id"] + 1
+            st.session_state[_SWARM_NEXT_ID_KEY] = next_id
+            st.session_state[_SWARM_DRONES_KEY] = new_list
+            return new_list
+
+    return drones
 
 
 def build_scenario_from_state(
