@@ -43,6 +43,13 @@ _SWARM_NEXT_ID_KEY = "_swarm_next_drone_id"    # monotonic id counter
 _SWARM_ACTIVE_TYPE_KEY = "_swarm_active_type"  # drone type for next click
 _SWARM_SELECTED_KEY = "_swarm_selected_drone"  # drone_id (stable) of selection
 _SWARM_R_DETECT_KEY = "_swarm_R_detect_max_m"  # captured for the map extent
+_SWARM_LAST_CLICK_KEY = "_swarm_last_click_sig"
+# Streamlit's plotly chart preserves the selection state across
+# reruns — without this guard we'd re-process the same click on
+# every rerun and create infinite drones / infinite loops. The
+# signature is a tuple (trace_idx, snapped_x, snapped_y, point_idx)
+# that uniquely identifies a click; we only act on a click whose
+# signature differs from the one we last processed.
 
 
 # Plotly trace-index constants (used by the click handler to dispatch
@@ -537,13 +544,58 @@ def _render_scenario_map(R_detect_max_m: float, R_min_m: float) -> None:
             if isinstance(clicked, dict)
             else getattr(clicked, "point_number", None)
         )
-        if trace_idx == _TRACE_SNAP_GRID and cx is not None and cy is not None:
-            # Click on empty space → snap-grid hit → add new drone.
-            active_type = st.session_state.get(_SWARM_ACTIVE_TYPE_KEY, "commercial_quad")
-            _add_drone(active_type, (float(cx), float(cy)))
+        # Click-de-duplication: Streamlit preserves the chart's
+        # selection state across reruns, so without this guard the
+        # same click would be re-processed forever (creating drones
+        # endlessly or looping the page in "Running…"). We hash the
+        # click into a signature and only act when the signature is
+        # NEW relative to the last processed click.
+        click_sig = (trace_idx, round(float(cx or 0.0), 1),
+                     round(float(cy or 0.0), 1), pt_idx)
+        if click_sig == st.session_state.get(_SWARM_LAST_CLICK_KEY):
+            # Already-processed click — ignore. Don't rerun.
+            pass
+        elif trace_idx == _TRACE_SNAP_GRID and cx is not None and cy is not None:
+            st.session_state[_SWARM_LAST_CLICK_KEY] = click_sig
+            selected_id = st.session_state.get(_SWARM_SELECTED_KEY)
+            drones_list = st.session_state[_SWARM_DRONES_KEY]
+            if selected_id is not None and any(
+                d["drone_id"] == selected_id for d in drones_list
+            ):
+                # A drone is currently selected and the user clicked
+                # empty space → MOVE the selected drone to the
+                # snapped coordinates (click-to-grab, click-to-drop;
+                # closest UX we get to drag-and-drop without a 3rd-
+                # party component). The drone keeps its TYPE; its
+                # velocity is recomputed to head toward the BD from
+                # the new position at its current speed.
+                for d in drones_list:
+                    if d["drone_id"] == selected_id:
+                        old_speed = math.sqrt(
+                            d["velocity_x_mps"] ** 2
+                            + d["velocity_y_mps"] ** 2
+                        )
+                        new_pos = (float(cx), float(cy))
+                        d["position_x_m"] = new_pos[0]
+                        d["position_y_m"] = new_pos[1]
+                        # Re-aim toward BD at the previous speed. If
+                        # the drone was stationary, leave it stationary.
+                        if old_speed > 0:
+                            r = math.sqrt(new_pos[0] ** 2 + new_pos[1] ** 2)
+                            if r > 0:
+                                d["velocity_x_mps"] = -old_speed * new_pos[0] / r
+                                d["velocity_y_mps"] = -old_speed * new_pos[1] / r
+                        break
+            else:
+                # No selection → click adds a new drone of the
+                # active dropdown type.
+                active_type = st.session_state.get(
+                    _SWARM_ACTIVE_TYPE_KEY, "commercial_quad",
+                )
+                _add_drone(active_type, (float(cx), float(cy)))
             st.rerun()
         elif trace_idx == _TRACE_DRONES and pt_idx is not None:
-            # Click on existing drone → open edit panel.
+            st.session_state[_SWARM_LAST_CLICK_KEY] = click_sig
             drones_list = st.session_state[_SWARM_DRONES_KEY]
             if 0 <= pt_idx < len(drones_list):
                 st.session_state[_SWARM_SELECTED_KEY] = (
@@ -653,13 +705,21 @@ def _render_edit_panel() -> None:
             st.session_state[_SWARM_SELECTED_KEY] = None
             st.rerun()
 
-    # Apply slider edits to the drone's velocity.
+    # Apply slider edits to the drone's velocity. The tolerance
+    # has to absorb cos/sin/radians round-trip drift (~1e-15) AND
+    # the inherent re-derivation of "Toward BD" heading from
+    # position (which depends on the current floats). A 0.05 m/s
+    # threshold safely catches every meaningful slider step (slider
+    # min step is 1.0 m/s for speed, 5° for heading) while ignoring
+    # noise. Without this guard the panel would loop `st.rerun`
+    # indefinitely on every page render (the user reported this
+    # 2026-04-29).
     new_heading_rad = math.radians(new_heading_deg)
     new_vx = new_speed * math.cos(new_heading_rad)
     new_vy = new_speed * math.sin(new_heading_rad)
     if (
-        abs(new_vx - vel[0]) > 1e-9
-        or abs(new_vy - vel[1]) > 1e-9
+        abs(new_vx - vel[0]) > 0.05
+        or abs(new_vy - vel[1]) > 0.05
     ):
         # Mutate the dict in-place (it's the actual session-state list element).
         drone["velocity_x_mps"] = float(new_vx)
@@ -686,12 +746,14 @@ def render_scenario_builder() -> list[dict]:
 
     st.markdown("### Swarm scenario")
     st.caption(
-        "Build a multi-drone scenario by clicking on the map below — "
-        "the beam director sits at the origin (white square). Each "
-        "click places a drone of the type currently selected in the "
-        "dropdown, snapped to a 200 m grid, with a velocity vector "
-        "heading at the BD by default. Click an existing drone to "
-        "tweak its speed / heading or delete it."
+        "**Click an empty cell** to place a drone of the type selected "
+        "in the dropdown (snapped to a 200 m grid; velocity defaults to "
+        "head-on at the BD). **Click an existing drone** to select it "
+        "(it gets a white outline) → its edit panel opens below with "
+        "speed / heading / delete controls. **While a drone is selected, "
+        "clicking an empty cell MOVES that drone** (click-to-grab + "
+        "click-to-drop) — the closest thing to drag-and-drop without "
+        "external dependencies."
     )
 
     # ── Active type picker + quick-action buttons ────────────────
