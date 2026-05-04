@@ -75,68 +75,88 @@ sidebar_inputs = swarm_panels.render_swarm_sidebar()
 # ---------------------------------------------------------------------------
 drones_state = swarm_panels.render_scenario_builder()
 
-# JSON save / load — small toolbar above Run button.
 st.markdown("---")
-col_run, col_save, col_load = st.columns([2, 1, 1])
-with col_save:
-    scenario_for_export = swarm_panels.build_scenario_from_state(
-        sidebar_inputs, drones_state
-    )
-    if scenario_for_export is not None:
-        st.download_button(
-            label="📥 Download scenario",
-            data=scenario_for_export.to_json(),
-            file_name="swarm_scenario.json",
-            mime="application/json",
-            use_container_width=True,
-            help="Save the current scenario (drones + sidebar inputs) as JSON.",
-        )
-with col_load:
-    uploaded = st.file_uploader(
-        "📤 Upload scenario",
-        type=["json"],
-        key="_swarm_upload",
-        label_visibility="collapsed",
-        help="Load a previously-saved swarm scenario from JSON.",
-    )
-    if uploaded is not None:
-        try:
-            json_blob = uploaded.read().decode("utf-8")
-            scenario_loaded = SwarmScenario.from_json(json_blob)
-            # Replay the loaded scenario into session-state so the
-            # table editor shows it.
-            st.session_state["_swarm_drones"] = [
-                {
-                    "drone_id": d.drone_id,
-                    "drone_type_key": d.drone_type_key,
-                    "position_x_m": d.position_m[0],
-                    "position_y_m": d.position_m[1],
-                    "velocity_x_mps": d.velocity_mps[0],
-                    "velocity_y_mps": d.velocity_mps[1],
-                }
-                for d in scenario_loaded.drones
-            ]
-            st.session_state["_swarm_next_drone_id"] = (
-                max((d.drone_id for d in scenario_loaded.drones), default=-1) + 1
-            )
-            st.success(
-                f"Loaded {len(scenario_loaded.drones)} drone(s). "
-                f"Click **Run simulation** to engage."
-            )
-            # Clear the uploader so a re-upload of the same file works.
-            time.sleep(0.05)
-            st.rerun()
-        except (ValueError, KeyError) as exc:
-            st.error(f"Invalid scenario JSON: {exc}")
 
-# Run button.
-with col_run:
-    run_clicked = st.button(
-        "▶ Run simulation",
-        type="primary",
-        use_container_width=True,
-        help="Execute the swarm engagement simulation.",
+# Run button — full width, primary action.
+run_clicked = st.button(
+    "▶ Run simulation",
+    type="primary",
+    use_container_width=True,
+    help="Execute the swarm engagement simulation.",
+    disabled=(len(drones_state) == 0),
+)
+if len(drones_state) == 0:
+    st.caption("⚠ Build a scenario above (use the Add buttons or a quick-action) "
+               "before running the simulation.")
+
+# Save / load scenario — OPTIONAL, hidden inside an expander so it
+# doesn't confuse first-time users. Only opens when you actually
+# want to share or re-load a scenario.
+with st.expander(
+    "💾 Save / load scenario (optional — for sharing scenarios with teammates)",
+    expanded=False,
+):
+    st.caption(
+        "Most of the time you don't need this. The scenario you build "
+        "above is automatically remembered while the page is open. Use "
+        "this section if you want to **save** a scenario as a `.json` "
+        "file (to email a teammate, archive, or pin as a benchmark) — "
+        "or **load** one a teammate sent you."
     )
+    col_save, col_load = st.columns(2)
+    with col_save:
+        st.markdown("**Save current scenario**")
+        scenario_for_export = swarm_panels.build_scenario_from_state(
+            sidebar_inputs, drones_state
+        )
+        if scenario_for_export is not None:
+            st.download_button(
+                label="📥 Download as JSON",
+                data=scenario_for_export.to_json(),
+                file_name="swarm_scenario.json",
+                mime="application/json",
+                use_container_width=True,
+                help="Saves drones + sidebar inputs.",
+            )
+        else:
+            st.caption("Add drones to the scenario before saving.")
+    with col_load:
+        st.markdown("**Load a saved scenario**")
+        uploaded = st.file_uploader(
+            "Drop a swarm_scenario.json file here",
+            type=["json"],
+            key="_swarm_upload",
+            label_visibility="collapsed",
+            help="Loads a previously-downloaded swarm scenario JSON file.",
+        )
+        if uploaded is not None:
+            try:
+                json_blob = uploaded.read().decode("utf-8")
+                scenario_loaded = SwarmScenario.from_json(json_blob)
+                # Replay the loaded scenario into session-state so the
+                # table editor shows it.
+                st.session_state["_swarm_drones"] = [
+                    {
+                        "drone_id": d.drone_id,
+                        "drone_type_key": d.drone_type_key,
+                        "position_x_m": d.position_m[0],
+                        "position_y_m": d.position_m[1],
+                        "velocity_x_mps": d.velocity_mps[0],
+                        "velocity_y_mps": d.velocity_mps[1],
+                    }
+                    for d in scenario_loaded.drones
+                ]
+                st.session_state["_swarm_next_drone_id"] = (
+                    max((d.drone_id for d in scenario_loaded.drones), default=-1) + 1
+                )
+                st.success(
+                    f"Loaded {len(scenario_loaded.drones)} drone(s). "
+                    f"Click **Run simulation** above to engage."
+                )
+                time.sleep(0.05)
+                st.rerun()
+            except (ValueError, KeyError) as exc:
+                st.error(f"Invalid scenario JSON: {exc}")
 
 
 # ---------------------------------------------------------------------------
