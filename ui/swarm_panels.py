@@ -408,9 +408,17 @@ def _render_scenario_map(R_detect_max_m: float, R_min_m: float) -> None:
         for iy in range(-snap_n, snap_n + 1):
             snap_xs.append(ix * snap_grid_step_m)
             snap_ys.append(iy * snap_grid_step_m)
+    # Snap-grid markers: SMALLER than drone markers (10 vs 18) so
+    # that clicks at a drone's location resolve to the drone trace,
+    # not the snap-grid underneath. (Plotly's click hit-test uses
+    # marker pixel size; the larger marker wins for overlapping
+    # points regardless of trace z-order. Original v1 used size=20
+    # invisible markers which captured drone clicks as snap-grid
+    # clicks — bug user reported 2026-04-29.) Faint colour so the
+    # user gets a visual cue of where the snap targets are.
     fig.add_trace(go.Scatter(
         x=snap_xs, y=snap_ys, mode="markers",
-        marker=dict(size=20, color="rgba(0,0,0,0)"),  # invisible
+        marker=dict(size=10, color="rgba(127,142,156,0.15)"),
         hoverinfo="skip",
         showlegend=False,
         name="_snap_grid",
@@ -442,7 +450,10 @@ def _render_scenario_map(R_detect_max_m: float, R_min_m: float) -> None:
         fig.add_trace(go.Scatter(
             x=drone_xs, y=drone_ys, mode="markers",
             marker=dict(
-                size=14, color=drone_colors,
+                # 18 px — bigger than snap-grid (10 px) so drone
+                # clicks always win the hit-test when a drone sits
+                # on a snap-grid point.
+                size=18, color=drone_colors,
                 line=dict(color=line_colors, width=line_widths),
             ),
             text=hover_texts,
@@ -455,7 +466,7 @@ def _render_scenario_map(R_detect_max_m: float, R_min_m: float) -> None:
         # at _TRACE_DRONES = 5 even before any drone is placed.
         fig.add_trace(go.Scatter(
             x=[], y=[], mode="markers",
-            marker=dict(size=14),
+            marker=dict(size=18),
             showlegend=False,
             name="_drones",
         ))
@@ -504,11 +515,16 @@ def _render_scenario_map(R_detect_max_m: float, R_min_m: float) -> None:
         ),
     )
 
-    # Render with click event capture.
+    # Render with click event capture. Streamlit 1.38 returns a
+    # state-like object whose ``.selection.points`` is the list of
+    # currently-selected scatter points. Each user click triggers
+    # a rerun (``on_select="rerun"``); subsequent clicks at the
+    # same coordinates are ignored by the de-duplication guard
+    # below.
     selection = st.plotly_chart(
         fig,
         on_select="rerun",
-        selection_mode=("points",),
+        selection_mode="points",
         key="_swarm_map_chart",
         use_container_width=True,
         config=PLOTLY_MODEBAR_CONFIG,
